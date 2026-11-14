@@ -1,0 +1,5 @@
+/* Tailwind utilities (P3-08, master plan §7). No @tailwind base: preflight is off so the design
+   system in index.css keeps its own base styles. Imported BEFORE index.css: on equal specificity the
+   design system wins, so its sizing rules (44 px touch targets, rule h) are not undone. */
+@tailwind components;
+@tailwind utilities;

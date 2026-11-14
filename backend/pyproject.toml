@@ -1,0 +1,92 @@
+[project]
+name = "rms-backend"
+version = "0.1.0"
+description = "Replacement Management System (RMS) API"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic>=2",
+    "pydantic-settings",
+    "sqlalchemy>=2",
+    "psycopg[binary]",
+    "pyjwt[crypto]",
+    "httpx",
+    "structlog",
+    "supabase",
+    "slowapi",
+    "apscheduler",
+    "openpyxl>=3.1.5",
+    "reportlab>=4.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+    "types-openpyxl>=3.1.5.20261017",
+]
+
+[tool.uv]
+# The backend is an application, not a distributable library.
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "B",     # flake8-bugbear
+    "UP",    # pyupgrade
+    "N",     # pep8-naming
+    "S",     # flake8-bandit (security)
+    "BLE",   # no blind except
+    "ASYNC", # async pitfalls
+    "SIM",   # simplifications
+    "RUF",   # ruff-specific
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"] # assert is how pytest works
+# Manual verification scripts (scripts/verify_pN_NN.py) check outcomes with assert, like tests,
+# and hold long literal SQL / report lines.
+"scripts/verify_*.py" = ["S101", "E501"]
+"app/core/errors.py" = ["N818"] # exception names are fixed by the P1-03 spec (NotFound, Conflict, ...)
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+# APScheduler 3.x ships no type information (app/worker.py).
+module = ["apscheduler.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# reportlab ships no type information (app/shared/pdf.py, DEC-41 server-side PDFs).
+module = ["reportlab.*"]
+ignore_missing_imports = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true

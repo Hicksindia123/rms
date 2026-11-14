@@ -1,0 +1,499 @@
+{
+  "version": "1.0.0",
+  "description": "Shared test vectors for RMS conditional-rules engine and field validation (master plan §6.1, P1-07)",
+  "cases": [
+    {
+      "id": "TC-01-eq-string-match",
+      "description": "Direct equality matching string",
+      "rule": { "field": "delivery_mode", "op": "eq", "value": "COURIER_PARCEL" },
+      "values": { "delivery_mode": "COURIER_PARCEL" },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-02-eq-string-mismatch",
+      "description": "Direct equality non-matching string",
+      "rule": { "field": "delivery_mode", "op": "eq", "value": "COURIER_PARCEL" },
+      "values": { "delivery_mode": "DIRECT_TRUCK" },
+      "context": null,
+      "expected": false
+    },
+    {
+      "id": "TC-03-eq-number-match",
+      "description": "Numeric equality matching",
+      "rule": { "field": "box_count", "op": "eq", "value": 5 },
+      "values": { "box_count": 5 },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-04-eq-boolean-match",
+      "description": "Boolean equality matching",
+      "rule": { "field": "challan_qty_matched", "op": "eq", "value": true },
+      "values": { "challan_qty_matched": true },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-05-eq-null-value",
+      "description": "Equality check with null value",
+      "rule": { "field": "optional_ref", "op": "eq", "value": null },
+      "values": { "optional_ref": null },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-06-neq-string-match",
+      "description": "Not-equal matches when values differ",
+      "rule": { "field": "delivery_mode", "op": "neq", "value": "COURIER_PARCEL" },
+      "values": { "delivery_mode": "DIRECT_TRUCK" },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-07-neq-string-mismatch",
+      "description": "Not-equal fails when values match",
+      "rule": { "field": "delivery_mode", "op": "neq", "value": "COURIER_PARCEL" },
+      "values": { "delivery_mode": "COURIER_PARCEL" },
+      "context": null,
+      "expected": false
+    },
+    {
+      "id": "TC-08-in-array-match",
+      "description": "In operator matches item in array",
+      "rule": { "field": "accompanying_doc", "op": "in", "value": ["INVOICE", "DEBIT_NOTE", "DELIVERY_CHALLAN"] },
+      "values": { "accompanying_doc": "INVOICE" },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-09-in-array-mismatch",
+      "description": "In operator fails when item absent from array",
+      "rule": { "field": "accompanying_doc", "op": "in", "value": ["INVOICE", "DEBIT_NOTE", "DELIVERY_CHALLAN"] },
+      "values": { "accompanying_doc": "HANDWRITTEN_SLIP" },
+      "context": null,
+      "expected": false
+    },
+    {
+      "id": "TC-10-nin-array-match",
+      "description": "Not-in operator matches when item absent from array",
+      "rule": { "field": "accompanying_doc", "op": "nin", "value": ["INVOICE", "DEBIT_NOTE"] },
+      "values": { "accompanying_doc": "NO_DOCUMENT" },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-11-nin-array-mismatch",
+      "description": "Not-in operator fails when item present in array",
+      "rule": { "field": "accompanying_doc", "op": "nin", "value": ["INVOICE", "DEBIT_NOTE"] },
+      "values": { "accompanying_doc": "DEBIT_NOTE" },
+      "context": null,
+      "expected": false
+    },
+    {
+      "id": "TC-12-gt-match",
+      "description": "Greater-than passes when field is larger",
+      "rule": { "field": "box_count", "op": "gt", "value": 10 },
+      "values": { "box_count": 15 },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-13-gt-equal-fails",
+      "description": "Greater-than fails on equal value",
+      "rule": { "field": "box_count", "op": "gt", "value": 10 },
+      "values": { "box_count": 10 },
+      "context": null,
+      "expected": false
+    },
+    {
+      "id": "TC-14-gte-match",
+      "description": "Greater-than-or-equal passes on equal value",
+      "rule": { "field": "box_count", "op": "gte", "value": 10 },
+      "values": { "box_count": 10 },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-15-lt-match",
+      "description": "Less-than passes when field is smaller",
+      "rule": { "field": "dn_amount", "op": "lt", "value": 50000 },
+      "values": { "dn_amount": 25000 },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-16-lte-match",
+      "description": "Less-than-or-equal passes on boundary value",
+      "rule": { "field": "dn_amount", "op": "lte", "value": 50000 },
+      "values": { "dn_amount": 50000 },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-17-empty-null",
+      "description": "Empty passes on null value",
+      "rule": { "field": "party_claim_text", "op": "empty" },
+      "values": { "party_claim_text": null },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-18-empty-empty-string",
+      "description": "Empty passes on empty string",
+      "rule": { "field": "party_claim_text", "op": "empty" },
+      "values": { "party_claim_text": "" },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-19-empty-whitespace-string",
+      "description": "Empty passes on whitespace string",
+      "rule": { "field": "party_claim_text", "op": "empty" },
+      "values": { "party_claim_text": "   " },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-20-empty-empty-array",
+      "description": "Empty passes on empty array",
+      "rule": { "field": "tags", "op": "empty" },
+      "values": { "tags": [] },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-21-empty-nonempty-fails",
+      "description": "Empty fails when field has value",
+      "rule": { "field": "party_claim_text", "op": "empty" },
+      "values": { "party_claim_text": "Defective screen" },
+      "context": null,
+      "expected": false
+    },
+    {
+      "id": "TC-22-not-empty-match",
+      "description": "Not-empty passes when field has value",
+      "rule": { "field": "party_claim_text", "op": "not_empty" },
+      "values": { "party_claim_text": "Goods damaged in transit" },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-23-not-empty-null-fails",
+      "description": "Not-empty fails on null value",
+      "rule": { "field": "party_claim_text", "op": "not_empty" },
+      "values": { "party_claim_text": null },
+      "context": null,
+      "expected": false
+    },
+    {
+      "id": "TC-24-all-group-all-pass",
+      "description": "All group passes when every child passes",
+      "rule": {
+        "all": [
+          { "field": "delivery_mode", "op": "eq", "value": "COURIER_PARCEL" },
+          { "field": "box_count", "op": "gt", "value": 0 }
+        ]
+      },
+      "values": { "delivery_mode": "COURIER_PARCEL", "box_count": 2 },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-25-all-group-one-fails",
+      "description": "All group fails when at least one child fails",
+      "rule": {
+        "all": [
+          { "field": "delivery_mode", "op": "eq", "value": "COURIER_PARCEL" },
+          { "field": "box_count", "op": "gt", "value": 5 }
+        ]
+      },
+      "values": { "delivery_mode": "COURIER_PARCEL", "box_count": 2 },
+      "context": null,
+      "expected": false
+    },
+    {
+      "id": "TC-26-any-group-one-passes",
+      "description": "Any group passes when at least one child passes",
+      "rule": {
+        "any": [
+          { "field": "delivery_mode", "op": "eq", "value": "COURIER_PARCEL" },
+          { "field": "delivery_mode", "op": "eq", "value": "DIRECT_TRUCK" }
+        ]
+      },
+      "values": { "delivery_mode": "DIRECT_TRUCK" },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-27-any-group-all-fail",
+      "description": "Any group fails when all children fail",
+      "rule": {
+        "any": [
+          { "field": "delivery_mode", "op": "eq", "value": "COURIER_PARCEL" },
+          { "field": "delivery_mode", "op": "eq", "value": "DIRECT_TRUCK" }
+        ]
+      },
+      "values": { "delivery_mode": "SELF_PARTY_REP" },
+      "context": null,
+      "expected": false
+    },
+    {
+      "id": "TC-28-not-group-inverts-true",
+      "description": "Not group inverts true to false",
+      "rule": {
+        "not": { "field": "accompanying_doc", "op": "eq", "value": "NO_DOCUMENT" }
+      },
+      "values": { "accompanying_doc": "NO_DOCUMENT" },
+      "context": null,
+      "expected": false
+    },
+    {
+      "id": "TC-29-not-group-inverts-false",
+      "description": "Not group inverts false to true",
+      "rule": {
+        "not": { "field": "accompanying_doc", "op": "eq", "value": "NO_DOCUMENT" }
+      },
+      "values": { "accompanying_doc": "INVOICE" },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-30-nested-boolean-logic",
+      "description": "Nested All with Any and Not children",
+      "rule": {
+        "all": [
+          {
+            "any": [
+              { "field": "delivery_mode", "op": "eq", "value": "COURIER_PARCEL" },
+              { "field": "delivery_mode", "op": "eq", "value": "DIRECT_TRUCK" }
+            ]
+          },
+          {
+            "not": { "field": "accompanying_doc", "op": "eq", "value": "NO_DOCUMENT" }
+          }
+        ]
+      },
+      "values": { "delivery_mode": "COURIER_PARCEL", "accompanying_doc": "INVOICE" },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-31-context-top-level-match",
+      "description": "Context operand resolves top-level context variable",
+      "rule": { "context": "step_code", "op": "eq", "value": "S1_GATE" },
+      "values": {},
+      "context": { "step_code": "S1_GATE" },
+      "expected": true
+    },
+    {
+      "id": "TC-32-context-nested-dot-notation",
+      "description": "Context operand resolves nested dot-notation path",
+      "rule": { "context": "product_category.code", "op": "eq", "value": "DMT" },
+      "values": {},
+      "context": { "product_category": { "code": "DMT", "name": "Digital Thermometer" } },
+      "expected": true
+    },
+    {
+      "id": "TC-33-context-nested-dot-mismatch",
+      "description": "Context operand nested path mismatch",
+      "rule": { "context": "product_category.code", "op": "eq", "value": "PRISMATIC" },
+      "values": {},
+      "context": { "product_category": { "code": "DMT" } },
+      "expected": false
+    },
+    {
+      "id": "TC-34-context-missing-path",
+      "description": "Context operand with missing path resolves to empty/null",
+      "rule": { "context": "product_category.missing_prop", "op": "empty" },
+      "values": {},
+      "context": { "product_category": { "code": "DMT" } },
+      "expected": true
+    },
+    {
+      "id": "TC-35-field-missing-from-values",
+      "description": "Field not present in values behaves as null / empty",
+      "rule": { "field": "unregistered_field", "op": "empty" },
+      "values": { "box_count": 1 },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-36-empty-rule-is-true",
+      "description": "Empty rule object evaluates to true (visible by default)",
+      "rule": {},
+      "values": { "box_count": 1 },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-37-battery-replaced-conditional",
+      "description": "Battery check replaced triggers battery fields visible",
+      "rule": { "field": "battery_check", "op": "eq", "value": "BATTERY_REPLACED" },
+      "values": { "battery_check": "BATTERY_REPLACED" },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-38-part-type-pcb-conditional",
+      "description": "Part type PCB triggers model and supplier fields",
+      "rule": { "field": "part_type", "op": "eq", "value": "PCB" },
+      "values": { "part_type": "PCB" },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-39-gst-not-reflected-rule",
+      "description": "GST portal NOT_REFLECTED check",
+      "rule": { "field": "gst_portal_verification", "op": "eq", "value": "GST_NOT_REFLECTED" },
+      "values": { "gst_portal_verification": "GST_NOT_REFLECTED" },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-40-storage-dedicated-containers",
+      "description": "Storage method dedicated containers shows barcode",
+      "rule": { "field": "parts_storage_separation", "op": "eq", "value": "DEDICATED_CONTAINERS" },
+      "values": { "parts_storage_separation": "DEDICATED_CONTAINERS" },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-41-storage-partitioned-container",
+      "description": "Storage method partitioned container shows compartment",
+      "rule": { "field": "parts_storage_separation", "op": "eq", "value": "PARTITIONED_CONTAINER" },
+      "values": { "parts_storage_separation": "PARTITIONED_CONTAINER" },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-42-acceptance-discrepancy-reason",
+      "description": "Acceptance status discrepancy triggers reason field",
+      "rule": { "field": "acceptance_status", "op": "eq", "value": "DISCREPANCY" },
+      "values": { "acceptance_status": "DISCREPANCY" },
+      "context": null,
+      "expected": true
+    },
+    {
+      "id": "TC-43-validation-sum-equals-match",
+      "description": "Cross-field sum matches target",
+      "rule": null,
+      "validation_spec": {
+        "cross_field_sums": {
+          "sum_equals": {
+            "fields": ["packaging_extracted_qty", "container_extracted_qty"],
+            "target": "allocated_qty"
+          }
+        }
+      },
+      "values": {
+        "packaging_extracted_qty": 30,
+        "container_extracted_qty": 70,
+        "allocated_qty": 100
+      },
+      "context": null,
+      "expected_valid": true,
+      "expected_error": null
+    },
+    {
+      "id": "TC-44-validation-sum-equals-mismatch",
+      "description": "Cross-field sum does not match target",
+      "rule": null,
+      "validation_spec": {
+        "cross_field_sums": {
+          "sum_equals": {
+            "fields": ["packaging_extracted_qty", "container_extracted_qty"],
+            "target": "allocated_qty"
+          }
+        }
+      },
+      "values": {
+        "packaging_extracted_qty": 30,
+        "container_extracted_qty": 50,
+        "allocated_qty": 100
+      },
+      "context": null,
+      "expected_valid": false,
+      "expected_error": "Sum of fields (80) must equal allocated_qty (100)"
+    },
+    {
+      "id": "TC-45-validation-min-max-pass",
+      "description": "Numeric min and max boundaries pass",
+      "rule": null,
+      "validation_spec": {
+        "min": 1,
+        "max": 1000
+      },
+      "field_value": 50,
+      "values": { "box_count": 50 },
+      "context": null,
+      "expected_valid": true,
+      "expected_error": null
+    },
+    {
+      "id": "TC-46-validation-min-fail",
+      "description": "Numeric min boundary violation",
+      "rule": null,
+      "validation_spec": {
+        "min": 1
+      },
+      "field_value": 0,
+      "values": { "box_count": 0 },
+      "context": null,
+      "expected_valid": false,
+      "expected_error": "Value must be at least 1"
+    },
+    {
+      "id": "TC-47-validation-regex-gstin-pass",
+      "description": "Regex matches valid 15-character GSTIN",
+      "rule": null,
+      "validation_spec": {
+        "regex": "^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$"
+      },
+      "field_value": "07AAAAA0000A1Z5",
+      "values": { "buyer_gstin": "07AAAAA0000A1Z5" },
+      "context": null,
+      "expected_valid": true,
+      "expected_error": null
+    },
+    {
+      "id": "TC-48-validation-regex-gstin-fail",
+      "description": "Regex fails on invalid GSTIN format",
+      "rule": null,
+      "validation_spec": {
+        "regex": "^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$"
+      },
+      "field_value": "INVALID_GSTIN",
+      "values": { "buyer_gstin": "INVALID_GSTIN" },
+      "context": null,
+      "expected_valid": false,
+      "expected_error": "Value does not match required format"
+    },
+    {
+      "id": "TC-49-validation-date-not-in-future-pass",
+      "description": "Date not in future passes for past date",
+      "rule": null,
+      "validation_spec": {
+        "date_not_in_future": true
+      },
+      "field_value": "2020-01-01",
+      "values": { "gate_doc_date": "2020-01-01" },
+      "context": null,
+      "expected_valid": true,
+      "expected_error": null
+    },
+    {
+      "id": "TC-50-validation-date-not-in-future-fail",
+      "description": "Date not in future fails for future date",
+      "rule": null,
+      "validation_spec": {
+        "date_not_in_future": true
+      },
+      "field_value": "2099-12-31",
+      "values": { "gate_doc_date": "2099-12-31" },
+      "context": null,
+      "expected_valid": false,
+      "expected_error": "Date cannot be in the future"
+    }
+  ]
+}

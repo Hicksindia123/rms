@@ -1,0 +1,2 @@
+# SPA rewrite rule for Render / Cloudflare Pages / Netlify
+/*    /index.html   200

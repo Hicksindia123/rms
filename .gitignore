@@ -1,0 +1,52 @@
+# Environment / secrets (only the *.example templates are committed)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Node / frontend
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/
+*.tsbuildinfo
+
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/
+
+# Logs / OS / editors
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+~$*.xlsx
+
+# Local DB dumps from scripts/reset-db.*
+backups/
+
+# Local credentials / working files — never commit (production audit 2026-11-14, user decision)
+RMS_USER_CREDENTIALS.txt
+**/RMS_USER_CREDENTIALS.txt
+# Root-level CSV working files (master-data imports, review sheets). Seeds live in supabase/.
+/*.csv
+# Ad-hoc screenshots
+frontend/x/

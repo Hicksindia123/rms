@@ -1,0 +1,185 @@
+# ==============================================================================
+# RMS — Render Blueprint (production audit Phase 8, rewritten 2026-11-14)
+#
+# Three services, matching the current code:
+#   rms-api     FastAPI web service   backend/app/main.py      (health: /health, /health/ready)
+#   rms-worker  APScheduler worker    backend/app/worker.py    (python -m app.worker)
+#   rms-web     React/Vite static SPA frontend/                (pnpm build -> dist/)
+#
+# Rules this file follows:
+# - NO secrets in Git. Every secret or deployment-specific value is `sync: false`: Render asks for
+#   it when the Blueprint is first created (Dashboard -> New -> Blueprint).
+# - NO migrations at deploy time (no preDeployCommand). Schema changes run by hand with
+#   `supabase db push` BEFORE deploying (docs/DATABASE_MIGRATION_GUIDE.md §7, CLAUDE.md rule d).
+# - Auto-deploy OFF: deploy manually until production is signed off.
+# - Region: Singapore (closest Render region to the Supabase project in Mumbai, ap-south-1).
+#
+# Backend dependencies are installed from the committed uv.lock (exact versions + hashes), exported
+# at build time, so the runtime needs only plain `uvicorn` / `python` (no uv at runtime).
+# Step-by-step instructions: DEPLOY_HELPER.md (repo root).
+# ==============================================================================
+
+services:
+  # ----------------------------------------------------------------------------
+  # Backend API (FastAPI + Uvicorn)
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: rms-api
+    runtime: python
+    region: singapore
+    plan: starter            # Free sleeps after 15 min idle (~1 min cold start): not for daily use
+    rootDir: backend
+    buildCommand: >-
+      pip install --upgrade pip uv &&
+      uv export --frozen --no-dev --no-emit-project -o requirements.txt &&
+      pip install -r requirements.txt
+    startCommand: >-
+      uvicorn app.main:app --host 0.0.0.0 --port $PORT
+      --proxy-headers --forwarded-allow-ips="*" --no-server-header
+    healthCheckPath: /health/ready   # 200 only when the DB answers `select 1` (503 otherwise)
+    autoDeployTrigger: "off"
+    buildFilter:
+      paths:
+        - backend/**
+    envVars:
+      # --- runtime ------------------------------------------------------------
+      - key: PYTHON_VERSION
+        value: "3.12.16"         # pyproject: requires-python >=3.12,<3.13
+      - key: APP_ENV
+        value: prod              # Literal local|test|dev|prod. prod = no /docs, HSTS, sslmode enforced
+      - key: LOG_LEVEL
+        value: INFO
+      - key: TZ
+        value: Asia/Kolkata
+      # --- database (rms_api role via the Supabase SESSION pooler, IPv4, port 5432) ----------
+      # postgresql://rms_api.<ref>:<password>@aws-<n>-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=require
+      - key: DATABASE_URL
+        sync: false
+      - key: DB_POOL_SIZE
+        value: "5"               # Free-tier Supabase has a small connection budget
+      - key: DB_MAX_OVERFLOW
+        value: "5"
+      - key: DB_STATEMENT_TIMEOUT_MS
+        value: "30000"           # set "0" if the pooler rejects the startup option (role timeout still applies)
+      # --- Supabase -------------------------------------------------------------
+      - key: SUPABASE_URL
+        sync: false              # https://<ref>.supabase.co  (JWKS + issuer derived from it)
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false              # backend only: Storage signed URLs + user administration
+      # --- HTTP -----------------------------------------------------------------
+      - key: CORS_ORIGINS
+        sync: false              # exact frontend origin, e.g. https://rms-web.onrender.com (no "*" in prod)
+      - key: APP_PUBLIC_URL
+        sync: false              # same as the frontend origin (deep links)
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+
+  # ----------------------------------------------------------------------------
+  # Background worker: notification outbox, e-mail, party e-mail, digest, SLA escalation,
+  # nightly segregation check, container-audit alerts, pending-upload cleanup.
+  # ----------------------------------------------------------------------------
+  - type: worker
+    name: rms-worker
+    runtime: python
+    region: singapore
+    plan: starter            # Render has no free plan for background workers
+    rootDir: backend
+    buildCommand: >-
+      pip install --upgrade pip uv &&
+      uv export --frozen --no-dev --no-emit-project -o requirements.txt &&
+      pip install -r requirements.txt
+    startCommand: python -m app.worker
+    autoDeployTrigger: "off"
+    buildFilter:
+      paths:
+        - backend/**
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.16"
+      - key: APP_ENV
+        value: prod
+      - key: LOG_LEVEL
+        value: INFO
+      - key: TZ
+        value: Asia/Kolkata      # cron jobs run in IST (18:00 / 09:00 / 02:00)
+      - key: DATABASE_URL
+        sync: false              # same value as rms-api
+      - key: DB_POOL_SIZE
+        value: "2"
+      - key: DB_MAX_OVERFLOW
+        value: "2"
+      - key: DB_STATEMENT_TIMEOUT_MS
+        value: "30000"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false              # deletes expired PENDING_UPLOAD objects from Storage
+      - key: APP_PUBLIC_URL
+        sync: false              # frontend origin, used in notification e-mail links
+      # --- optional e-mail channel (empty SMTP_HOST or SMTP_FROM = e-mail disabled) ---------
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SMTP_USE_TLS
+        value: "true"            # STARTTLS on 587. For port 465 set SMTP_SSL=true, SMTP_USE_TLS=false
+      - key: SMTP_SSL
+        value: "false"
+
+  # ----------------------------------------------------------------------------
+  # Frontend: React 18 + Vite static single-page app
+  # Only PUBLIC values here (rule i): never the service-role key or a DB password.
+  # VITE_* values are baked in at build time; change them -> "Clear build cache & deploy".
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: rms-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npx --yes pnpm@9.15.9 install --frozen-lockfile && npx --yes pnpm@9.15.9 build
+    staticPublishPath: dist
+    autoDeployTrigger: "off"
+    buildFilter:
+      paths:
+        - frontend/**
+    envVars:
+      - key: NODE_VERSION
+        value: "22"              # Vite 8 needs Node 20.19+ / 22.12+
+      - key: VITE_API_BASE_URL
+        sync: false              # rms-api public URL, no trailing slash, no /api/v1
+      - key: VITE_SUPABASE_URL
+        sync: false              # https://<ref>.supabase.co
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false              # public anon key (RLS protects data; all business data goes via the API)
+    routes:
+      # Client-side routing (React Router): every unknown path serves the SPA shell.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=31536000; includeSubDomains
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(self), microphone=(self), geolocation=(), payment=(), usb=()
+      # Vite emits content-hashed file names under /assets: safe to cache for a year.
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      # Content-Security-Policy intentionally not set yet: print/slip pages write into
+      # window.open('') documents and need a browser-verified policy first (audit Phase 3).
