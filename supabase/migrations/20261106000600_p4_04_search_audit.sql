@@ -1,81 +1,87 @@
 -- Migration: 20261106000600_p4_04_search_audit.sql
 -- Prompt: P4-04 Global search, advanced filters, audit trail & activity history UI
 -- (master plan §8.7, BR-40, G-17).
+--
+-- Corrected 2026-11-14 (first `supabase db push` to Supabase Cloud): the operator class is written
+-- `extensions.gin_trgm_ops`. pg_trgm lives in schema `extensions` (20261102000100), and the Cloud
+-- push session's search_path does not include it, so the unqualified name failed with SQLSTATE 42704.
+-- Same object, same result. Local databases that already applied this version are unaffected (the
+-- CLI tracks versions, not file contents). Guarded by backend/tests/unit/test_migration_extension_refs.py.
 
 -- ===========================================================================
 -- 1. pg_trgm indexes for high-performance global search (<300ms on 50k GS)
 -- ===========================================================================
-create extension if not exists pg_trgm;
+create extension if not exists pg_trgm with schema extensions;  -- already created in 20261102000100
 
 -- Goods Slips (docket, vehicle, transporter, rep, gate_doc_no live directly on goods_slips)
 create index if not exists goods_slips_gs_no_trgm_idx
-  on public.goods_slips using gin (gs_no gin_trgm_ops);
+  on public.goods_slips using gin (gs_no extensions.gin_trgm_ops);
 create index if not exists goods_slips_docket_no_trgm_idx
-  on public.goods_slips using gin (docket_no gin_trgm_ops) where docket_no is not null;
+  on public.goods_slips using gin (docket_no extensions.gin_trgm_ops) where docket_no is not null;
 create index if not exists goods_slips_vehicle_no_trgm_idx
-  on public.goods_slips using gin (vehicle_no gin_trgm_ops) where vehicle_no is not null;
+  on public.goods_slips using gin (vehicle_no extensions.gin_trgm_ops) where vehicle_no is not null;
 create index if not exists goods_slips_transporter_trgm_idx
-  on public.goods_slips using gin (transporter_name gin_trgm_ops) where transporter_name is not null;
+  on public.goods_slips using gin (transporter_name extensions.gin_trgm_ops) where transporter_name is not null;
 create index if not exists goods_slips_rep_name_trgm_idx
-  on public.goods_slips using gin (rep_name gin_trgm_ops) where rep_name is not null;
+  on public.goods_slips using gin (rep_name extensions.gin_trgm_ops) where rep_name is not null;
 create index if not exists goods_slips_gate_doc_no_trgm_idx
-  on public.goods_slips using gin (gate_doc_no gin_trgm_ops) where gate_doc_no is not null;
+  on public.goods_slips using gin (gate_doc_no extensions.gin_trgm_ops) where gate_doc_no is not null;
 
 -- Parties
 create index if not exists parties_name_trgm_idx
-  on public.parties using gin (name gin_trgm_ops);
+  on public.parties using gin (name extensions.gin_trgm_ops);
 create index if not exists parties_gstin_trgm_idx
-  on public.parties using gin (gstin gin_trgm_ops) where gstin is not null;
+  on public.parties using gin (gstin extensions.gin_trgm_ops) where gstin is not null;
 create index if not exists parties_contact_name_trgm_idx
-  on public.parties using gin (contact_name gin_trgm_ops) where contact_name is not null;
+  on public.parties using gin (contact_name extensions.gin_trgm_ops) where contact_name is not null;
 create index if not exists parties_phone_trgm_idx
-  on public.parties using gin (phone gin_trgm_ops) where phone is not null;
+  on public.parties using gin (phone extensions.gin_trgm_ops) where phone is not null;
 
 -- GS Documents
 create index if not exists gs_documents_doc_no_trgm_idx
-  on public.gs_documents using gin (doc_no gin_trgm_ops) where doc_no is not null;
+  on public.gs_documents using gin (doc_no extensions.gin_trgm_ops) where doc_no is not null;
 
 -- Credit Notes
 create index if not exists credit_notes_cn_no_trgm_idx
-  on public.credit_notes using gin (cn_no gin_trgm_ops) where cn_no is not null;
+  on public.credit_notes using gin (cn_no extensions.gin_trgm_ops) where cn_no is not null;
 create index if not exists credit_notes_jv_no_trgm_idx
-  on public.credit_notes using gin (jv_no gin_trgm_ops) where jv_no is not null;
+  on public.credit_notes using gin (jv_no extensions.gin_trgm_ops) where jv_no is not null;
 create index if not exists credit_notes_party_doc_no_trgm_idx
-  on public.credit_notes using gin (party_doc_no gin_trgm_ops) where party_doc_no is not null;
+  on public.credit_notes using gin (party_doc_no extensions.gin_trgm_ops) where party_doc_no is not null;
 
 -- Custody Transfers
 create index if not exists custody_transfers_transfer_no_trgm_idx
-  on public.custody_transfers using gin (transfer_no gin_trgm_ops);
+  on public.custody_transfers using gin (transfer_no extensions.gin_trgm_ops);
 
 -- Technician Batches
 create index if not exists technician_batches_batch_no_trgm_idx
-  on public.technician_batches using gin (batch_no gin_trgm_ops);
+  on public.technician_batches using gin (batch_no extensions.gin_trgm_ops);
 
 -- Store Issues
 create index if not exists store_issues_issue_no_trgm_idx
-  on public.store_issues using gin (issue_no gin_trgm_ops);
+  on public.store_issues using gin (issue_no extensions.gin_trgm_ops);
 
 -- Replacement Dispatches
 create index if not exists replacement_dispatches_dispatch_no_trgm_idx
-  on public.replacement_dispatches using gin (dispatch_no gin_trgm_ops);
+  on public.replacement_dispatches using gin (dispatch_no extensions.gin_trgm_ops);
 create index if not exists replacement_dispatches_docket_no_trgm_idx
-  on public.replacement_dispatches using gin (docket_no gin_trgm_ops) where docket_no is not null;
+  on public.replacement_dispatches using gin (docket_no extensions.gin_trgm_ops) where docket_no is not null;
 create index if not exists replacement_dispatches_vehicle_no_trgm_idx
-  on public.replacement_dispatches using gin (vehicle_no gin_trgm_ops) where vehicle_no is not null;
+  on public.replacement_dispatches using gin (vehicle_no extensions.gin_trgm_ops) where vehicle_no is not null;
 create index if not exists replacement_dispatches_ref_doc_no_trgm_idx
-  on public.replacement_dispatches using gin (ref_doc_no gin_trgm_ops) where ref_doc_no is not null;
+  on public.replacement_dispatches using gin (ref_doc_no extensions.gin_trgm_ops) where ref_doc_no is not null;
 
 -- Containers & Partitions
 create index if not exists storage_containers_barcode_trgm_idx
-  on public.storage_containers using gin (barcode gin_trgm_ops) where barcode is not null;
+  on public.storage_containers using gin (barcode extensions.gin_trgm_ops) where barcode is not null;
 create index if not exists storage_containers_code_trgm_idx
-  on public.storage_containers using gin (code gin_trgm_ops);
+  on public.storage_containers using gin (code extensions.gin_trgm_ops);
 create index if not exists storage_containers_name_trgm_idx
-  on public.storage_containers using gin (name gin_trgm_ops);
+  on public.storage_containers using gin (name extensions.gin_trgm_ops);
 
 -- Dismantling Batches
 create index if not exists dismantle_batches_batch_no_trgm_idx
-  on public.dismantle_batches using gin (batch_no gin_trgm_ops);
+  on public.dismantle_batches using gin (batch_no extensions.gin_trgm_ops);
 
 -- ===========================================================================
 -- 2. Audit log index hardening (for instant timeline & audit explorer queries)

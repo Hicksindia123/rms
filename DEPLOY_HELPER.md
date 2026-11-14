@@ -136,7 +136,9 @@ postgresql://rms_api.<V1>:<V7>@<V6>:5432/postgres?sslmode=require
 
 ### Option A: Blueprint (recommended, 10 min)
 `render.yaml` in the repo defines all three services with the right commands, plans, headers and SPA rewrite.
-- [ ] Render → **New → Blueprint** → select the `rms` repo, branch `main` → Blueprint name `rms`.
+- [ ] Render → left sidebar **Blueprints** → **New Blueprint Instance** (or open
+      `https://dashboard.render.com/select-repo?type=blueprint`) → select the `rms` repo, branch `main` →
+      Blueprint name `rms`. (Blueprint is not one of the service tiles on the "New" page.)
 - [ ] Render asks for every value marked `sync: false`. Fill them in from the tables in 3.1–3.3 below. For SMTP, leave
       all values empty if you don't use e-mail yet. For `CORS_ORIGINS`, `APP_PUBLIC_URL` and `VITE_API_BASE_URL`, use
       the expected URLs (`https://rms-web.onrender.com` and `https://rms-api.onrender.com`). Correct them in step 4 if
@@ -257,6 +259,7 @@ $env:CORS_ORIGINS="<V9>"
 
 | Symptom | Fix |
 |---|---|
+| `supabase db push` stops partway with an error | Migrations that already succeeded stay applied. Fix the cause (ask Claude, paste the error), then run `supabase db push --dry-run` and `supabase db push` again. It continues from the failed file. |
 | API won't start: "sslmode=require" | `DATABASE_URL` must end with `?sslmode=require`. |
 | API won't start: password or tenant error | Check the user is `rms_api.<V1>`, the host is the **session** pooler on port **5432**, and V7 matches step 2.6. |
 | Browser: "CORS" error | `CORS_ORIGINS` must equal V9 exactly (https, no slash). Redeploy the API. |
