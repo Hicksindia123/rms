@@ -546,15 +546,25 @@ export function SystemSettingsManager() {
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 {logoUrl && (
-                  <img
-                    src={logoUrl}
-                    alt="Logo"
-                    loading="lazy"
-                    style={{ height: '28px', objectFit: 'contain' }}
-                    onError={(e) => {
-                      (e.target as HTMLElement).style.display = 'none';
+                  <div
+                    style={{
+                      background: '#ffffff',
+                      padding: '2px 6px',
+                      borderRadius: '6px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
                     }}
-                  />
+                  >
+                    <img
+                      src={logoUrl}
+                      alt="Logo"
+                      loading="lazy"
+                      style={{ height: '26px', objectFit: 'contain' }}
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.display = 'none';
+                      }}
+                    />
+                  </div>
                 )}
                 <span style={{ fontWeight: 700, fontSize: '1rem' }}>
                   Replacement Management System

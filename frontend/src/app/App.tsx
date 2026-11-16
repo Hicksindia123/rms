@@ -455,6 +455,7 @@ function Shell() {
   };
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [logoError, setLogoError] = useState(false);
   // Phase 10: rarely used admin items start collapsed; open while an admin screen is shown.
   const [adminExpanded, setAdminExpanded] = useState(false);
   const adminOpen = adminExpanded || ADMIN_TABS.has(activeTab);
@@ -645,10 +646,24 @@ function Shell() {
             <Menu size={18} />
           </button>
           <div className="saas-brand">
-            <div className="saas-logo-icon" aria-hidden="true">
-              <Layers size={18} />
+            <div className="saas-logo-badge" title="Hicks India Limited">
+              {!logoError ? (
+                <img
+                  src="/assets/logo.png"
+                  alt="Hicks India"
+                  className="saas-logo-img"
+                  onError={() => setLogoError(true)}
+                />
+              ) : (
+                <div className="saas-logo-icon" aria-hidden="true">
+                  <Layers size={18} />
+                </div>
+              )}
             </div>
-            <h1 className="saas-title">Replacement Management System</h1>
+            <div className="saas-brand-text">
+              <h1 className="saas-title">Replacement Management System</h1>
+              <span className="saas-company-tag">Hicks India Limited</span>
+            </div>
           </div>
         </div>
 

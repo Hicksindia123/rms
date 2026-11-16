@@ -2898,6 +2898,33 @@ button.dataview__card:active {
   color: inherit;
 }
 
+.saas-logo-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  padding: 3px 8px;
+  border-radius: 7px;
+  height: 38px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  flex-shrink: 0;
+}
+
+.saas-logo-img {
+  height: 30px;
+  width: auto;
+  max-width: 100px;
+  object-fit: contain;
+  display: block;
+}
+
+.saas-brand-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
 .saas-logo-icon {
   width: 34px;
   height: 34px;
@@ -2919,6 +2946,16 @@ button.dataview__card:active {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  line-height: 1.25;
+}
+
+.saas-company-tag {
+  font-size: 0.6875rem;
+  color: #94a3b8;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  line-height: 1.1;
 }
 
 .saas-badge-phase {
@@ -3612,9 +3649,18 @@ button.dataview__card:active {
     padding: 0 0.5rem;
   }
   .saas-title,
+  .saas-company-tag,
   .saas-topbar .saas-profile-name,
   .saas-btn-signout span {
     display: none;
+  }
+  .saas-logo-badge {
+    height: 32px;
+    padding: 2px 6px;
+  }
+  .saas-logo-img {
+    height: 24px;
+    max-width: 75px;
   }
   .saas-profile-pill {
     gap: 0.35rem;

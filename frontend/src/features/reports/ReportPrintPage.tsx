@@ -14,10 +14,9 @@ interface Props {
   onBack: () => void;
 }
 
-/** Only an uploaded logo (absolute URL from the branding bucket) is shown; the seeded placeholder
- * path has no file behind it, so the header falls back to the configured application name. */
+/** Logo display: absolute URL or bundled asset path (e.g. /assets/logo.png). */
 function isUploadedLogo(url: string | null): url is string {
-  return url !== null && /^https?:\/\//.test(url);
+  return url !== null && (/^https?:\/\//.test(url) || url.startsWith('/'));
 }
 
 /** P4-02 generic report print layout: A4 landscape, branding header, filters used, generated
