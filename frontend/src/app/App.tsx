@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 
 import { parseHashQuery, useHashRoute } from '@/app/router';
+import hicksLogo from '@/assets/logo.png';
 import { Button, EmptyState, ErrorState, LoadingState } from '@/components/ui';
 import { AuthProvider } from '@/features/auth/AuthContext';
 import { useAuth } from '@/features/auth/useAuth';
@@ -649,7 +650,7 @@ function Shell() {
             <div className="saas-logo-badge" title="Hicks India Limited">
               {!logoError ? (
                 <img
-                  src="/assets/logo.png"
+                  src={hicksLogo}
                   alt="Hicks India"
                   className="saas-logo-img"
                   onError={() => setLogoError(true)}

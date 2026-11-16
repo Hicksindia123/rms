@@ -74,6 +74,7 @@ async def test_inward_verifier_journey_order_steps_then_tools(
         "CARTON_OPENING",
         "COUNTING",
         "CATEGORISATION",
+        "INSPECTION",
         "DEPT_RECEIVING",
         "CONTAINER_AUDIT",
         "GS_LIST",

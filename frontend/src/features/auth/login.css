@@ -60,8 +60,8 @@
 .auth-brand {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 32px;
+  gap: 14px;
+  margin-bottom: 28px;
 }
 
 .auth-brand__mark {
@@ -78,20 +78,24 @@
 
 .auth-brand__mark--logo {
   width: auto;
-  min-width: 52px;
-  height: 46px;
+  min-width: 90px;
+  height: 48px;
   padding: 4px 10px;
   background: #ffffff;
   border: 1px solid var(--auth-border);
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .auth-brand__mark img {
   width: auto;
   height: 36px;
-  max-width: 140px;
+  max-width: 125px;
   object-fit: contain;
   background: transparent;
+  display: block;
 }
 
 .auth-brand__text {

@@ -37,6 +37,11 @@ _QUEUES: dict[str, str] = {
         select {_GS_COLS}, g.id as target_id, {_SINCE_STATUS} as since
           from public.goods_slips g {_GS_JOINS}
          where g.status = 'CATEGORISATION'""",  # noqa: S608
+    # Phase 2 / P2-05: Product Inspection & Grading (inspection module).
+    "INSPECTION": f"""
+        select {_GS_COLS}, g.id as target_id, {_SINCE_STATUS} as since
+          from public.goods_slips g {_GS_JOINS}
+         where g.status = 'INSPECTION'""",  # noqa: S608
     # AMD-12: RM review until the RM approves and the Transfer Slip is generated (rm_review).
     "RM_REVIEW": f"""
         select {_GS_COLS}, g.id as target_id, {_SINCE_STATUS} as since

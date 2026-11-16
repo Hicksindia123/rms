@@ -7,6 +7,7 @@ import {
   Boxes,
   Building2,
   CheckCircle2,
+  ClipboardCheck,
   ClipboardList,
   Clock,
   FileSpreadsheet,
@@ -79,6 +80,8 @@ export function itemPath(
       return `/gs/${item.gs_id}/unboxing`;
     case 'gs-itemization':
       return `/gs/${item.gs_id}/itemization`;
+    case 'gs-inspection':
+      return `/gs/${item.gs_id}/inspection`;
     case 'gs-rm-review':
       return `/gs/${item.gs_id}/rm-review`;
     case 'gs-final-actions':
@@ -111,6 +114,7 @@ const ICONS: Record<string, LucideIcon> = {
   CARTON_OPENING: PackageOpen,
   COUNTING: ListChecks,
   CATEGORISATION: Tags,
+  INSPECTION: ClipboardCheck,
   RM_REVIEW: FileCheck2,
   STORE_ACCEPT: Warehouse,
   DEPT_ROUTING: Building2,

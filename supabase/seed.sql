@@ -253,6 +253,7 @@ select r.id, s.id, m.ord
     ('INWARD_VERIFIER',            'CARTON_OPENING',  10),
     ('INWARD_VERIFIER',            'COUNTING',        20),
     ('INWARD_VERIFIER',            'CATEGORISATION',  30),
+    ('INWARD_VERIFIER',            'INSPECTION',      35),
     ('INWARD_VERIFIER',            'DEPT_RECEIVING',  40),   -- Q8 / DEC-42
     ('INWARD_VERIFIER',            'CONTAINER_AUDIT',100),
     ('INWARD_VERIFIER',            'GS_LIST',        110),
@@ -317,8 +318,8 @@ on conflict (role_id, journey_step_id) do nothing;
 -- Fail loudly on a typo in the journey matrix (same rule as the permission matrix).
 do $$
 begin
-  if (select count(*) from public.role_journey_steps) < 51 then
-    raise exception 'role journey seed incomplete: % rows (expected 51)',
+  if (select count(*) from public.role_journey_steps) < 52 then
+    raise exception 'role journey seed incomplete: % rows (expected 52)',
       (select count(*) from public.role_journey_steps);
   end if;
 end
