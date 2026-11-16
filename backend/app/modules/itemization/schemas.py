@@ -246,11 +246,16 @@ class ItemCountIn(BaseModel):
 class ItemCountOut(BaseModel):
     id: UUID
     item_id: UUID
-    count_type: str
+    count_type: str  # the ITEM_COUNT field code (PACKAGING, CONTAINER, USER_MANUAL …)
+    field_label: str | None = None  # G-18 label snapshot
     count_value: int
 
 
 class ResolvedBucketField(BaseModel):
+    """One field of the product's resolved item-field profile (Phase 4), used for both the
+    CATEGORISATION buckets and the ITEM_COUNT counts. Codes are stable; labels come from config."""
+
+    field_id: UUID
     field_code: str
     field_label: str
     sort_order: int
@@ -258,13 +263,20 @@ class ResolvedBucketField(BaseModel):
 
 class ItemCategorisationDetail(BaseModel):
     item_id: UUID
+    line_no: int
     product_id: UUID
     sku_code: str
     sku_name: str
+    category_name: str | None = None
+    documented_qty: int
     received_qty: int
     profile_id: UUID | None
     profile_name: str | None
+    # AMD-09: the qty buckets this product may be categorised into (always a list).
     allowed_buckets: list[ResolvedBucketField]
+    # AMD-11: the Packaging / Container / User Manual counts enabled for this product (always a
+    # list; empty when the profile enables none). The save endpoint accepts exactly these codes.
+    allowed_counts: list[ResolvedBucketField]
     buckets: list[ItemBucketOut]
     total_bucket_qty: int
     is_conserved: bool  # AMD-11 / G-19: sum(bucket qty) == received_qty

@@ -51,18 +51,22 @@ const mockData: RmReviewData = {
       received_qty: 8,
       short_qty: 0,
       excess_qty: 0,
+      // Shapes as returned by GET /gs/{id}/rm-review (backend rm_review/schemas.py).
       allowed_buckets: [
-        { field_id: 'f-1', field_code: 'OK_PACKED', label: 'OK and Packed', rank: 10 },
-        { field_id: 'f-2', field_code: 'DAMAGED', label: 'Damaged', rank: 20 },
+        { field_id: 'f-1', field_code: 'OK_PACKED', field_label: 'OK and Packed', sort_order: 10 },
+        { field_id: 'f-2', field_code: 'DAMAGED', field_label: 'Damaged', sort_order: 20 },
+      ],
+      allowed_counts: [
+        { field_id: 'fc-1', field_code: 'PACKAGING', field_label: 'Packaging', sort_order: 10 },
       ],
       buckets: [
-        { field_code: 'OK_PACKED', label_snapshot: 'OK and Packed', qty: 8 },
-        { field_code: 'DAMAGED', label_snapshot: 'Damaged', qty: 0 },
+        { id: 'b-1', item_id: 'item-10', field_code: 'OK_PACKED', field_label: 'OK and Packed', qty: 8 },
+        { id: 'b-2', item_id: 'item-10', field_code: 'DAMAGED', field_label: 'Damaged', qty: 0 },
       ],
       total_bucket_qty: 8,
       is_conserved: true,
       counts: [
-        { field_code: 'PACKAGING_COUNT', label_snapshot: 'Packaging Box Count', count_value: 8 },
+        { id: 'c-1', item_id: 'item-10', count_type: 'PACKAGING', field_label: 'Packaging', count_value: 8 },
       ],
     },
   ],
@@ -119,6 +123,9 @@ describe('RmReviewPage (AMD-12, AMD-13, G-19)', () => {
     expect(screen.getByText(/Carton Opening Videos \(1\)/i)).toBeInTheDocument();
     expect(screen.getByText(/Electric Iron 1000W/i)).toBeInTheDocument();
     expect(screen.getByText(/Conserved \(8\/8\)/i)).toBeInTheDocument();
+    // Labels come from the backend's field_label (config), not the code.
+    expect(screen.getByText('OK and Packed:')).toBeInTheDocument();
+    expect(screen.getByText(/Packaging:/)).toBeInTheDocument();
   });
 
   it('allows RM to open Edit modal and adjusts quantity with G-19 conservation', async () => {
@@ -158,6 +165,8 @@ describe('RmReviewPage (AMD-12, AMD-13, G-19)', () => {
         expect.objectContaining({
           received_qty: 6,
           remarks: 'RM adjusted count from 8 to 6',
+          // RmEditItemIn.counts is keyed by count_type (the backend rejects field_code).
+          counts: [{ count_type: 'PACKAGING', count_value: 8 }],
         }),
         expect.any(String),
       );

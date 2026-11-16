@@ -628,6 +628,15 @@ def resolve_profile_for_product(
     return [dict(r) for r in rows]
 
 
+def get_profile_version_id(session: Session, gs_id: UUID) -> UUID | None:
+    """The item-field profile version stamped on the GS (null until it leaves CATEGORISATION)."""
+    value = session.execute(
+        text("select item_field_profile_version_id from public.goods_slips where id = :id"),
+        {"id": gs_id},
+    ).scalar_one_or_none()
+    return UUID(str(value)) if value else None
+
+
 def get_item_buckets(session: Session, item_id: UUID) -> list[dict[str, Any]]:
     rows = session.execute(
         text(

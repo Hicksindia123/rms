@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, PackageCheck, Send, ShieldAlert } from 'lucide-react';
 
 import { Badge, Button, ErrorState, LoadingState, Textarea } from '@/components/ui';
+import { useApiQuery } from '@/hooks/useApiQuery';
 import { toApiError, type ApiError } from '@/lib/api/client';
 
 import {
@@ -16,14 +17,44 @@ interface Props {
   onDone: () => void;
 }
 
-export function ItemCategorisationSection({ gsId, onDone }: Props) {
-  const [data, setData] = useState<CategorisationStateOut | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<ApiError | null>(null);
+type Edits = Record<string, Record<string, number>>; // item_id -> field_code -> unsaved qty
 
-  // Local editing state: item_id -> { buckets: Record<code, qty>, counts: Record<code, qty> }
-  const [draftBuckets, setDraftBuckets] = useState<Record<string, Record<string, number>>>({});
-  const [draftCounts, setDraftCounts] = useState<Record<string, Record<string, number>>>({});
+/** Saved bucket quantities of one item: every allowed bucket (0 when not saved yet). */
+function savedBuckets(item: ItemCategorisationDetail): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const b of item.allowed_buckets) {
+    out[b.field_code] = item.buckets.find((x) => x.field_code === b.field_code)?.qty ?? 0;
+  }
+  return out;
+}
+
+/** Saved auxiliary counts of one item (AMD-11): every allowed count (0 when not saved yet). */
+function savedCounts(item: ItemCategorisationDetail): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const c of item.allowed_counts) {
+    out[c.field_code] = item.counts.find((x) => x.count_type === c.field_code)?.count_value ?? 0;
+  }
+  return out;
+}
+
+/** Drop the item's edits that equal the saved values; keep anything typed after the save started. */
+function withoutSaved(edits: Edits, itemId: string, saved: Record<string, number>): Edits {
+  const remaining = Object.fromEntries(
+    Object.entries(edits[itemId] ?? {}).filter(([code, qty]) => saved[code] !== qty),
+  );
+  const rest = Object.fromEntries(Object.entries(edits).filter(([id]) => id !== itemId));
+  return Object.keys(remaining).length ? { ...rest, [itemId]: remaining } : rest;
+}
+
+export function ItemCategorisationSection({ gsId, onDone }: Props) {
+  // Validated against the backend contract (INVALID_API_RESPONSE on a mismatch, never a crash).
+  const fetcher = useCallback(async () => itemizationApi.getCategorisation(gsId), [gsId]);
+  const query = useApiQuery<CategorisationStateOut>(fetcher);
+  const data = query.data?.goods_slip_id === gsId ? query.data : null;
+
+  // Unsaved edits only; the displayed value is edit ?? saved, so fresh server data needs no sync.
+  const [draftBuckets, setDraftBuckets] = useState<Edits>({});
+  const [draftCounts, setDraftCounts] = useState<Edits>({});
   const [savingItem, setSavingItem] = useState<string | null>(null);
   const [itemError, setItemError] = useState<{ id: string; error: ApiError } | null>(null);
 
@@ -31,103 +62,83 @@ export function ItemCategorisationSection({ gsId, onDone }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<ApiError | null>(null);
 
-  const reload = async () => {
-    try {
-      setLoading(true);
-      setLoadError(null);
-      const res = await itemizationApi.getCategorisation(gsId);
-      setData(res);
+  // Idempotency-Key per save intent: reused only when the same payload is retried after a
+  // network/server failure (G-16), replaced after a success or a 4xx.
+  const saveKeys = useRef(new Map<string, { body: string; key: string }>());
+  const submitKey = useRef<{ body: string; key: string } | null>(null);
 
-      // Initialise drafts from server data
-      const initB: Record<string, Record<string, number>> = {};
-      const initC: Record<string, Record<string, number>> = {};
-      for (const it of res.items) {
-        const itemBuckets: Record<string, number> = {};
-        for (const b of it.allowed_buckets) {
-          const matched = it.buckets.find((x) => x.field_code === b.field_code);
-          itemBuckets[b.field_code] = matched ? matched.qty : 0;
-        }
-        initB[it.id] = itemBuckets;
+  if (!data && query.error) {
+    return (
+      <ErrorState
+        title="Item categorisation could not be loaded"
+        error={query.error}
+        onRetry={query.reload}
+      />
+    );
+  }
+  if (!data) return <LoadingState />;
 
-        const itemCounts: Record<string, number> = {};
-        for (const c of it.allowed_counts) {
-          const matched = it.counts.find((x) => x.field_code === c.field_code);
-          itemCounts[c.field_code] = matched ? matched.count_value : 0;
-        }
-        initC[it.id] = itemCounts;
-      }
-      setDraftBuckets(initB);
-      setDraftCounts(initC);
-    } catch (err) {
-      setLoadError(toApiError(err));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void reload();
-  }, [gsId]);
-
-  if (loading && !data) return <LoadingState />;
-  if (loadError) return <ErrorState error={loadError} onRetry={reload} />;
-  if (!data) return null;
+  const bucketsOf = (item: ItemCategorisationDetail) => ({
+    ...savedBuckets(item),
+    ...(draftBuckets[item.item_id] ?? {}),
+  });
+  const countsOf = (item: ItemCategorisationDetail) => ({
+    ...savedCounts(item),
+    ...(draftCounts[item.item_id] ?? {}),
+  });
 
   const handleBucketChange = (itemId: string, fieldCode: string, val: number) => {
     setDraftBuckets((prev) => ({
       ...prev,
-      [itemId]: {
-        ...(prev[itemId] || {}),
-        [fieldCode]: Math.max(0, val),
-      },
+      [itemId]: { ...(prev[itemId] ?? {}), [fieldCode]: Math.max(0, val) },
     }));
   };
 
   const handleCountChange = (itemId: string, fieldCode: string, val: number) => {
     setDraftCounts((prev) => ({
       ...prev,
-      [itemId]: {
-        ...(prev[itemId] || {}),
-        [fieldCode]: Math.max(0, val),
-      },
+      [itemId]: { ...(prev[itemId] ?? {}), [fieldCode]: Math.max(0, val) },
     }));
   };
 
   const saveLine = async (item: ItemCategorisationDetail) => {
+    const itemId = item.item_id;
     try {
-      setSavingItem(item.id);
+      setSavingItem(itemId);
       setItemError(null);
-      const bMap = draftBuckets[item.id] || {};
-      const cMap = draftCounts[item.id] || {};
+      const bMap = bucketsOf(item);
+      const cMap = countsOf(item);
 
-      const bucketsPayload = item.allowed_buckets.map((b) => ({
-        field_code: b.field_code,
-        qty: bMap[b.field_code] ?? 0,
-      }));
-      const countsPayload = item.allowed_counts.map((c) => ({
-        field_code: c.field_code,
-        count_value: cMap[c.field_code] ?? 0,
-      }));
+      const body = {
+        buckets: item.allowed_buckets.map((b) => ({
+          field_code: b.field_code,
+          qty: bMap[b.field_code] ?? 0,
+        })),
+        counts: item.allowed_counts.map((c) => ({
+          count_type: c.field_code,
+          count_value: cMap[c.field_code] ?? 0,
+        })),
+      };
+      const bodyJson = JSON.stringify(body);
+      const prior = saveKeys.current.get(itemId);
+      const key = prior?.body === bodyJson ? prior.key : newIdempotencyKey();
+      saveKeys.current.set(itemId, { body: bodyJson, key });
 
-      const updated = await itemizationApi.saveItemCategorisation(gsId, item.id, {
-        buckets: bucketsPayload,
-        counts: countsPayload,
-      });
+      await itemizationApi.saveItemCategorisation(gsId, itemId, body, key);
+      saveKeys.current.delete(itemId);
 
-      // Update item in local data
-      setData((prev) => {
-        if (!prev) return null;
-        const nextItems = prev.items.map((i) => (i.id === item.id ? updated : i));
-        const allCons = nextItems.every((i) => i.is_conserved);
-        return {
-          ...prev,
-          items: nextItems,
-          all_conserved: allCons,
-          can_submit: allCons && prev.is_counted_by_current_user,
-        };
-      });
+      // The save returns {item_id, status}; re-read the server state (conservation is computed
+      // there) and drop only the edits that were saved; other lines and values typed meanwhile
+      // are kept.
+      const sentBuckets = Object.fromEntries(body.buckets.map((b) => [b.field_code, b.qty]));
+      const sentCounts = Object.fromEntries(body.counts.map((c) => [c.count_type, c.count_value]));
+      query.setData(await itemizationApi.getCategorisation(gsId));
+      setDraftBuckets((prev) => withoutSaved(prev, itemId, sentBuckets));
+      setDraftCounts((prev) => withoutSaved(prev, itemId, sentCounts));
     } catch (err) {
-      setItemError({ id: item.id, error: toApiError(err) });
+      const apiError = toApiError(err);
+      if (apiError.status >= 400 && apiError.status < 500) saveKeys.current.delete(itemId);
+      setItemError({ id: itemId, error: apiError });
     } finally {
       setSavingItem(null);
     }
@@ -137,14 +148,18 @@ export function ItemCategorisationSection({ gsId, onDone }: Props) {
     try {
       setSubmitting(true);
       setSubmitError(null);
-      await itemizationApi.submitCategorisation(
-        gsId,
-        { category_code: 'REGULAR_RETURN', remarks: remarks.trim() || null },
-        newIdempotencyKey(),
-      );
+      const body = { category_code: 'REGULAR_RETURN', remarks: remarks.trim() || null };
+      const bodyJson = JSON.stringify(body);
+      if (submitKey.current?.body !== bodyJson) {
+        submitKey.current = { body: bodyJson, key: newIdempotencyKey() };
+      }
+      await itemizationApi.submitCategorisation(gsId, body, submitKey.current.key);
+      submitKey.current = null;
       onDone();
     } catch (err) {
-      setSubmitError(toApiError(err));
+      const apiError = toApiError(err);
+      if (apiError.status >= 400 && apiError.status < 500) submitKey.current = null;
+      setSubmitError(apiError);
     } finally {
       setSubmitting(false);
     }
@@ -170,7 +185,7 @@ export function ItemCategorisationSection({ gsId, onDone }: Props) {
       </div>
 
       {/* Same user who counted guard warning (AMD-08) */}
-      {!data.is_counted_by_current_user && (
+      {!data.is_same_user_who_counted && (
         <div
           role="alert"
           style={{
@@ -196,17 +211,17 @@ export function ItemCategorisationSection({ gsId, onDone }: Props) {
       {/* Item Lines */}
       <div style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         {data.items.map((item) => {
-          const bMap = draftBuckets[item.id] || {};
-          const cMap = draftCounts[item.id] || {};
-          const currentTotal = Object.values(bMap).reduce((a, b) => a + (Number(b) || 0), 0);
+          const bMap = bucketsOf(item);
+          const cMap = countsOf(item);
+          const currentTotal = Object.values(bMap).reduce((a, b) => a + b, 0);
           const isLocallyConserved = currentTotal === item.received_qty;
           const diff = currentTotal - item.received_qty;
-          const isSaving = savingItem === item.id;
-          const err = itemError?.id === item.id ? itemError.error : null;
+          const isSaving = savingItem === item.item_id;
+          const err = itemError?.id === item.item_id ? itemError.error : null;
 
           return (
             <div
-              key={item.id}
+              key={item.item_id}
               style={{
                 border: '1px solid var(--color-border)',
                 borderRadius: '8px',
@@ -250,7 +265,7 @@ export function ItemCategorisationSection({ gsId, onDone }: Props) {
                   ) : (
                     <Badge variant="danger">
                       <AlertCircle size={12} style={{ marginRight: '4px' }} />
-                      Mismatch: {currentTotal}/{item.received_qty} ({diff > 0 ? `+${diff}` : diff})
+                      Mismatch: {currentTotal}/{item.received_qty} ({diff > 0 ? `+${String(diff)}` : diff})
                     </Badge>
                   )}
                 </div>
@@ -262,7 +277,11 @@ export function ItemCategorisationSection({ gsId, onDone }: Props) {
                   Condition Buckets (G-19 conservation required):
                 </div>
                 {item.allowed_buckets.length === 0 ? (
-                  <p style={{ fontSize: '0.85rem', color: 'var(--color-muted)' }}>No categorisation fields enabled for this product.</p>
+                  <p role="alert" style={{ fontSize: '0.85rem', color: 'var(--color-danger)' }}>
+                    No categorisation buckets are enabled for this product, so its counted quantity
+                    cannot be categorised (G-19). Ask an administrator to enable buckets in Admin → Item
+                    Field Profiles, then retry.
+                  </p>
                 ) : (
                   <div
                     style={{
@@ -284,19 +303,21 @@ export function ItemCategorisationSection({ gsId, onDone }: Props) {
                         }}
                       >
                         <label
-                          htmlFor={`b-${item.id}-${b.field_code}`}
+                          htmlFor={`b-${item.item_id}-${b.field_code}`}
                           style={{ fontSize: '0.8rem', fontWeight: 500, marginBottom: '0.25rem', color: 'var(--color-text)' }}
-                          title={b.label}
+                          title={b.field_label}
                         >
-                          {b.label}
+                          {b.field_label}
                         </label>
                         <input
-                          id={`b-${item.id}-${b.field_code}`}
+                          id={`b-${item.item_id}-${b.field_code}`}
                           type="number"
                           min="0"
                           max={item.received_qty}
                           value={bMap[b.field_code] ?? 0}
-                          onChange={(e) => handleBucketChange(item.id, b.field_code, parseInt(e.target.value, 10) || 0)}
+                          onChange={(e) => {
+                            handleBucketChange(item.item_id, b.field_code, parseInt(e.target.value, 10) || 0);
+                          }}
                           style={{
                             padding: '0.4rem 0.5rem',
                             borderRadius: '4px',
@@ -339,18 +360,20 @@ export function ItemCategorisationSection({ gsId, onDone }: Props) {
                         }}
                       >
                         <label
-                          htmlFor={`c-${item.id}-${c.field_code}`}
+                          htmlFor={`c-${item.item_id}-${c.field_code}`}
                           style={{ fontSize: '0.8rem', fontWeight: 500, marginBottom: '0.25rem', color: 'var(--color-text)' }}
-                          title={c.label}
+                          title={c.field_label}
                         >
-                          {c.label}
+                          {c.field_label}
                         </label>
                         <input
-                          id={`c-${item.id}-${c.field_code}`}
+                          id={`c-${item.item_id}-${c.field_code}`}
                           type="number"
                           min="0"
                           value={cMap[c.field_code] ?? 0}
-                          onChange={(e) => handleCountChange(item.id, c.field_code, parseInt(e.target.value, 10) || 0)}
+                          onChange={(e) => {
+                            handleCountChange(item.item_id, c.field_code, parseInt(e.target.value, 10) || 0);
+                          }}
                           style={{
                             padding: '0.4rem 0.5rem',
                             borderRadius: '4px',
@@ -371,8 +394,9 @@ export function ItemCategorisationSection({ gsId, onDone }: Props) {
               <div style={{ marginTop: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   {err && (
-                    <span style={{ fontSize: '0.8rem', color: 'var(--color-danger)' }}>
+                    <span role="alert" style={{ fontSize: '0.8rem', color: 'var(--color-danger)' }}>
                       {err.message}
+                      {err.requestId ? ` (Request ID: ${err.requestId})` : ''}
                     </span>
                   )}
                 </div>
@@ -381,7 +405,9 @@ export function ItemCategorisationSection({ gsId, onDone }: Props) {
                   variant="outline"
                   size="sm"
                   isLoading={isSaving}
-                  onClick={() => void saveLine(item)}
+                  onClick={() => {
+                    void saveLine(item);
+                  }}
                 >
                   Save Line {item.line_no}
                 </Button>
@@ -407,11 +433,14 @@ export function ItemCategorisationSection({ gsId, onDone }: Props) {
           rows={2}
           value={remarks}
           placeholder="e.g. All pieces inspected and categorised as per packaging condition"
-          onChange={(e) => setRemarks(e.target.value)}
+          onChange={(e) => {
+            setRemarks(e.target.value);
+          }}
         />
         {submitError && (
           <p role="alert" className="form-control__error" style={{ marginTop: '0.5rem' }}>
             {submitError.message}
+            {submitError.requestId ? ` (Request ID: ${submitError.requestId})` : ''}
           </p>
         )}
         <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -419,17 +448,21 @@ export function ItemCategorisationSection({ gsId, onDone }: Props) {
             type="button"
             variant="primary"
             isLoading={submitting}
-            disabled={!data.all_conserved || !data.is_counted_by_current_user}
-            onClick={() => void handleSubmit()}
+            disabled={!data.all_conserved || !data.can_submit}
+            onClick={() => {
+              void handleSubmit();
+            }}
           >
             <Send size={16} style={{ marginRight: '6px' }} />
             Submit Categorisation to RM Review
           </Button>
           <span style={{ fontSize: '0.85rem', color: 'var(--color-muted)' }}>
             {!data.all_conserved
-              ? 'Cannot submit: Resolve bucket quantity mismatches across all items.'
-              : !data.is_counted_by_current_user
+              ? 'Cannot submit: Save every line with bucket quantities equal to its counted quantity.'
+              : !data.is_same_user_who_counted
               ? 'Cannot submit: You are not the inward verifier who counted this slip.'
+              : !data.can_submit
+              ? 'Cannot submit: this goods slip is not open for categorisation by you.'
               : 'All lines conserved. Ready for Replacement Manager review.'}
           </span>
         </div>

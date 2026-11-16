@@ -63,6 +63,7 @@ class RmReviewItemOut(BaseModel):
     short_qty: int
     excess_qty: int
     allowed_buckets: list[ResolvedBucketField]
+    allowed_counts: list[ResolvedBucketField]  # AMD-11, same resolution as categorisation
     buckets: list[ItemBucketOut]
     total_bucket_qty: int
     is_conserved: bool  # G-19: total_bucket_qty == received_qty

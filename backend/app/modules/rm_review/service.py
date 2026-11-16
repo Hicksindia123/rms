@@ -25,10 +25,10 @@ from app.modules.custody.schemas import TransferLineIn
 from app.modules.goods_slips import service as gs_service
 from app.modules.inventory import ledger_service
 from app.modules.itemization import repository as item_repo
+from app.modules.itemization import service as item_service
 from app.modules.itemization.schemas import (
     ItemBucketOut,
     ItemCountOut,
-    ResolvedBucketField,
 )
 from app.modules.notifications import service as notifications
 from app.modules.rm_review import repository as repo
@@ -114,38 +114,17 @@ class RmReviewService:
                         id=c["id"],
                         item_id=c["gs_item_id"],
                         count_type=c["field_code"],
+                        field_label=c.get("label_snapshot") or c["field_code"],
                         count_value=c["qty"],
                     )
                 )
 
             items_out: list[RmReviewItemOut] = []
             all_conserved = bool(items_raw)
+            version_id = item_repo.get_profile_version_id(session, gs_id)
             for it in items_raw:
-                profile_rows = item_repo.resolve_profile_for_product(session, it["product_id"])
-                cat_fields = [
-                    ResolvedBucketField(
-                        field_code=r["code"],
-                        field_label=r["label"],
-                        sort_order=r["sort_order"],
-                    )
-                    for r in profile_rows
-                    if r.get("field_group") == "CATEGORISATION"
-                ]
-                if not cat_fields:
-                    lib_rows = session.execute(
-                        text(
-                            "select code, label, sort_order from public.item_field_library "
-                            "where field_group = 'CATEGORISATION' order by sort_order"
-                        )
-                    ).mappings()
-                    cat_fields = [
-                        ResolvedBucketField(
-                            field_code=r["code"],
-                            field_label=r["label"],
-                            sort_order=r["sort_order"],
-                        )
-                        for r in lib_rows
-                    ]
+                fields = item_service.resolve_item_fields(session, it["product_id"], version_id)
+                sku_code, sku_name = item_service.item_display(it)
 
                 b_list = b_by_item.get(it["id"], [])
                 tot_b = sum(b.qty for b in b_list)
@@ -157,8 +136,8 @@ class RmReviewService:
                     RmReviewItemOut(
                         item_id=it["id"],
                         product_id=it["product_id"],
-                        sku_code=it.get("sku_code") or "",
-                        sku_name=it.get("sku_name") or "",
+                        sku_code=sku_code,
+                        sku_name=sku_name,
                         documented_qty=it["documented_qty"],
                         received_qty=it["received_qty"],
                         short_qty=it.get(
@@ -167,7 +146,8 @@ class RmReviewService:
                         excess_qty=it.get(
                             "excess_qty", max(0, it["received_qty"] - it["documented_qty"])
                         ),
-                        allowed_buckets=cat_fields,
+                        allowed_buckets=fields.buckets,
+                        allowed_counts=fields.counts,
                         buckets=b_list,
                         total_bucket_qty=tot_b,
                         is_conserved=is_cons,
@@ -285,30 +265,18 @@ class RmReviewService:
                         )
 
         # Update buckets and counts
-        profile_rows = item_repo.resolve_profile_for_product(session, item["product_id"])
-        cat_map: dict[str, UUID] = {
-            r["code"]: r["field_id"]
-            for r in profile_rows
-            if r.get("field_group") == "CATEGORISATION"
-        }
-        count_map: dict[str, UUID] = {
-            r["code"]: r["field_id"] for r in profile_rows if r.get("field_group") == "ITEM_COUNT"
-        }
-        if not cat_map or not count_map:
-            lib_rows = session.execute(
-                text("select id, field_group, code from public.item_field_library")
-            ).mappings()
-            for lr in lib_rows:
-                if lr["field_group"] == "CATEGORISATION" and lr["code"] not in cat_map:
-                    cat_map[lr["code"]] = lr["id"]
-                elif lr["field_group"] == "ITEM_COUNT" and lr["code"] not in count_map:
-                    count_map[lr["code"]] = lr["id"]
+        fields = item_service.resolve_item_fields(
+            session, item["product_id"], item_repo.get_profile_version_id(session, gs_id)
+        )
+        cat_map = fields.bucket_ids()
+        count_map = fields.count_ids()
 
         for b in payload.buckets:
             field_id = cat_map.get(b.field_code)
             if not field_id:
                 raise ValidationFailed(
-                    f"Unknown categorisation bucket field {b.field_code}", code="INVALID_FIELD"
+                    f"Bucket {b.field_code} is not enabled in this product's item field profile",
+                    code="INVALID_FIELD",
                 )
             item_repo.upsert_item_bucket(session, item_id, field_id, b.qty, user.id)
 
@@ -316,7 +284,8 @@ class RmReviewService:
             field_id = count_map.get(c.count_type)
             if not field_id:
                 raise ValidationFailed(
-                    f"Unknown count type {c.count_type}", code="INVALID_COUNT_TYPE"
+                    f"Count {c.count_type} is not enabled in this product's item field profile",
+                    code="INVALID_COUNT_TYPE",
                 )
             item_repo.upsert_item_count(session, item_id, field_id, c.count_value, user.id)
 
@@ -337,8 +306,8 @@ class RmReviewService:
         snapshot = [
             {
                 "item_id": str(i["id"]),
-                "sku_code": i.get("sku_code"),
-                "sku_name": i.get("sku_name"),
+                "sku_code": item_service.item_display(i)[0],
+                "sku_name": item_service.item_display(i)[1],
                 "documented_qty": i["documented_qty"],
                 "received_qty": i["received_qty"],
                 "buckets": [
@@ -355,7 +324,7 @@ class RmReviewService:
             revision_no=rev_no,
             action="RM_EDIT",
             items_snapshot=snapshot,
-            remarks=payload.remarks or f"RM edited item {item.get('sku_code', '')}",
+            remarks=payload.remarks or f"RM edited item {item_service.item_display(item)[0]}",
             created_by=user.id,
         )
 
@@ -404,8 +373,8 @@ class RmReviewService:
         snapshot = [
             {
                 "item_id": str(i["id"]),
-                "sku_code": i.get("sku_code"),
-                "sku_name": i.get("sku_name"),
+                "sku_code": item_service.item_display(i)[0],
+                "sku_name": item_service.item_display(i)[1],
                 "documented_qty": i["documented_qty"],
                 "received_qty": i["received_qty"],
                 "buckets": [
@@ -506,7 +475,7 @@ class RmReviewService:
             if b_sum != recv:
                 raise SystemGuardViolation(
                     "G-19",
-                    f"Item {it.get('sku_code', '')} bucket total ({b_sum}) does not "
+                    f"Item {item_service.item_display(it)[0]} bucket total ({b_sum}) does not "
                     f"match counted quantity ({recv}) (G-19)",
                     details={"item_id": str(it["id"]), "received_qty": recv, "bucket_total": b_sum},
                 )
@@ -571,8 +540,8 @@ class RmReviewService:
         snapshot = [
             {
                 "item_id": str(i["id"]),
-                "sku_code": i.get("sku_code"),
-                "sku_name": i.get("sku_name"),
+                "sku_code": item_service.item_display(i)[0],
+                "sku_name": item_service.item_display(i)[1],
                 "documented_qty": i["documented_qty"],
                 "received_qty": i["received_qty"],
                 "buckets": [

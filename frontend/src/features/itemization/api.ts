@@ -1,4 +1,6 @@
-import { apiRequest } from '@/lib/api/client';
+import { z } from 'zod';
+
+import { ApiError, apiRequest } from '@/lib/api/client';
 import type { Attachment } from '@/features/unboxing/api';
 
 // Shapes mirror backend/app/modules/itemization/schemas.py (P2-04).
@@ -288,86 +290,119 @@ export const itemizationApi = {
       method: 'POST',
       body,
     }),
-  getCategorisation: (gsId: string) =>
-    apiRequest<CategorisationStateOut>(`${gs(gsId)}/categorisation`),
+  getCategorisation: async (gsId: string) =>
+    parseCategorisationState(await apiRequest<unknown>(`${gs(gsId)}/categorisation`)),
+  /** Body mirrors SaveItemCategorisationIn: buckets by field_code, counts by count_type. */
   saveItemCategorisation: (
     gsId: string,
     itemId: string,
     body: {
       buckets: Array<{ field_code: string; qty: number }>;
-      counts: Array<{ field_code: string; count_value: number }>;
+      counts: Array<{ count_type: string; count_value: number }>;
     },
+    idempotencyKey: string,
   ) =>
-    apiRequest<ItemCategorisationDetail>(
+    apiRequest<{ item_id: string; status: string }>(
       `${gs(gsId)}/items/${encodeURIComponent(itemId)}/categorisation`,
-      { method: 'PUT', body },
+      { method: 'PUT', body, idempotencyKey },
     ),
   submitCategorisation: (
     gsId: string,
     body: { category_code?: string; remarks?: string | null },
     idempotencyKey: string,
   ) =>
-    apiRequest<{ gs_id: string; status: string }>(`${gs(gsId)}/categorisation/submit`, {
+    apiRequest<{ goods_slip_id: string; status: string }>(`${gs(gsId)}/categorisation/submit`, {
       method: 'POST',
       body,
       idempotencyKey,
     }),
 };
 
-export interface ResolvedBucketField {
-  field_id: string;
-  field_code: string;
-  label: string;
-  rank: number;
-}
+// --- Item categorisation (AMD-09 buckets, AMD-11 counts, G-19) ---------------------------------
+// Mirrors backend/app/modules/itemization/schemas.py (ItemCategorisationDetail,
+// CategorisationStateOut). The response is validated at runtime: a missing or malformed field is
+// reported as INVALID_API_RESPONSE naming the field, never iterated blindly or defaulted to [].
 
-export interface ItemBucket {
-  id?: string;
-  field_id?: string;
-  field_code: string;
-  label_snapshot?: string;
-  qty: number;
-}
+/** A field of the product's resolved item-field profile (bucket or count). Codes are stable. */
+const resolvedFieldSchema = z.object({
+  field_id: z.string(),
+  field_code: z.string().min(1),
+  field_label: z.string(),
+  sort_order: z.number(),
+});
 
-export interface ItemCount {
-  id?: string;
-  field_id?: string;
-  field_code?: string;
-  count_type?: string;
-  label_snapshot?: string;
-  count_value: number;
-}
+const itemBucketSchema = z.object({
+  id: z.string(),
+  item_id: z.string(),
+  field_code: z.string(),
+  field_label: z.string().nullish(),
+  qty: z.number().int(),
+});
 
-export interface ItemCategorisationDetail {
-  id: string;
-  line_no: number;
-  product_id: string;
-  sku_code: string | null;
-  sku_name: string | null;
-  category_name: string | null;
-  documented_qty: number;
-  received_qty: number;
-  allowed_buckets: ResolvedBucketField[];
-  allowed_counts: ResolvedBucketField[];
-  buckets: ItemBucket[];
-  counts: ItemCount[];
-  total_bucket_qty: number;
-  is_conserved: boolean;
-}
+const itemCountSchema = z.object({
+  id: z.string(),
+  item_id: z.string(),
+  /** The ITEM_COUNT field code (PACKAGING, CONTAINER, USER_MANUAL …). */
+  count_type: z.string(),
+  field_label: z.string().nullish(),
+  count_value: z.number().int(),
+});
 
-export interface CategorisationStateOut {
-  goods_slip: {
-    id: string;
-    gs_no: string;
-    status: string;
-    counted_by?: string | null;
-    created_at: string;
-  };
-  items: ItemCategorisationDetail[];
-  all_conserved: boolean;
-  can_submit: boolean;
-  counted_by_id: string | null;
-  is_counted_by_current_user: boolean;
+const itemCategorisationSchema = z.object({
+  item_id: z.string(),
+  line_no: z.number().int(),
+  product_id: z.string(),
+  sku_code: z.string(),
+  sku_name: z.string(),
+  category_name: z.string().nullish(),
+  documented_qty: z.number().int(),
+  received_qty: z.number().int().nonnegative(),
+  profile_id: z.string().nullable(),
+  profile_name: z.string().nullable(),
+  allowed_buckets: z.array(resolvedFieldSchema),
+  allowed_counts: z.array(resolvedFieldSchema),
+  buckets: z.array(itemBucketSchema),
+  total_bucket_qty: z.number().int(),
+  is_conserved: z.boolean(),
+  counts: z.array(itemCountSchema),
+});
+
+const categorisationStateSchema = z.object({
+  goods_slip_id: z.string(),
+  gs_no: z.string(),
+  status: z.string(),
+  counted_by: z.string().nullable(),
+  counted_by_name: z.string().nullable(),
+  /** AMD-08: true when the caller is the verifier who counted (or super admin / nobody yet). */
+  is_same_user_who_counted: z.boolean(),
+  /** Server-side: same user + status CATEGORISATION + permission (G-19 is checked on submit). */
+  can_submit: z.boolean(),
+  all_conserved: z.boolean(),
+  items: z.array(itemCategorisationSchema),
+});
+
+export type ResolvedBucketField = z.infer<typeof resolvedFieldSchema>;
+export type ItemBucket = z.infer<typeof itemBucketSchema>;
+export type ItemCount = z.infer<typeof itemCountSchema>;
+export type ItemCategorisationDetail = z.infer<typeof itemCategorisationSchema>;
+export type CategorisationStateOut = z.infer<typeof categorisationStateSchema>;
+
+/** Validates GET /gs/{id}/categorisation; throws an actionable ApiError on a contract mismatch. */
+export function parseCategorisationState(raw: unknown): CategorisationStateOut {
+  const result = categorisationStateSchema.safeParse(raw);
+  if (result.success) return result.data;
+  const problems = result.error.issues.map(
+    (i) => `${i.path.map(String).join('.') || '(response)'}: ${i.message}`,
+  );
+  throw new ApiError(
+    0,
+    'INVALID_API_RESPONSE',
+    `The categorisation data from the server is incomplete or in an unexpected format ` +
+      `(${problems.slice(0, 3).join('; ')}${problems.length > 3 ? '; …' : ''}). ` +
+      'Retry; if it persists, report this goods slip to the administrator.',
+    { issues: problems },
+    null,
+  );
 }
 
 /** A fresh key per user intent; reused when the same intent is retried after a failure. */

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -133,6 +134,66 @@ def form_field_options(snapshot: dict[str, Any], field_key: str) -> list[Categor
 def field_label(snapshot: dict[str, Any], field_key: str) -> str:
     field = next((f for f in snapshot.get("fields") or [] if f.get("field_key") == field_key), None)
     return str((field or {}).get("label") or field_key)
+
+
+# --- item field profile for categorisation (AMD-09 buckets, AMD-11 counts) ----------------------
+CATEGORISATION_GROUP = "CATEGORISATION"
+ITEM_COUNT_GROUP = "ITEM_COUNT"
+
+
+@dataclass(frozen=True)
+class ResolvedItemFields:
+    """The fields a GS item may be categorised with. One resolution serves the categorisation
+    screen, its save validation and RM review, so the codes offered = the codes accepted."""
+
+    buckets: list[ResolvedBucketField]
+    counts: list[ResolvedBucketField]
+    profile_version_id: UUID | None
+    profile_version_no: int | None
+
+    def bucket_ids(self) -> dict[str, UUID]:
+        return {f.field_code: f.field_id for f in self.buckets}
+
+    def count_ids(self) -> dict[str, UUID]:
+        return {f.field_code: f.field_id for f in self.counts}
+
+
+def _to_fields(rows: list[dict[str, Any]]) -> list[ResolvedBucketField]:
+    return [
+        ResolvedBucketField(
+            field_id=r["field_id"],
+            field_code=r["code"],
+            field_label=r["label"],
+            sort_order=r["sort_order"],
+        )
+        for r in rows
+    ]
+
+
+def resolve_item_fields(
+    session: Session, product_id: UUID, version_id: UUID | None
+) -> ResolvedItemFields:
+    """Phase 4 resolver (rms_private.resolve_item_field_profile) at the GS's stamped profile
+    version (current version while unstamped). This is exactly the set the DB guards
+    gs_item_buckets_guard / gs_item_counts_guard (G-18) accept, so it has no library fallback:
+    a field the profile does not enable would be rejected by the database anyway. A product whose
+    profile enables no bucket gets an empty list (shown as a configuration problem in the UI)."""
+    rows = repo.resolve_profile_for_product(session, product_id, version_id)
+    first = rows[0] if rows else None
+    return ResolvedItemFields(
+        buckets=_to_fields([r for r in rows if r.get("field_group") == CATEGORISATION_GROUP]),
+        counts=_to_fields([r for r in rows if r.get("field_group") == ITEM_COUNT_GROUP]),
+        profile_version_id=first.get("profile_version_id") if first else None,
+        profile_version_no=first.get("profile_version_no") if first else None,
+    )
+
+
+def item_display(item: dict[str, Any]) -> tuple[str, str]:
+    """(code, name) of a GS item line from its G-18 product snapshots (repository columns)."""
+    return (
+        str(item.get("product_code_snapshot") or ""),
+        str(item.get("product_name_snapshot") or ""),
+    )
 
 
 def is_short(item: dict[str, Any], *, all_categories: bool, short_categories: set[UUID]) -> bool:
@@ -495,13 +556,16 @@ class ItemizationService:
             counts = repo.get_counts_for_items(session, item_ids)
             counted_info = repo.get_counted_by_info(session, gs_id)
             counted_by_id = counted_info.get("counted_by") if counted_info else None
-            counted_by_name = counted_info.get("full_name") if counted_info else None
+            counted_by_name = counted_info.get("counted_by_name") if counted_info else None
 
             is_same = user.is_super_admin or counted_by_id is None or counted_by_id == user.id
             can_submit = (
                 is_same
                 and gs["status"] == CATEGORISATION
-                and perms.allows("itemization", "perform")
+                # Same permission the submit endpoint requires (router CreateUser). There is no
+                # "perform" action in the permission vocabulary, so the flag was never true for
+                # a verifier.
+                and perms.allows("itemization", "create")
             )
 
             b_by_item: dict[UUID, list[ItemBucketOut]] = {iid: [] for iid in item_ids}
@@ -523,38 +587,16 @@ class ItemizationService:
                         id=c["id"],
                         item_id=c["gs_item_id"],
                         count_type=c["field_code"],
+                        field_label=c.get("label_snapshot") or c["field_code"],
                         count_value=c["qty"],
                     )
                 )
 
             details: list[ItemCategorisationDetail] = []
             all_conserved = bool(items)
+            version_id = repo.get_profile_version_id(session, gs_id)
             for item in items:
-                profile_rows = repo.resolve_profile_for_product(session, item["product_id"])
-                cat_fields = [
-                    ResolvedBucketField(
-                        field_code=r["code"],
-                        field_label=r["label"],
-                        sort_order=r["sort_order"],
-                    )
-                    for r in profile_rows
-                    if r.get("field_group") == "CATEGORISATION"
-                ]
-                if not cat_fields:
-                    lib_rows = session.execute(
-                        text(
-                            "select code, label, sort_order from public.item_field_library "
-                            "where field_group = 'CATEGORISATION' order by sort_order"
-                        )
-                    ).mappings()
-                    cat_fields = [
-                        ResolvedBucketField(
-                            field_code=r["code"],
-                            field_label=r["label"],
-                            sort_order=r["sort_order"],
-                        )
-                        for r in lib_rows
-                    ]
+                fields = resolve_item_fields(session, item["product_id"], version_id)
 
                 b_list = b_by_item.get(item["id"], [])
                 tot_b = sum(b.qty for b in b_list)
@@ -562,23 +604,25 @@ class ItemizationService:
                 if not is_cons:
                     all_conserved = False
 
-                profile_id = profile_rows[0].get("profile_version_id") if profile_rows else None
-                profile_name = (
-                    f"Profile v{profile_rows[0].get('profile_version_no')}"
-                    if profile_rows
-                    else None
-                )
-
+                sku_code, sku_name = item_display(item)
                 details.append(
                     ItemCategorisationDetail(
                         item_id=item["id"],
+                        line_no=item["line_no"],
                         product_id=item["product_id"],
-                        sku_code=item.get("sku_code") or "",
-                        sku_name=item.get("sku_name") or "",
+                        sku_code=sku_code,
+                        sku_name=sku_name,
+                        category_name=item.get("category_name"),
+                        documented_qty=item["documented_qty"],
                         received_qty=item["received_qty"],
-                        profile_id=profile_id,
-                        profile_name=profile_name,
-                        allowed_buckets=cat_fields,
+                        profile_id=fields.profile_version_id,
+                        profile_name=(
+                            f"Profile v{fields.profile_version_no}"
+                            if fields.profile_version_no is not None
+                            else None
+                        ),
+                        allowed_buckets=fields.buckets,
+                        allowed_counts=fields.counts,
                         buckets=b_list,
                         total_bucket_qty=tot_b,
                         is_conserved=is_cons,
@@ -648,30 +692,19 @@ class ItemizationService:
         if not item or item["gs_id"] != gs_id:
             raise NotFound(f"Item {item_id} not found on goods slip {gs_id}", code="ITEM_NOT_FOUND")
 
-        profile_rows = repo.resolve_profile_for_product(session, item["product_id"])
-        cat_map: dict[str, UUID] = {
-            r["code"]: r["field_id"]
-            for r in profile_rows
-            if r.get("field_group") == "CATEGORISATION"
-        }
-        count_map: dict[str, UUID] = {
-            r["code"]: r["field_id"] for r in profile_rows if r.get("field_group") == "ITEM_COUNT"
-        }
-        if not cat_map or not count_map:
-            lib_rows = session.execute(
-                text("select id, field_group, code from public.item_field_library")
-            ).mappings()
-            for lr in lib_rows:
-                if lr["field_group"] == "CATEGORISATION" and lr["code"] not in cat_map:
-                    cat_map[lr["code"]] = lr["id"]
-                elif lr["field_group"] == "ITEM_COUNT" and lr["code"] not in count_map:
-                    count_map[lr["code"]] = lr["id"]
+        # Same resolution as the categorisation screen: only the offered codes are accepted.
+        fields = resolve_item_fields(
+            session, item["product_id"], repo.get_profile_version_id(session, gs_id)
+        )
+        cat_map = fields.bucket_ids()
+        count_map = fields.count_ids()
 
         for b in payload.buckets:
             field_id = cat_map.get(b.field_code)
             if not field_id:
                 raise ValidationFailed(
-                    f"Unknown categorisation bucket field {b.field_code}", code="INVALID_FIELD"
+                    f"Bucket {b.field_code} is not enabled in this product's item field profile",
+                    code="INVALID_FIELD",
                 )
             repo.upsert_item_bucket(session, item_id, field_id, b.qty, user.id)
 
@@ -679,7 +712,8 @@ class ItemizationService:
             field_id = count_map.get(c.count_type)
             if not field_id:
                 raise ValidationFailed(
-                    f"Unknown count type {c.count_type}", code="INVALID_COUNT_TYPE"
+                    f"Count {c.count_type} is not enabled in this product's item field profile",
+                    code="INVALID_COUNT_TYPE",
                 )
             repo.upsert_item_count(session, item_id, field_id, c.count_value, user.id)
 
@@ -738,8 +772,8 @@ class ItemizationService:
             if b_sum != recv:
                 raise SystemGuardViolation(
                     "G-19",
-                    f"Item {item.get('sku_code', '')} bucket total ({b_sum}) does not "
-                    f"match counted quantity ({recv}) (G-19)",
+                    f"Line {item['line_no']} ({item_display(item)[0]}) bucket total ({b_sum}) "
+                    f"does not match counted quantity ({recv}) (G-19)",
                     details={
                         "item_id": str(item["id"]),
                         "received_qty": recv,
@@ -757,8 +791,8 @@ class ItemizationService:
         items_snapshot = [
             {
                 "item_id": str(i["id"]),
-                "sku_code": i.get("sku_code"),
-                "sku_name": i.get("sku_name"),
+                "sku_code": item_display(i)[0],
+                "sku_name": item_display(i)[1],
                 "documented_qty": i["documented_qty"],
                 "received_qty": i["received_qty"],
                 "buckets": [

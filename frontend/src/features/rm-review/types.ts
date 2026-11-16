@@ -1,4 +1,8 @@
-import type { ResolvedBucketField } from '@/features/itemization/api';
+import type { ItemBucket, ItemCount, ResolvedBucketField } from '@/features/itemization/api';
+
+// Shapes mirror backend/app/modules/rm_review/schemas.py; buckets/counts reuse the itemization
+// shapes (ItemBucketOut / ItemCountOut / ResolvedBucketField).
+export type { ItemBucket, ItemCount };
 
 export interface RmReviewHeader {
   id: string;
@@ -36,22 +40,6 @@ export interface RmReviewCartonVideo {
   created_at: string;
 }
 
-export interface ItemBucket {
-  id?: string;
-  field_id?: string;
-  field_code: string;
-  label_snapshot?: string;
-  qty: number;
-}
-
-export interface ItemCount {
-  id?: string;
-  field_id?: string;
-  field_code: string;
-  label_snapshot?: string;
-  count_value: number;
-}
-
 export interface RmReviewItem {
   item_id: string;
   product_id: string;
@@ -62,6 +50,7 @@ export interface RmReviewItem {
   short_qty: number;
   excess_qty: number;
   allowed_buckets: ResolvedBucketField[];
+  allowed_counts: ResolvedBucketField[];
   buckets: ItemBucket[];
   total_bucket_qty: number;
   is_conserved: boolean;
@@ -111,7 +100,7 @@ export interface RmEditItemPayload {
   documented_qty?: number;
   received_qty?: number;
   buckets: Array<{ field_code: string; qty: number }>;
-  counts?: Array<{ field_code: string; count_value: number }>;
+  counts?: Array<{ count_type: string; count_value: number }>;
   remarks?: string | null;
 }
 

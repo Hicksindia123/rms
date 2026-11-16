@@ -12,6 +12,19 @@ vi.mock('@/features/itemization/api', () => ({
     products: () => Promise.resolve([]),
     categories: () => Promise.resolve([]),
     decide: (...args: unknown[]) => decideFn(...args),
+    // Item categorisation section (rendered next to the whole-GS category): backend shape.
+    getCategorisation: (gsId: string) =>
+      Promise.resolve({
+        goods_slip_id: gsId,
+        gs_no: 'GS/1',
+        status: 'CATEGORISATION',
+        counted_by: null,
+        counted_by_name: null,
+        is_same_user_who_counted: true,
+        can_submit: true,
+        all_conserved: false,
+        items: [],
+      }),
   },
   newIdempotencyKey: () => 'web-test-key',
 }));

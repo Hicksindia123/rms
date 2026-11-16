@@ -102,7 +102,7 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
 
     const cMap: Record<string, number> = {};
     for (const c of item.counts) {
-      cMap[c.field_code] = c.count_value;
+      cMap[c.count_type] = c.count_value;
     }
     setEditCounts(cMap);
 
@@ -121,7 +121,7 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
         qty: editBuckets[b.field_code] ?? 0,
       }));
       const countPayload = Object.entries(editCounts).map(([code, val]) => ({
-        field_code: code,
+        count_type: code,
         count_value: val,
       }));
 
@@ -494,7 +494,7 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
                       gap: '6px',
                     }}
                   >
-                    <span style={{ color: 'var(--color-muted)' }}>{b.label_snapshot || b.field_code}:</span>
+                    <span style={{ color: 'var(--color-muted)' }}>{b.field_label || b.field_code}:</span>
                     <strong>{b.qty}</strong>
                   </div>
                 ))}
@@ -503,16 +503,11 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
               {/* Counts details */}
               {it.counts.length > 0 && (
                 <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: 'var(--color-muted)', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-                  {it.counts.map((c, cIdx) => {
-                    const countType = 'count_type' in c && typeof c.count_type === 'string' ? c.count_type : undefined;
-                    const code = countType || c.field_code || c.id || String(cIdx);
-                    const label = c.label_snapshot || countType || c.field_code || 'Count';
-                    return (
-                      <span key={code}>
-                        {label}: <strong>{c.count_value}</strong>
-                      </span>
-                    );
-                  })}
+                  {it.counts.map((c) => (
+                    <span key={c.count_type}>
+                      {c.field_label || c.count_type}: <strong>{c.count_value}</strong>
+                    </span>
+                  ))}
                 </div>
               )}
             </div>
@@ -624,7 +619,7 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
                 {editingItem.allowed_buckets.map((b) => (
                   <div key={b.field_code} style={{ display: 'flex', flexDirection: 'column' }}>
                     <label style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-muted)' }}>
-                      {b.label}
+                      {b.field_label}
                     </label>
                     <input
                       type="number"
