@@ -1,4 +1,4 @@
-# RMS gap plan — 2026-11-17 (workflow steps 5–10)
+# RMS Gap plan — 2026-11-17 (workflow steps 5–10)
 
 Status: **ANSWERED (2026-11-17) — ready to build, phase by phase.** Business answers Q1–Q17 are recorded
 below and in `docs/DECISIONS.md` (DEC-54 … DEC-58).
