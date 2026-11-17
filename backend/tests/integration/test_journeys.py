@@ -72,8 +72,7 @@ async def test_inward_verifier_journey_order_steps_then_tools(
     body = await _journey(client, make_token(users.create(roles=["INWARD_VERIFIER"])))
     assert _codes(body) == [
         "CARTON_OPENING",
-        "COUNTING",
-        "CATEGORISATION",
+        "COUNTING",  # DEC-53: Counting & Categorisation, one entry
         "INSPECTION",
         "DEPT_RECEIVING",
         "CONTAINER_AUDIT",
@@ -92,11 +91,11 @@ async def test_menu_follows_db_config_not_code(
             """update public.role_journey_steps rjs set sort_order = 1
                  from public.roles r, public.journey_steps s
                 where r.id = rjs.role_id and s.id = rjs.journey_step_id
-                  and r.code = 'INWARD_VERIFIER' and s.code = 'CATEGORISATION'"""
+                  and r.code = 'INWARD_VERIFIER' and s.code = 'INSPECTION'"""
         )
     )
     body = await _journey(client, make_token(users.create(roles=["INWARD_VERIFIER"])))
-    assert _codes(body)[:3] == ["CATEGORISATION", "CARTON_OPENING", "COUNTING"]
+    assert _codes(body)[:3] == ["INSPECTION", "CARTON_OPENING", "COUNTING"]
 
 
 async def test_multi_role_user_gets_the_union_without_duplicates(
@@ -131,11 +130,12 @@ async def test_counts_and_next_gs_follow_the_gs_through_the_steps(
     item = next(i for i in queue["items"] if i["gs_id"] == gs_id)
     assert item["target_id"] == gs_id and item["since"] is not None
 
+    # DEC-53: a slip sent back to CATEGORISATION is listed under Counting & Categorisation.
     force_gs_status(db_conn, gs_id, "CATEGORISATION")
     moved = await _journey(client, iv)
     assert _entry(moved, "CARTON_OPENING")["count"] == _entry(before, "CARTON_OPENING")["count"]
-    assert _entry(moved, "CATEGORISATION")["count"] == _entry(before, "CATEGORISATION")["count"] + 1
-    cat = (await client.get("/api/v1/me/journey/CATEGORISATION", headers=_auth(iv))).json()
+    assert _entry(moved, "COUNTING")["count"] == _entry(before, "COUNTING")["count"] + 1
+    cat = (await client.get("/api/v1/me/journey/COUNTING", headers=_auth(iv))).json()
     assert gs_id in [i["gs_id"] for i in cat["items"]]
 
 

@@ -28,11 +28,12 @@ _QUEUES: dict[str, str] = {
         select {_GS_COLS}, g.id as target_id, {_SINCE_STATUS} as since
           from public.goods_slips g {_GS_JOINS}
          where g.status in ('GATE_CREATED', 'UNBOXING')""",  # noqa: S608
-    # AMD-08: Counting = ITEMIZATION; Categorisation = CATEGORISATION (itemization module).
+    # DEC-53: Counting & Categorisation are one step: ITEMIZATION plus slips the RM sent back to
+    # CATEGORISATION (split-only). The CATEGORISATION queue is kept for any role still mapped.
     "COUNTING": f"""
         select {_GS_COLS}, g.id as target_id, {_SINCE_STATUS} as since
           from public.goods_slips g {_GS_JOINS}
-         where g.status = 'ITEMIZATION'""",  # noqa: S608
+         where g.status in ('ITEMIZATION', 'CATEGORISATION')""",  # noqa: S608
     "CATEGORISATION": f"""
         select {_GS_COLS}, g.id as target_id, {_SINCE_STATUS} as since
           from public.goods_slips g {_GS_JOINS}

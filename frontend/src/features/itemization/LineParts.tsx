@@ -12,6 +12,7 @@ import {
   type CategoryLookup,
   type ItemLine,
   type LineInput,
+  type ProductFields,
   type ProductLookup,
 } from './api';
 
@@ -132,12 +133,50 @@ export function ItemLineCard({ item, actions }: { item: ItemLine; actions?: Reac
           ) : null}
         </div>
       </dl>
+      <LineSplit item={item} />
       {item.remarks ? <p className="item-line__remarks">{item.remarks}</p> : null}
     </li>
   );
 }
 
-/** Add / edit a line: product search, two big steppers, live badges, remarks. */
+/** DEC-53: the condition split (and item counts) recorded with a line, as compact chips. */
+export function LineSplit({ item }: { item: ItemLine }) {
+  const buckets = (item.buckets ?? []).filter((b) => b.qty > 0);
+  const counts = item.counts ?? [];
+  if (buckets.length === 0 && counts.length === 0) {
+    return item.received_qty > 0 ? (
+      <div className="item-line__split">
+        <Badge variant="warning">Condition split not entered</Badge>
+      </div>
+    ) : null;
+  }
+  return (
+    <div className="item-line__split" data-testid="line-split">
+      {buckets.map((b) => (
+        <Badge key={b.id} variant="neutral">
+          {b.field_label ?? b.field_code}: {b.qty}
+        </Badge>
+      ))}
+      {counts.map((c) => (
+        <Badge key={c.id} variant="info">
+          {c.field_label ?? c.count_type}: {c.count_value}
+        </Badge>
+      ))}
+      {item.is_balanced === false ? (
+        <Badge variant="danger">
+          Split {item.bucket_total ?? 0} ≠ physical {item.received_qty}
+        </Badge>
+      ) : null}
+    </div>
+  );
+}
+
+type QtyMap = Record<string, number>;
+
+const sumOf = (m: QtyMap) => Object.values(m).reduce((a, b) => a + b, 0);
+
+/** Add / edit a line: product search, two big steppers, live badges, the condition split
+ * (DEC-53: Counting & Categorisation in one step; split total = physical qty, G-19), remarks. */
 export function LineEditor({
   gsId,
   initial,
@@ -155,6 +194,16 @@ export function LineEditor({
   const [documented, setDocumented] = useState(initial?.documented_qty ?? 0);
   const [received, setReceived] = useState(initial?.received_qty ?? 0);
   const [remarks, setRemarks] = useState(initial?.remarks ?? '');
+  // DEC-53: the product's resolved buckets / counts and the quantities entered for them.
+  const [fieldsState, setFieldsState] = useState<{
+    productId: string;
+    reload: number;
+    data: ProductFields | null;
+    error: ApiError | null;
+  } | null>(null);
+  const [fieldsReload, setFieldsReload] = useState(0);
+  const [split, setSplit] = useState<QtyMap>({});
+  const [counts, setCounts] = useState<QtyMap>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const idPrefix = initial ? `line-${initial.id}` : 'line-new';
@@ -181,6 +230,56 @@ export function LineEditor({
     };
   }, []);
 
+  // The saved line (edit mode) seeds the split once, at mount: a parent re-render must not wipe
+  // what the user is typing.
+  const [seed] = useState(initial);
+  useEffect(() => {
+    if (!productId) return;
+    let live = true;
+    itemizationApi
+      .productFields(productId)
+      .then((res) => {
+        if (!live) return;
+        const same = seed?.product_id === productId;
+        const nextSplit: QtyMap = {};
+        for (const b of res.allowed_buckets) {
+          nextSplit[b.field_code] = same
+            ? (seed.buckets?.find((x) => x.field_code === b.field_code)?.qty ?? 0)
+            : 0;
+        }
+        const nextCounts: QtyMap = {};
+        for (const c of res.allowed_counts) {
+          nextCounts[c.field_code] = same
+            ? (seed.counts?.find((x) => x.count_type === c.field_code)?.count_value ?? 0)
+            : 0;
+        }
+        setSplit(nextSplit);
+        setCounts(nextCounts);
+        setFieldsState({ productId, reload: fieldsReload, data: res, error: null });
+      })
+      .catch((err: unknown) => {
+        console.error('Condition fields could not be loaded', err);
+        if (live) {
+          setFieldsState({ productId, reload: fieldsReload, data: null, error: toApiError(err) });
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, [productId, fieldsReload, seed]);
+  // Only a response for the current product (and retry) counts; anything else is "loading".
+  const current =
+    fieldsState?.productId === productId && fieldsState.reload === fieldsReload
+      ? fieldsState
+      : null;
+  const fields = current?.data ?? null;
+  const fieldsError = current?.error ?? null;
+
+  const splitTotal = sumOf(split);
+  const needsSplit = received > 0;
+  const noBuckets = fields !== null && fields.allowed_buckets.length === 0;
+  const splitOk = !needsSplit || (fields !== null && !noBuckets && splitTotal === received);
+
   const loadOptions = useCallback(
     async (q: string): Promise<ComboboxOption[]> => {
       const rows = await itemizationApi.products(q, { categoryId, subcategoryId });
@@ -202,6 +301,11 @@ export function LineEditor({
       documented_qty: documented,
       received_qty: received,
       remarks: remarks.trim() || null,
+      buckets: Object.entries(split).map(([field_code, qty]) => ({ field_code, qty })),
+      counts: Object.entries(counts).map(([count_type, count_value]) => ({
+        count_type,
+        count_value,
+      })),
     };
     try {
       if (initial) await itemizationApi.updateItem(gsId, initial.id, body);
@@ -212,6 +316,8 @@ export function LineEditor({
         setDocumented(0);
         setReceived(0);
         setRemarks('');
+        setSplit({});
+        setCounts({});
       }
       onSaved();
     } catch (err) {
@@ -286,6 +392,75 @@ export function LineEditor({
       <div aria-live="polite" style={{ margin: '0.5rem 0' }}>
         <QtyBadges documented={documented} received={received} />
       </div>
+      {productId ? (
+        <fieldset className="line-split" data-testid="line-split-editor">
+          <legend className="line-split__legend">Condition split</legend>
+          {fieldsError ? (
+            <div role="alert" className="form-control__error">
+              Condition fields could not be loaded: {fieldsError.message}
+              {fieldsError.requestId ? ` (Request ID: ${fieldsError.requestId})` : ''}{' '}
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setFieldsReload((n) => n + 1);
+                }}
+              >
+                Retry
+              </Button>
+            </div>
+          ) : fields === null ? (
+            <p className="page__subtitle">Loading condition fields…</p>
+          ) : noBuckets ? (
+            <p role="alert" className="form-control__error">
+              No condition buckets are configured for this product. Ask an admin to enable them in
+              Item Field Profiles.
+            </p>
+          ) : (
+            <>
+              <p className="line-split__hint">
+                Split the physically received quantity by the condition each piece arrived in.
+              </p>
+              <div className="line-split__grid">
+                {fields.allowed_buckets.map((b) => (
+                  <QtyStepper
+                    key={b.field_code}
+                    id={`${idPrefix}-bucket-${b.field_code}`}
+                    label={b.field_label}
+                    value={split[b.field_code] ?? 0}
+                    onChange={(v) => {
+                      setSplit((m) => ({ ...m, [b.field_code]: v }));
+                    }}
+                  />
+                ))}
+              </div>
+              <div aria-live="polite" style={{ margin: '0.5rem 0' }}>
+                <Badge
+                  variant={splitTotal === received ? 'success' : 'danger'}
+                  data-testid="split-total"
+                >
+                  Split {splitTotal} / Physical {received}
+                </Badge>
+              </div>
+              {fields.allowed_counts.length > 0 ? (
+                <div className="line-split__grid">
+                  {fields.allowed_counts.map((c) => (
+                    <QtyStepper
+                      key={c.field_code}
+                      id={`${idPrefix}-count-${c.field_code}`}
+                      label={c.field_label}
+                      value={counts[c.field_code] ?? 0}
+                      onChange={(v) => {
+                        setCounts((m) => ({ ...m, [c.field_code]: v }));
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : null}
+            </>
+          )}
+        </fieldset>
+      ) : null}
       <label className="form-label" htmlFor={`${idPrefix}-remarks`}>
         Remarks (optional)
       </label>
@@ -313,7 +488,7 @@ export function LineEditor({
           type="button"
           variant="primary"
           isLoading={busy}
-          disabled={!productId || (documented === 0 && received === 0)}
+          disabled={!productId || (documented === 0 && received === 0) || !splitOk}
           onClick={() => {
             void save();
           }}

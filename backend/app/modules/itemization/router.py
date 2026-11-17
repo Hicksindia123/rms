@@ -22,6 +22,7 @@ from app.modules.itemization.schemas import (
     CorrectionOut,
     CsrApprovalCard,
     CsrDecisionIn,
+    ItemFieldsOut,
     ItemIn,
     ItemizationStateOut,
     ItemOut,
@@ -32,6 +33,7 @@ from app.modules.itemization.schemas import (
     ReopenIn,
     SaveItemCategorisationIn,
     SubmitCategorisationIn,
+    SubmitItemizationIn,
 )
 from app.modules.itemization.service import ItemizationService
 
@@ -77,6 +79,29 @@ def lookup_products(
 def lookup_categories(user: ViewUser, service: ServiceDep) -> list[CategoryLookup]:
     """Category -> Sub-Category filters for the counting product search (AMD-07)."""
     return service.categories(user)
+
+
+@router.get("/itemization/lookups/products/{product_id}/fields", response_model=ItemFieldsOut)
+def lookup_product_fields(product_id: UUID, user: ViewUser, service: ServiceDep) -> ItemFieldsOut:
+    """DEC-53: the condition buckets / item counts the line editor offers for a product."""
+    return service.product_fields(user, product_id)
+
+
+@router.post(
+    "/gs/{gs_id}/itemization/submit",
+    responses={409: {"description": "Not at Counting & Categorisation / idempotency conflict"}},
+)
+def submit_itemization(
+    gs_id: UUID,
+    payload: SubmitItemizationIn,
+    user: CreateUser,
+    perms: EffectivePermissionsDep,
+    idem: IdempotencyKeyDep,
+    service: ServiceDep,
+) -> JSONResponse:
+    """DEC-53: Counting & Categorisation -> RM_REVIEW in one transaction (G-01, G-19,
+    Idempotency-Key G-16)."""
+    return service.submit_itemization(user, perms, gs_id, payload, idem).to_response()
 
 
 @router.post(

@@ -38,12 +38,62 @@ class CategoryLookup(BaseModel):
     subcategories: list[SubcategoryLookup]
 
 
+class ItemBucketIn(BaseModel):
+    field_code: str
+    qty: int = Field(default=0, ge=0)
+
+
+class ItemBucketOut(BaseModel):
+    id: UUID
+    item_id: UUID
+    field_code: str
+    field_label: str | None = None
+    qty: int
+
+
+class ItemCountIn(BaseModel):
+    count_type: str  # PACKAGING, CONTAINER, USER_MANUAL
+    count_value: int = Field(default=0, ge=0)
+
+
+class ItemCountOut(BaseModel):
+    id: UUID
+    item_id: UUID
+    count_type: str  # the ITEM_COUNT field code (PACKAGING, CONTAINER, USER_MANUAL …)
+    field_label: str | None = None  # G-18 label snapshot
+    count_value: int
+
+
+class ResolvedBucketField(BaseModel):
+    """One field of the product's resolved item-field profile (Phase 4), used for both the
+    CATEGORISATION buckets and the ITEM_COUNT counts. Codes are stable; labels come from config."""
+
+    field_id: UUID
+    field_code: str
+    field_label: str
+    sort_order: int
+
+
+class ItemFieldsOut(BaseModel):
+    """DEC-53: the condition-split buckets and item counts a product may be recorded with, shown
+    in the Counting & Categorisation line editor before the line exists (current profile)."""
+
+    product_id: UUID
+    allowed_buckets: list[ResolvedBucketField]
+    allowed_counts: list[ResolvedBucketField]
+
+
 class ItemIn(BaseModel):
     product_id: UUID
     # Change plan Phase 3: the documented qty is optional at counting (0 = no document qty).
     documented_qty: int = Field(default=0, ge=0, le=1_000_000, description="As per document")
     received_qty: int = Field(ge=0, le=1_000_000, description="Physically received")
     remarks: str | None = Field(default=None, max_length=1000)
+    # DEC-53 (Counting & Categorisation merged): the condition split of the physical qty and the
+    # item counts, recorded with the line. When sent, the bucket total must equal received_qty
+    # (G-19 at line level). None = leave the split unchanged.
+    buckets: list[ItemBucketIn] | None = None
+    counts: list[ItemCountIn] | None = None
 
 
 class ItemPatchIn(BaseModel):
@@ -51,6 +101,9 @@ class ItemPatchIn(BaseModel):
     documented_qty: int | None = Field(default=None, ge=0, le=1_000_000)
     received_qty: int | None = Field(default=None, ge=0, le=1_000_000)
     remarks: str | None = Field(default=None, max_length=1000)
+    # DEC-53: replaces the whole split when sent (bucket total must equal the line's received qty).
+    buckets: list[ItemBucketIn] | None = None
+    counts: list[ItemCountIn] | None = None
 
 
 class ItemOut(BaseModel):
@@ -72,6 +125,11 @@ class ItemOut(BaseModel):
     remarks: str | None
     lot_id: UUID | None = None
     stocked_qty: int | None = None
+    # DEC-53: the condition split and item counts recorded with the line (G-18 label snapshots).
+    buckets: list[ItemBucketOut] = Field(default_factory=list)
+    counts: list[ItemCountOut] = Field(default_factory=list)
+    bucket_total: int = 0
+    is_balanced: bool = False  # G-19: bucket_total == received_qty
 
 
 class CategoryOption(BaseModel):
@@ -225,42 +283,6 @@ class ItemizationGs(BaseModel):
     counted_by: UUID | None = None
 
 
-class ItemBucketIn(BaseModel):
-    field_code: str
-    qty: int = Field(default=0, ge=0)
-
-
-class ItemBucketOut(BaseModel):
-    id: UUID
-    item_id: UUID
-    field_code: str
-    field_label: str | None = None
-    qty: int
-
-
-class ItemCountIn(BaseModel):
-    count_type: str  # PACKAGING, CONTAINER, USER_MANUAL
-    count_value: int = Field(default=0, ge=0)
-
-
-class ItemCountOut(BaseModel):
-    id: UUID
-    item_id: UUID
-    count_type: str  # the ITEM_COUNT field code (PACKAGING, CONTAINER, USER_MANUAL …)
-    field_label: str | None = None  # G-18 label snapshot
-    count_value: int
-
-
-class ResolvedBucketField(BaseModel):
-    """One field of the product's resolved item-field profile (Phase 4), used for both the
-    CATEGORISATION buckets and the ITEM_COUNT counts. Codes are stable; labels come from config."""
-
-    field_id: UUID
-    field_code: str
-    field_label: str
-    sort_order: int
-
-
 class ItemCategorisationDetail(BaseModel):
     item_id: UUID
     line_no: int
@@ -300,6 +322,12 @@ class SaveItemCategorisationIn(BaseModel):
     counts: list[ItemCountIn] = Field(default_factory=list)
 
 
+class SubmitItemizationIn(BaseModel):
+    """DEC-53: one submit for Counting & Categorisation -> RM_REVIEW."""
+
+    remarks: str | None = Field(default=None, max_length=2000)
+
+
 class SubmitCategorisationIn(BaseModel):
     category_code: str = Field(default="REGULAR_RETURN")
     remarks: str | None = None
@@ -317,6 +345,9 @@ class ItemizationPermissions(BaseModel):
     can_edit_lines: bool  # Counting (status ITEMIZATION)
     can_submit_counting: bool  # Counting -> CATEGORISATION (AMD-08)
     can_categorize: bool  # status CATEGORISATION
+    # DEC-53: one "Submit to RM Review" (ITEMIZATION or, after a send-back, CATEGORISATION) when
+    # every line's split balances (G-19).
+    can_submit_to_rm: bool = False
     can_decide: bool
     can_reopen: bool
     can_request_correction: bool

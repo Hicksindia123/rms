@@ -44,6 +44,43 @@ export interface ItemLine {
   remarks: string | null;
   lot_id: string | null;
   stocked_qty: number | null;
+  /** DEC-53: the condition split recorded with the line (G-18 label snapshots). */
+  buckets?: LineBucket[];
+  counts?: LineCount[];
+  bucket_total?: number;
+  /** G-19: bucket_total == received_qty. */
+  is_balanced?: boolean;
+}
+
+export interface LineBucket {
+  id: string;
+  item_id: string;
+  field_code: string;
+  field_label?: string | null;
+  qty: number;
+}
+
+export interface LineCount {
+  id: string;
+  item_id: string;
+  count_type: string;
+  field_label?: string | null;
+  count_value: number;
+}
+
+/** A field of the product's resolved item-field profile (bucket or count). Codes are stable. */
+export interface ProductField {
+  field_id: string;
+  field_code: string;
+  field_label: string;
+  sort_order: number;
+}
+
+/** DEC-53: GET /itemization/lookups/products/{id}/fields. */
+export interface ProductFields {
+  product_id: string;
+  allowed_buckets: ProductField[];
+  allowed_counts: ProductField[];
 }
 
 /** An option of RETURN_CATEGORY / CSR_APPROVAL as published in the step form (labels from config). */
@@ -182,6 +219,8 @@ export interface ItemizationState {
     /** AMD-08: Counting -> CATEGORISATION. */
     can_submit_counting: boolean;
     can_categorize: boolean;
+    /** DEC-53: one "Submit to RM Review" once every line's split balances (G-19). */
+    can_submit_to_rm?: boolean;
     can_decide: boolean;
     can_reopen: boolean;
     can_request_correction: boolean;
@@ -211,6 +250,9 @@ export interface LineInput {
   documented_qty: number;
   received_qty: number;
   remarks?: string | null;
+  /** DEC-53: condition split of the physical qty (total must equal received_qty, G-19). */
+  buckets?: Array<{ field_code: string; qty: number }>;
+  counts?: Array<{ count_type: string; count_value: number }>;
 }
 
 const gs = (id: string) => `/gs/${encodeURIComponent(id)}`;
@@ -227,6 +269,17 @@ export const itemizationApi = {
       },
     }),
   categories: () => apiRequest<CategoryLookup[]>('/itemization/lookups/categories'),
+  productFields: (productId: string) =>
+    apiRequest<ProductFields>(
+      `/itemization/lookups/products/${encodeURIComponent(productId)}/fields`,
+    ),
+  /** DEC-53: Counting & Categorisation -> RM Review in one transaction. */
+  submitItemization: (gsId: string, remarks: string | null, idempotencyKey: string) =>
+    apiRequest<{ goods_slip_id: string; status: string }>(`${gs(gsId)}/itemization/submit`, {
+      method: 'POST',
+      body: { remarks },
+      idempotencyKey,
+    }),
   submitCounting: (gsId: string, idempotencyKey: string) =>
     apiRequest<ItemizationState>(`${gs(gsId)}/counting/submit`, {
       method: 'POST',

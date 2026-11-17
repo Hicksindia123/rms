@@ -36,7 +36,11 @@ create temp table _fix_item (id uuid, product_id uuid);
 with ins as (
   insert into public.gs_items (gs_id, line_no, product_id, category_id, documented_qty, received_qty)
   select (select id from _fix_gs), 1, p.id, p.category_id, 10, 10
-    from public.products p limit 1
+    from public.products p
+   -- a product whose profile has a bucket (the full product master includes some without)
+   where exists (select 1 from rms_private.resolve_item_field_profile(p.id) r
+                  where r.field_group = 'CATEGORISATION')
+   limit 1
   returning id, product_id
 )
 insert into _fix_item (id, product_id) select id, product_id from ins;
@@ -113,8 +117,8 @@ select lives_ok(
 -- 11. Frozen outside CATEGORISATION / RM_REVIEW
 select throws_like(
   $$update public.gs_item_buckets set qty = 9 where gs_item_id = (select id from _fix_item)$$,
-  '%G-18: item buckets%while the GS is in CATEGORISATION or RM_REVIEW%',
-  'G-18: buckets frozen outside CATEGORISATION / RM_REVIEW'
+  '%G-18: item buckets%while the GS is in ITEMIZATION%CATEGORISATION or RM_REVIEW%',
+  'G-18: buckets frozen outside ITEMIZATION / CATEGORISATION / RM_REVIEW (DEC-53)'
 );
 
 -- 12. RM send back to CATEGORISATION
@@ -133,7 +137,10 @@ create temp table _fix_item2 (id uuid, product_id uuid);
 with ins as (
   insert into public.gs_items (gs_id, line_no, product_id, category_id, documented_qty, received_qty)
   select (select id from _fix_gs2), 1, p.id, p.category_id, 5, 5
-    from public.products p limit 1
+    from public.products p
+   where exists (select 1 from rms_private.resolve_item_field_profile(p.id) r
+                  where r.field_group = 'CATEGORISATION')
+   limit 1
   returning id, product_id
 )
 insert into _fix_item2 (id, product_id) select id, product_id from ins;

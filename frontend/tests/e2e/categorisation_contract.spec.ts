@@ -60,13 +60,15 @@ async function countedLines(tag: string, lines: Array<[string, number, number]>)
   return { gs, itemIds };
 }
 
-/** Submit the count in the UI and return the categorisation payload the screen received. */
+/** Put the GS in CATEGORISATION (as after an RM send-back, DEC-53: the screen's own submit goes
+ * straight to RM Review) and return the categorisation payload the screen received. */
 async function submitCountInUi(page: Page, gsId: string): Promise<CatState> {
-  await page.getByRole('button', { name: 'Submit count' }).click();
+  await expect(page.getByRole('button', { name: /^Submit to / })).toBeVisible();
+  await api(USERS.aman, 'POST', `/gs/${gsId}/counting/submit`, {}, true);
   const catResponse = page.waitForResponse(
     (r) => r.url().endsWith(`/gs/${gsId}/categorisation`) && r.request().method() === 'GET',
   );
-  await page.getByRole('button', { name: /Confirm submit/ }).click();
+  await page.reload();
   const res = await catResponse;
   expect(res.status()).toBe(200);
   return (await res.json()) as CatState;
@@ -85,7 +87,12 @@ function expectContract(state: CatState): void {
     expect(Array.isArray(it.allowed_buckets), 'allowed_buckets is an array').toBe(true);
     expect(Array.isArray(it.allowed_counts), 'allowed_counts is an array').toBe(true);
     for (const f of [...it.allowed_buckets, ...it.allowed_counts]) {
-      expect(Object.keys(f).sort()).toEqual(['field_code', 'field_id', 'field_label', 'sort_order']);
+      expect(Object.keys(f).sort()).toEqual([
+        'field_code',
+        'field_id',
+        'field_label',
+        'sort_order',
+      ]);
     }
   }
 }
@@ -124,9 +131,9 @@ test.describe('Counting → Categorisation (allowed_counts contract)', () => {
     expectContract(state);
     await expectCategorisationLoaded(page);
     // Both whole-GS options are still offered alongside.
-    await expect(page.locator('.category-option', { hasText: 'Complete Sales Return' })).toContainText(
-      'Requires approval',
-    );
+    await expect(
+      page.locator('.category-option', { hasText: 'Complete Sales Return' }),
+    ).toContainText('Requires approval');
     await expect(page.locator('.category-option', { hasText: 'Replacement Only' })).toBeVisible();
 
     const item = state.items[0];
@@ -134,7 +141,9 @@ test.describe('Counting → Categorisation (allowed_counts contract)', () => {
     const codes = item?.allowed_buckets.map((b) => b.field_code) ?? [];
     expect(codes.length).toBeGreaterThan(1);
     for (const b of item?.allowed_buckets ?? []) {
-      await expect(page.locator(`label[for="b-${itemId}-${b.field_code}"]`)).toHaveText(b.field_label);
+      await expect(page.locator(`label[for="b-${itemId}-${b.field_code}"]`)).toHaveText(
+        b.field_label,
+      );
     }
     await expect(page.getByText(/SKU: ITM-00180/)).toBeVisible();
     await expect(page.getByText(/ENCLOSED SCALE OVAL THERMOMETER/).first()).toBeVisible();
@@ -152,7 +161,9 @@ test.describe('Counting → Categorisation (allowed_counts contract)', () => {
 
     const rm = await asUser(browser, USERS.rm, `/gs/${gs.id}/rm-review`);
     await expect(rm.page.getByText(/ENCLOSED SCALE OVAL THERMOMETER/).first()).toBeVisible();
-    await expect(rm.page.getByText(`${item?.allowed_buckets[0]?.field_label ?? ''}:`)).toBeVisible();
+    await expect(
+      rm.page.getByText(`${item?.allowed_buckets[0]?.field_label ?? ''}:`),
+    ).toBeVisible();
     await expectNoHorizontalOverflow(rm.page);
     expect(rm.errors, rm.errors.join('\n')).toEqual([]);
     await rm.context.close();
@@ -176,7 +187,9 @@ test.describe('Counting → Categorisation (allowed_counts contract)', () => {
       await fillBucket(page, itemId, code, doc);
       const diff = doc - recv;
       await expect(
-        page.getByText(`Mismatch: ${String(doc)}/${String(recv)} (${diff > 0 ? '+' : ''}${String(diff)})`),
+        page.getByText(
+          `Mismatch: ${String(doc)}/${String(recv)} (${diff > 0 ? '+' : ''}${String(diff)})`,
+        ),
       ).toBeVisible();
       await saveLine(page, 1, gs.id);
       await expect(page.getByRole('button', { name: /Submit Categorisation/ })).toBeDisabled();
@@ -287,7 +300,9 @@ test.describe('Counting → Categorisation (allowed_counts contract)', () => {
     ['Complete Sales Return', 'CSR_APPROVAL_PENDING'],
     ['Replacement Only', 'INSPECTION'],
   ] as const) {
-    test(`whole-GS option "${option}" still works after counting → ${status}`, async ({ browser }) => {
+    test(`whole-GS option "${option}" still works after counting → ${status}`, async ({
+      browser,
+    }) => {
       const { gs } = await countedLines('cat-opt', [[EO, 6, 6]]);
       const aman = await asUser(browser, USERS.aman, `/gs/${gs.id}/itemization`);
       const { page } = aman;

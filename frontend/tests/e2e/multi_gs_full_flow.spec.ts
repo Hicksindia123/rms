@@ -496,4 +496,62 @@ test.describe('Multi-GS full flow on the thermometer catalogue (DEC-51)', () => 
     const { alert } = await accountsAlertDispatch(gs.id, acSlipId, tag, 5);
     expect(alert.body).toContain('ECO XL');
   });
+
+  test('GS-6 (DEC-53): Counting & Categorisation in one step on a 360px phone -> RM Review', async ({
+    browser,
+  }) => {
+    const tag = `M6-${Date.now().toString().slice(-6)}`;
+    await ensureFieldProfiles();
+    const dmt102 = await product('ITM-00003');
+
+    const gs = await createOfflineGs({ tag, cartonCount: 1 });
+    await openCartons(gs.id, 1, `INV-${tag}`, USERS.aman);
+
+    const page = await openPage(browser, USERS.aman, `/gs/${gs.id}/itemization`);
+    await page.setViewportSize({ width: 360, height: 800 });
+    const editor = page.getByTestId('line-editor').last();
+    await editor.locator('#line-new-product input').fill(dmt102.code);
+    await page.getByRole('option', { name: dmt102.name }).first().click();
+
+    // 4 as per document, 3 physically received; the split is entered on the same line.
+    await editor.getByRole('spinbutton', { name: /As per document/ }).fill('4');
+    await editor.getByRole('spinbutton', { name: 'Physically received' }).fill('3');
+    const splitBox = editor.getByTestId('line-split-editor');
+    await expect(splitBox).toBeVisible();
+    const add = editor.getByRole('button', { name: 'Add line' });
+    await expect(editor.getByTestId('split-total')).toHaveText('Split 0 / Physical 3');
+    await expect(add).toBeDisabled();
+    const buckets = splitBox.getByRole('spinbutton');
+    await buckets.nth(0).fill('2');
+    await buckets.nth(1).fill('1');
+    await expect(editor.getByTestId('split-total')).toHaveText('Split 3 / Physical 3');
+    await expectNoHorizontalOverflow(page);
+    await add.click();
+
+    const line = page.getByTestId('item-line').first();
+    await expect(line).toContainText('Short 1');
+    await expect(line.getByTestId('line-split')).toBeVisible();
+
+    // One submit: ITEMIZATION -> CATEGORISATION -> RM_REVIEW in one transaction.
+    await page.getByRole('button', { name: /^Submit to / }).click();
+    await page.getByRole('button', { name: /Confirm submit/ }).click();
+    await expect
+      .poll(
+        async () =>
+          (await api<{ goods_slip: { status: string } }>(USERS.rm, 'GET', `/gs/${gs.id}`))
+            .goods_slip.status,
+        { timeout: 15_000 },
+      )
+      .toBe('RM_REVIEW');
+    await expect(page.getByRole('status').filter({ hasText: /Submitted to/ })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+
+    // The RM sees the split recorded at counting.
+    const review = await api<{ items: Array<{ total_bucket_qty: number }> }>(
+      USERS.rm,
+      'GET',
+      `/gs/${gs.id}/rm-review`,
+    );
+    expect(review.items[0]?.total_bucket_qty).toBe(3);
+  });
 });

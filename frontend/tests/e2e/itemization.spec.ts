@@ -172,6 +172,12 @@ async function addLine(page: Page, search: string, documented: number, received:
   // One tap on the big "+" stepper, then back with "−" (touch targets work).
   await editor.getByRole('button', { name: 'Increase Physically received' }).click();
   await editor.getByRole('button', { name: 'Decrease Physically received' }).click();
+  // DEC-53: the condition split is entered with the line; put every piece in the first bucket.
+  const split = editor.getByTestId('line-split-editor');
+  await split.getByRole('spinbutton').first().fill(String(received));
+  await expect(editor.getByTestId('split-total')).toHaveText(
+    `Split ${String(received)} / Physical ${String(received)}`,
+  );
   await editor.getByRole('button', { name: 'Add line' }).click();
 }
 
@@ -215,9 +221,16 @@ test.describe('Itemisation & CSR approval (P2-04)', () => {
     await expect(page.getByTestId('item-line').nth(1)).toContainText('Short 1');
     await noHorizontalOverflow(page);
 
-    // AMD-08: the count is a draft until submitted; then the category is chosen.
-    await page.getByRole('button', { name: 'Submit count' }).click();
-    await page.getByRole('button', { name: /Confirm submit/ }).click();
+    // DEC-53: the screen's one submit goes straight to RM Review. The earlier whole-GS CSR / RO
+    // path is reached here through the counting-submit API (kept for compatibility).
+    await expect(page.getByRole('button', { name: /^Submit to / })).toBeEnabled();
+    await call(
+      await accessToken('aman@rms.local'),
+      `/gs/${gs.id}/counting/submit`,
+      {},
+      `count-${crypto.randomUUID()}`,
+    );
+    await page.reload();
 
     // Category explanations come from the option set; CSR "Requires approval".
     const csr = page.locator('.category-option', { hasText: 'Complete Sales Return' });

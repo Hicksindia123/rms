@@ -10,6 +10,10 @@ DEC-27, DEC-28).
   ITEMIZATION (labelled Counting); submit-counting (Idempotency-Key) needs >= 1 line and moves the
   GS to CATEGORISATION on the same S1_ITEMIZE step (lines frozen from then on, gs_items_guard; the
   G-03 trigger only lets ITEMIZATION go to CATEGORISATION).
+* DEC-53 (Counting & Categorisation merged): a line is saved with its condition split (buckets)
+  and item counts while the GS is ITEMIZATION; the bucket total must equal the physical qty
+  (G-19 at line level). submit-itemization runs ITEMIZATION -> CATEGORISATION -> RM_REVIEW in one
+  transaction (or CATEGORISATION -> RM_REVIEW after an RM send-back, split-only).
 * categorize (Idempotency-Key, status CATEGORISATION): one category per GS (BR-07, DEC-06).
   Per line with received > 0, in the same transaction: a FINISHED_GOOD / AS_RECEIVED lot and
   an INWARD movement into INWARD_STAGING with the deterministic key `{gs_item_id}:inward`
@@ -66,9 +70,12 @@ from app.modules.itemization.schemas import (
     CsrApprovalCard,
     CsrDecisionIn,
     DecisionOut,
+    ItemBucketIn,
     ItemBucketOut,
     ItemCategorisationDetail,
+    ItemCountIn,
     ItemCountOut,
+    ItemFieldsOut,
     ItemIn,
     ItemizationGs,
     ItemizationPermissions,
@@ -84,6 +91,7 @@ from app.modules.itemization.schemas import (
     ResolvedBucketField,
     SaveItemCategorisationIn,
     SubmitCategorisationIn,
+    SubmitItemizationIn,
     TransferOut,
     option_out,
 )
@@ -286,6 +294,18 @@ class ItemizationService:
                 for r in repo.product_categories_with_subcategories(session)
             ]
 
+    def product_fields(self, user: CurrentUser, product_id: UUID) -> ItemFieldsOut:
+        """DEC-53: buckets / counts the line editor offers for a product (current profile; the
+        GS is stamped only when it leaves CATEGORISATION, so this is what the save accepts)."""
+        with self._uow.transaction(user.id) as session:
+            self._product(session, product_id)
+            fields = resolve_item_fields(session, product_id, None)
+            return ItemFieldsOut(
+                product_id=product_id,
+                allowed_buckets=fields.buckets,
+                allowed_counts=fields.counts,
+            )
+
     def pending_csr(
         self, user: CurrentUser, perms: EffectivePermissions, limit: int
     ) -> list[CsrApprovalCard]:
@@ -347,6 +367,11 @@ class ItemizationService:
                 remarks=_clean(payload.remarks),
                 by=user.id,
             )
+            if payload.buckets is not None or payload.counts is not None:
+                item = self._own_item(session, gs_id, item_id)
+                self._write_line_split(
+                    session, gs_id, item, payload.buckets, payload.counts, user.id
+                )
             return self._item_out(session, item_id)
 
     def update_item(
@@ -381,7 +406,84 @@ class ItemizationService:
                 fields.get("received_qty", item["received_qty"]),
             )
             repo.update_item(session, item_id, fields)
+            if "product_id" in fields:
+                # DEC-53: the split belongs to the old product's profile; it is re-entered.
+                repo.delete_item_buckets(session, item_id)
+                repo.delete_item_counts(session, item_id)
+            if payload.buckets is not None or payload.counts is not None:
+                item = self._own_item(session, gs_id, item_id)
+                self._write_line_split(
+                    session, gs_id, item, payload.buckets, payload.counts, user.id
+                )
             return self._item_out(session, item_id)
+
+    def _write_line_split(
+        self,
+        session: Session,
+        gs_id: UUID,
+        item: dict[str, Any],
+        buckets: list[ItemBucketIn] | None,
+        counts: list[ItemCountIn] | None,
+        by: UUID,
+    ) -> None:
+        """DEC-53: replace a line's condition split (buckets) and / or item counts at counting.
+        Only codes the product's resolved profile enables are accepted (the DB guard G-18 would
+        refuse anything else) and the bucket total must equal the physical qty (G-19)."""
+        fields = resolve_item_fields(
+            session, item["product_id"], repo.get_profile_version_id(session, gs_id)
+        )
+        received = int(item["received_qty"])
+        if buckets is not None:
+            if not fields.buckets and received > 0:
+                raise ValidationFailed(
+                    "No condition buckets are configured for this product; ask an admin to "
+                    "enable them in Item Field Profiles",
+                    code="NO_CATEGORISATION_FIELDS",
+                    details={"product_id": str(item["product_id"])},
+                )
+            cat_map = fields.bucket_ids()
+            seen: set[str] = set()
+            for b in buckets:
+                if b.field_code not in cat_map:
+                    raise ValidationFailed(
+                        f"Bucket {b.field_code} is not enabled in this product's item field "
+                        "profile",
+                        code="INVALID_FIELD",
+                    )
+                if b.field_code in seen:
+                    raise ValidationFailed(
+                        f"Bucket {b.field_code} is entered twice", code="DUPLICATE_FIELD"
+                    )
+                seen.add(b.field_code)
+            total = sum(b.qty for b in buckets)
+            if total != received:
+                raise ValidationFailed(
+                    f"The condition split ({total}) must equal the physical quantity "
+                    f"({received}) (G-19)",
+                    code="BUCKET_TOTAL_MISMATCH",
+                    details={
+                        "buckets": [f"Split total {total} must equal physical qty {received}"],
+                        "received_qty": received,
+                        "bucket_total": total,
+                    },
+                )
+            repo.delete_item_buckets(session, item["id"])
+            for b in buckets:
+                if b.qty > 0:
+                    repo.upsert_item_bucket(session, item["id"], cat_map[b.field_code], b.qty, by)
+        if counts is not None:
+            count_map = fields.count_ids()
+            for c in counts:
+                if c.count_type not in count_map:
+                    raise ValidationFailed(
+                        f"Count {c.count_type} is not enabled in this product's item field profile",
+                        code="INVALID_COUNT_TYPE",
+                    )
+            repo.delete_item_counts(session, item["id"])
+            for c in counts:
+                repo.upsert_item_count(
+                    session, item["id"], count_map[c.count_type], c.count_value, by
+                )
 
     def delete_item(
         self, user: CurrentUser, perms: EffectivePermissions, gs_id: UUID, item_id: UUID
@@ -433,6 +535,50 @@ class ItemizationService:
         log.info("gs_counting_submitted", gs_id=str(gs_id), counted_by=str(user.id))
         view = gs_service.get_visible_goods_slip(session, user, perms, gs_id)
         return self._state(session, user, perms, view)
+
+    # ------------------------------------- DEC-53: Counting & Categorisation -> RM Review ------
+    def submit_itemization(
+        self,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        gs_id: UUID,
+        payload: SubmitItemizationIn,
+        idem: IdempotencyKey,
+    ) -> IdempotentResult:
+        """DEC-53: one submit, one transaction (G-16 Idempotency-Key). From ITEMIZATION it runs
+        the counting submit (-> CATEGORISATION, G-01 / BR-07) and then the categorisation submit
+        (G-19 per line, inward into INWARD_STAGING, revision, -> RM_REVIEW, RM notified); after
+        an RM send-back (CATEGORISATION) only the latter. Any failure rolls back both."""
+        with self._uow.transaction(user.id) as session:
+            return run_idempotent(
+                session,
+                idem,
+                user.id,
+                lambda: (200, self._submit_itemization(session, user, perms, gs_id, payload)),
+            )
+
+    def _submit_itemization(
+        self,
+        session: Session,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        gs_id: UUID,
+        payload: SubmitItemizationIn,
+    ) -> dict[str, Any]:
+        gs = gs_service.lock_goods_slip(session, gs_id)
+        if gs["status"] == "ITEMIZATION":
+            self._submit_counting(session, user, perms, gs_id)
+        elif gs["status"] == CATEGORISATION:
+            self._lock_categorisation(session, user, perms, gs_id)
+        else:
+            raise Conflict(
+                "This goods slip is not at Counting & Categorisation",
+                code="GS_NOT_ITEMIZATION",
+                details={"status": gs["status"]},
+            )
+        return self._submit_categorisation(
+            session, user, perms, gs_id, SubmitCategorisationIn(remarks=payload.remarks)
+        )
 
     # ---------------------------------------------------------------- categorise -------------
     def categorize(
@@ -1463,9 +1609,11 @@ class ItemizationService:
             for lot in ledger_service.lots_for_gs(session, gs_id)
             if lot["condition_class"] == "AS_RECEIVED" and lot["gs_item_id"]
         }
+        rows = repo.list_items(session, gs_id)
+        splits = _splits(session, [r["id"] for r in rows])
         return [
-            _item_out(row, all_categories, short_categories, lots.get(row["id"]))
-            for row in repo.list_items(session, gs_id)
+            _item_out(row, all_categories, short_categories, lots.get(row["id"]), splits)
+            for row in rows
         ]
 
     def _item_out(self, session: Session, item_id: UUID) -> ItemOut:
@@ -1473,7 +1621,7 @@ class ItemizationService:
         if not row:
             raise NotFound("Item line could not be loaded")
         all_categories, short_categories = self._short_rule(session)
-        return _item_out(row, all_categories, short_categories, None)
+        return _item_out(row, all_categories, short_categories, None, _splits(session, [item_id]))
 
     def _evidence(self, session: Session, gs_id: UUID) -> list[Any]:
         return [
@@ -1531,6 +1679,10 @@ class ItemizationService:
                 can_edit_lines=edit_lines,
                 can_submit_counting=edit_lines and bool(items),
                 can_categorize=status == CATEGORISATION and may_perform,
+                can_submit_to_rm=status in ("ITEMIZATION", CATEGORISATION)
+                and may_perform
+                and bool(items)
+                and all(i.is_balanced for i in items),
                 can_decide=status == "CSR_APPROVAL_PENDING"
                 and current is None
                 and approve
@@ -1583,12 +1735,46 @@ def _qty_at(lot: dict[str, Any], location_code: str) -> int:
     )
 
 
+Splits = tuple[dict[UUID, list[ItemBucketOut]], dict[UUID, list[ItemCountOut]]]
+
+
+def _splits(session: Session, item_ids: list[UUID]) -> Splits:
+    """DEC-53: condition split (buckets) and item counts per line, with G-18 label snapshots."""
+    buckets: dict[UUID, list[ItemBucketOut]] = {}
+    for b in repo.get_buckets_for_items(session, item_ids):
+        buckets.setdefault(b["gs_item_id"], []).append(
+            ItemBucketOut(
+                id=b["id"],
+                item_id=b["gs_item_id"],
+                field_code=b["field_code"],
+                field_label=b.get("label_snapshot") or b["field_code"],
+                qty=b["qty"],
+            )
+        )
+    counts: dict[UUID, list[ItemCountOut]] = {}
+    for c in repo.get_counts_for_items(session, item_ids):
+        counts.setdefault(c["gs_item_id"], []).append(
+            ItemCountOut(
+                id=c["id"],
+                item_id=c["gs_item_id"],
+                count_type=c["field_code"],
+                field_label=c.get("label_snapshot") or c["field_code"],
+                count_value=c["qty"],
+            )
+        )
+    return buckets, counts
+
+
 def _item_out(
     row: dict[str, Any],
     all_categories: bool,
     short_categories: set[UUID],
     lot: dict[str, Any] | None,
+    splits: Splits | None = None,
 ) -> ItemOut:
+    b_list = (splits[0] if splits else {}).get(row["id"], [])
+    c_list = (splits[1] if splits else {}).get(row["id"], [])
+    bucket_total = sum(b.qty for b in b_list)
     return ItemOut(
         id=row["id"],
         gs_id=row["gs_id"],
@@ -1607,6 +1793,10 @@ def _item_out(
         remarks=row["remarks"],
         lot_id=lot["lot_id"] if lot else None,
         stocked_qty=int(lot["total_qty"]) if lot else None,
+        buckets=b_list,
+        counts=c_list,
+        bucket_total=bucket_total,
+        is_balanced=bucket_total == int(row["received_qty"]),
     )
 
 

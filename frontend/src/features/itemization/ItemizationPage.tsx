@@ -42,8 +42,9 @@ function ActionError({ error }: { error: ApiError | null }) {
   );
 }
 
-/** Step-3 (Aman): Counting (status ITEMIZATION; lines are a saved draft, then submitted) and
- * Categorisation (status CATEGORISATION; GS-wise CSR / RO), P2-04 + change plan Phase 3 (AMD-08).
+/** Step-3 (Aman): Counting & Categorisation in one step (DEC-53): each line is recorded with its
+ * condition split (status ITEMIZATION), then one submit sends the GS to RM Review. After an RM
+ * send-back (status CATEGORISATION) only the split is edited. P2-04 + change plan Phase 3/5.
  * Page titles come from the GS_STATUS labels. */
 export function ItemizationPage({ gsId, onBack }: Props) {
   const fetcher = useCallback(() => itemizationApi.state(gsId), [gsId]);
@@ -115,15 +116,13 @@ export function ItemizationPage({ gsId, onBack }: Props) {
 
       <div className="itemize-layout">
         <div className="itemize-layout__main">
-          <LinesSection state={state} onChanged={query.reload} />
-          {p.can_edit_lines ? (
-            <SubmitCountingSection
-              state={state}
-              onDone={(next) => {
-                query.setData(next);
-              }}
-            />
+          {gs.status === 'RM_REVIEW' ? (
+            <div className="banner banner--success" role="status">
+              Submitted to {statusLabel('RM_REVIEW')}. The Replacement Manager has been notified.
+            </div>
           ) : null}
+          <LinesSection state={state} onChanged={query.reload} />
+          {p.can_edit_lines ? <SubmitToRmSection state={state} onDone={query.reload} /> : null}
           {p.can_categorize ? (
             <>
               <ItemCategorisationSection
@@ -293,27 +292,25 @@ function LinesSection({ state, onChanged }: { state: ItemizationState; onChanged
   );
 }
 
-/** AMD-08: the counted lines are saved as a draft; submitting moves the GS to categorisation and
- * freezes the lines (later changes go through an RM-approved correction). */
-function SubmitCountingSection({
-  state,
-  onDone,
-}: {
-  state: ItemizationState;
-  onDone: (next: ItemizationState) => void;
-}) {
+/** DEC-53: Counting & Categorisation are one step. Lines are saved with their condition split as
+ * a draft; one submit locks them, stocks the received qty into Inward Staging and sends the GS to
+ * RM Review (later changes: RM edit in review, or an RM send-back for the split). */
+function SubmitToRmSection({ state, onDone }: { state: ItemizationState; onDone: () => void }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const key = useRef<string | null>(null);
   const statusLabel = useStatusLabels();
+  const unbalanced = state.items.filter((i) => i.is_balanced === false);
+  const canSubmit = state.permissions.can_submit_to_rm === true;
 
   const submit = async () => {
     setBusy(true);
     setError(null);
     key.current ??= newIdempotencyKey();
     try {
-      onDone(await itemizationApi.submitCounting(state.goods_slip.id, key.current));
+      await itemizationApi.submitItemization(state.goods_slip.id, null, key.current);
+      onDone();
     } catch (err) {
       const apiError = toApiError(err);
       if (apiError.status >= 400 && apiError.status < 500) key.current = null;
@@ -325,14 +322,20 @@ function SubmitCountingSection({
   };
 
   return (
-    <section className="card unboxing__section" aria-labelledby="submit-count-h">
-      <h2 id="submit-count-h" className="unboxing__h2">
-        Submit {statusLabel('ITEMIZATION').toLowerCase()}
+    <section className="card unboxing__section" aria-labelledby="submit-rm-h">
+      <h2 id="submit-rm-h" className="unboxing__h2">
+        Submit to {statusLabel('RM_REVIEW')}
       </h2>
       <p className="page__subtitle" style={{ margin: 0 }}>
-        Lines are saved as you add them (draft). Submit when every carton is counted; the lines are
-        then locked and the goods slip moves to {statusLabel('CATEGORISATION').toLowerCase()}.
+        Each line is saved with its condition split as you add it (draft). Submit when every carton
+        is counted; the lines are then locked and the Replacement Manager reviews them.
       </p>
+      {unbalanced.length > 0 ? (
+        <p role="alert" className="form-control__error">
+          Condition split does not match the physical quantity on line(s){' '}
+          {unbalanced.map((i) => `#${String(i.line_no)}`).join(', ')}. Edit those lines first.
+        </p>
+      ) : null}
       <ActionError error={error} />
       {confirming ? (
         <div className="line-editor__actions">
@@ -361,15 +364,15 @@ function SubmitCountingSection({
         <Button
           type="button"
           variant="primary"
-          disabled={!state.permissions.can_submit_counting}
+          disabled={!canSubmit}
           onClick={() => {
             setConfirming(true);
           }}
         >
-          Submit count
+          Submit to {statusLabel('RM_REVIEW')}
         </Button>
       )}
-      {!state.permissions.can_submit_counting ? (
+      {state.items.length === 0 ? (
         <p className="page__subtitle" style={{ margin: 0 }}>
           Add at least one item to submit.
         </p>
