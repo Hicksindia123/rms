@@ -9,8 +9,11 @@ import {
   FileText,
   History,
   Package,
+  Plus,
   Printer,
+  RefreshCw,
   RotateCcw,
+  Trash2,
   Video,
 } from 'lucide-react';
 
@@ -21,6 +24,7 @@ import { newIdempotencyKey } from '@/features/itemization/api';
 import { toApiError, type ApiError } from '@/lib/api/client';
 
 import { rmReviewApi } from './api';
+import { RmAddLineModal, RmChangeProductModal, RmRemoveLineModal } from './RmReviewModals';
 import type {
   RmApproveResult,
   RmReviewData,
@@ -64,6 +68,11 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
   // Show revisions accordion
   const [showRevisions, setShowRevisions] = useState(false);
 
+  // DEC-54 G1: Add Line, Change Product, Remove Line states
+  const [addLineOpen, setAddLineOpen] = useState(false);
+  const [changingItem, setChangingItem] = useState<RmReviewItem | null>(null);
+  const [removingItem, setRemovingItem] = useState<{ item: RmReviewItem; lineNo: number } | null>(null);
+
   const loadData = async () => {
     try {
       setLoading(true);
@@ -86,7 +95,8 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
   if (!data) return null;
 
   const gs = data.goods_slip;
-  const isReviewable = data.can_review && gs.status === 'RM_REVIEW';
+  // DEC-54: After approval (or once transfer slip exists): read-only
+  const isReviewable = data.can_review && gs.status === 'RM_REVIEW' && !data.transfer_slip;
 
   const openEditModal = (item: RmReviewItem) => {
     setEditingItem(item);
@@ -411,11 +421,24 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
             <Package size={20} color="var(--color-primary)" />
             Counted Items &amp; Categorisation Breakdown
           </h2>
-          {data.all_conserved ? (
-            <Badge variant="success">All lines G-19 conserved</Badge>
-          ) : (
-            <Badge variant="danger">G-19 Mismatch present: Must resolve before approval</Badge>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            {data.all_conserved ? (
+              <Badge variant="success">All lines G-19 conserved</Badge>
+            ) : (
+              <Badge variant="danger">G-19 Mismatch present: Must resolve before approval</Badge>
+            )}
+            {isReviewable && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setAddLineOpen(true)}
+              >
+                <Plus size={14} style={{ marginRight: '4px' }} />
+                Add line
+              </Button>
+            )}
+          </div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -465,15 +488,35 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
                     </Badge>
                   )}
                   {isReviewable && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => openEditModal(it)}
-                    >
-                      <Edit size={14} style={{ marginRight: '4px' }} />
-                      Edit Qty/Buckets
-                    </Button>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openEditModal(it)}
+                      >
+                        <Edit size={14} style={{ marginRight: '4px' }} />
+                        Edit Qty/Buckets
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setChangingItem(it)}
+                      >
+                        <RefreshCw size={14} style={{ marginRight: '4px' }} />
+                        Change product
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setRemovingItem({ item: it, lineNo: idx + 1 })}
+                      >
+                        <Trash2 size={14} style={{ marginRight: '4px' }} />
+                        Remove line
+                      </Button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -555,7 +598,21 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                   <strong>Revision #{rev.revision_no}</strong>
-                  <Badge variant={rev.action === 'RM_APPROVED' ? 'success' : rev.action === 'RM_SENT_BACK' ? 'warning' : 'info'}>
+                  <Badge
+                    variant={
+                      rev.action === 'RM_APPROVED'
+                        ? 'success'
+                        : rev.action === 'RM_SENT_BACK'
+                        ? 'warning'
+                        : rev.action === 'RM_REMOVE_LINE'
+                        ? 'danger'
+                        : rev.action === 'RM_CHANGE_PRODUCT'
+                        ? 'warning'
+                        : rev.action === 'RM_ADD_LINE'
+                        ? 'success'
+                        : 'info'
+                    }
+                  >
                     {rev.action}
                   </Badge>
                   <span style={{ fontSize: '0.8rem', color: 'var(--color-muted)' }}>
@@ -778,6 +835,36 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
             </div>
           </div>
         </Modal>
+      )}
+
+      {/* DEC-54 Modals */}
+      <RmAddLineModal
+        gsId={gsId}
+        isOpen={addLineOpen}
+        onClose={() => setAddLineOpen(false)}
+        onSuccess={loadData}
+      />
+
+      {changingItem && (
+        <RmChangeProductModal
+          gsId={gsId}
+          item={changingItem}
+          isOpen={true}
+          onClose={() => setChangingItem(null)}
+          onSuccess={loadData}
+        />
+      )}
+
+      {removingItem && (
+        <RmRemoveLineModal
+          gsId={gsId}
+          item={removingItem.item}
+          lineNo={removingItem.lineNo}
+          totalLines={data.items.length}
+          isOpen={true}
+          onClose={() => setRemovingItem(null)}
+          onSuccess={loadData}
+        />
       )}
     </div>
   );

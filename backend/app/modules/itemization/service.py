@@ -914,11 +914,8 @@ class ItemizationService:
                     },
                 )
 
-        # Inward stock lines into INWARD_STAGING
-        inward = self._location(session, INWARD_LOCATION)
-        for item in items:
-            if int(item["received_qty"]) > 0:
-                self._inward_line(session, gs_id, item, inward["id"], user.id)
+        # DEC-54 (Q1): inward stock booking moved from categorisation submit to RM approval.
+        # Nothing is booked into INWARD_STAGING during review.
 
         # Record revision (SUBMITTED) in rm_review_revisions
         items_snapshot = [
