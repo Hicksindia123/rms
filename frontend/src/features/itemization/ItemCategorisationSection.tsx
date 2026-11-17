@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, PackageCheck, Send, ShieldAlert } from 'lucide-react';
+import { AlertCircle, CheckCircle2, PackageCheck, Send } from 'lucide-react';
 
 import { Badge, Button, ErrorState, LoadingState, Textarea } from '@/components/ui';
 import { useApiQuery } from '@/hooks/useApiQuery';
@@ -184,29 +184,7 @@ export function ItemCategorisationSection({ gsId, onDone }: Props) {
         )}
       </div>
 
-      {/* Same user who counted guard warning (AMD-08) */}
-      {!data.is_same_user_who_counted && (
-        <div
-          role="alert"
-          style={{
-            marginTop: '1rem',
-            padding: '0.75rem 1rem',
-            borderRadius: '6px',
-            backgroundColor: 'var(--color-warning-light, #fef3c7)',
-            color: 'var(--color-warning-dark, #92400e)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontSize: '0.875rem',
-          }}
-        >
-          <ShieldAlert size={18} />
-          <span>
-            <strong>Authorisation Notice:</strong> Only the inward verifier who counted this slip can submit
-            categorisation (AMD-08).
-          </span>
-        </div>
-      )}
+      {/* DEC-51: any eligible inward verifier may categorise, whoever counted. */}
 
       {/* Item Lines */}
       <div style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -459,8 +437,6 @@ export function ItemCategorisationSection({ gsId, onDone }: Props) {
           <span style={{ fontSize: '0.85rem', color: 'var(--color-muted)' }}>
             {!data.all_conserved
               ? 'Cannot submit: Save every line with bucket quantities equal to its counted quantity.'
-              : !data.is_same_user_who_counted
-              ? 'Cannot submit: You are not the inward verifier who counted this slip.'
               : !data.can_submit
               ? 'Cannot submit: this goods slip is not open for categorisation by you.'
               : 'All lines conserved. Ready for Replacement Manager review.'}

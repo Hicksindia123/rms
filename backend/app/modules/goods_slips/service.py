@@ -584,7 +584,7 @@ class GateInwardService:
             tasks=tasks,
             attachments=attachments,
             can_edit_gate=gs["status"] == "GATE_CREATED"
-            and (admin or (gs["created_by"] == user.id and perms.allows("goods_slips", "create"))),
+            and (admin or perms.allows("goods_slips", "create")),  # DEC-51: any gate user
             can_cancel=admin and gs["status"] in CANCELLABLE_STATUSES,
         )
 
@@ -667,10 +667,11 @@ class GateInwardService:
             if not gs:
                 raise NotFound("Goods slip not found")
             admin = is_gs_admin(user, perms)
-            is_creator = gs["created_by"] == user.id and perms.allows("goods_slips", "create")
-            if not (admin or is_creator):
+            # DEC-51: any gate user (goods_slips.create) may edit, not only the GS creator.
+            gate_user = perms.allows("goods_slips", "create")
+            if not (admin or gate_user):
                 raise PermissionDenied(
-                    "Only the creator or an admin can edit gate details", code="NOT_GS_CREATOR"
+                    "Only a gate user or an admin can edit gate details", code="NOT_GS_CREATOR"
                 )
             if gs["status"] != "GATE_CREATED":
                 raise Conflict(

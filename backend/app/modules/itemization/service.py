@@ -558,10 +558,10 @@ class ItemizationService:
             counted_by_id = counted_info.get("counted_by") if counted_info else None
             counted_by_name = counted_info.get("counted_by_name") if counted_info else None
 
+            # Informational only (DEC-51): any eligible user may categorise, not just the counter.
             is_same = user.is_super_admin or counted_by_id is None or counted_by_id == user.id
             can_submit = (
-                is_same
-                and gs["status"] == CATEGORISATION
+                gs["status"] == CATEGORISATION
                 # Same permission the submit endpoint requires (router CreateUser). There is no
                 # "perform" action in the permission vocabulary, so the flag was never true for
                 # a verifier.
@@ -678,15 +678,8 @@ class ItemizationService:
                 code="INVALID_STATUS",
             )
 
-        if gs["status"] == CATEGORISATION:
-            counted_info = repo.get_counted_by_info(session, gs_id)
-            counted_by_id = counted_info.get("counted_by") if counted_info else None
-            if counted_by_id and not user.is_super_admin and counted_by_id != user.id:
-                raise PermissionDenied(
-                    "Only the inward verifier who counted this slip can edit "
-                    "categorisation (AMD-08)",
-                    details={"counted_by": str(counted_by_id), "user": str(user.id)},
-                )
+        # DEC-51: no "same user who counted" restriction. Any user holding the itemization
+        # permission (router) may categorise any GS at this step, whoever did the count.
 
         item = repo.get_item(session, item_id)
         if not item or item["gs_id"] != gs_id:
@@ -747,13 +740,7 @@ class ItemizationService:
         if gs["status"] != CATEGORISATION:
             raise Conflict("Goods slip must be in CATEGORISATION to submit", code="INVALID_STATUS")
 
-        counted_info = repo.get_counted_by_info(session, gs_id)
-        counted_by_id = counted_info.get("counted_by") if counted_info else None
-        if counted_by_id and not user.is_super_admin and counted_by_id != user.id:
-            raise PermissionDenied(
-                "Only the inward verifier who counted this slip can submit categorisation (AMD-08)",
-                details={"counted_by": str(counted_by_id), "user": str(user.id)},
-            )
+        # DEC-51: any eligible user (itemization.create, router) may submit, whoever counted.
 
         items = repo.list_items(session, gs_id)
         if not items:

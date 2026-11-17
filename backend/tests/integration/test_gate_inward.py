@@ -603,10 +603,12 @@ async def test_edit_gate_by_creator_with_reason(
     assert audit[-1]["reason"] == "Recounted boxes at gate"
     assert "box_count" in audit[-1]["changed_fields"]
 
-    # Another gate user (not the creator) cannot edit.
+    # DEC-51: another gate user (not the creator) may edit too (no task-ownership lock).
     _, other = gate_token()
+    detail = await client.get(f"/api/v1/gs/{gs['id']}", headers=_auth(other))
+    assert detail.json()["can_edit_gate"] is True
     res = await client.patch(f"/api/v1/gs/{gs['id']}/gate", json=patch, headers=_auth(other))
-    assert res.status_code == 403
+    assert res.status_code == 200, res.text
 
     # Once unboxing has started the gate details are frozen.
     as_admin(db_conn).execute(

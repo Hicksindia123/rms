@@ -373,7 +373,7 @@ const categorisationStateSchema = z.object({
   status: z.string(),
   counted_by: z.string().nullable(),
   counted_by_name: z.string().nullable(),
-  /** AMD-08: true when the caller is the verifier who counted (or super admin / nobody yet). */
+  /** Informational only (DEC-51): true when the caller is the verifier who counted. */
   is_same_user_who_counted: z.boolean(),
   /** Server-side: same user + status CATEGORISATION + permission (G-19 is checked on submit). */
   can_submit: z.boolean(),

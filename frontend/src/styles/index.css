@@ -1235,6 +1235,7 @@ button.dataview__card:active {
   font-size: 0.8125rem;
   color: var(--color-muted);
   word-break: break-word;
+  white-space: pre-line; /* multi-line bodies, e.g. Dispatch Slip lines */
 }
 .bell__time {
   font-size: 0.75rem;
@@ -2723,6 +2724,7 @@ button.dataview__card:active {
   font-size: 0.8125rem;
   color: var(--color-muted);
   word-break: break-word;
+  white-space: pre-line; /* multi-line bodies, e.g. Dispatch Slip lines */
 }
 .notif-item__meta {
   display: flex;

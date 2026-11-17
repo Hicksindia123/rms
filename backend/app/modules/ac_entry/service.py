@@ -690,13 +690,28 @@ class AcEntryService:
         for ln in shipping:
             repo.insert_dispatch_slip_line(session, slip_id=slip_id, entry=ln)
         # AMD-19: DISPATCH is told; recipients come from the notification rule, not code.
+        # The body lists what to send per line (action label snapshot = new / repaired goods),
+        # product, qty and the challan Accounts entered (AMD-18), so the team can act on it.
+        to_send = "\n".join(
+            f"• {ln['action_label']}: {ln['qty']} pc - "
+            f"{' '.join(x for x in (ln['product_code'], ln['product_name']) if x)}"
+            + (
+                f" (Challan {ln['challan_no']}"
+                + (f" dt {ln['challan_date']}" if ln["challan_date"] else "")
+                + ")"
+                if ln["challan_no"]
+                else ""
+            )
+            for ln in content["lines"]
+        )
+        destination = " / ".join(x for x in (content["party_name"], content["state_station"]) if x)
         notifications.publish(
             session,
             "DISPATCH_SLIP_READY",
-            title=f"{gs['gs_no']}: Dispatch Slip {slip_no} ready",
+            title=f"{gs['gs_no']}: Dispatch Slip {slip_no} ready - send {content['total_qty']} pc",
             body=(
-                f"{content['total_qty']} pc(s) on {len(shipping)} line(s) to ship to "
-                f"{content['party_name'] or 'the party'}. Issue the goods against the slip."
+                f"Ship to {destination or 'the party'}:\n{to_send}\n"
+                f"Issue the goods against Dispatch Slip {slip_no}."
             ),
             entity_type=repo.DISPATCH_SLIP_ENTITY,
             entity_id=slip_id,

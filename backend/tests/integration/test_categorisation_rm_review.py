@@ -130,7 +130,7 @@ def sahil(users: UserFactory, make_token: JwtFactory) -> str:
 
 
 @pytest.mark.asyncio
-async def test_categorisation_same_user_guard_and_g19_conservation(
+async def test_categorisation_any_verifier_and_g19_conservation(
     client: AsyncClient,
     storage: FakeStorage,
     actors: Actors,
@@ -139,7 +139,7 @@ async def test_categorisation_same_user_guard_and_g19_conservation(
     products: Products,
 ) -> None:
     """AMD-08 / AMD-11 / G-19:
-    - Same user who counted can submit categorisation (other verifier gets 403).
+    - DEC-51: any eligible verifier may categorise (not only the one who counted).
     - G-19: sum(bucket qty) must equal received_qty; mismatch returns G-19 violation.
     - Conserved submit transitions GS to RM_REVIEW and creates revision 1 (SUBMITTED).
     """
@@ -168,21 +168,18 @@ async def test_categorisation_same_user_guard_and_g19_conservation(
     assert len(allowed_buckets) > 0
     bucket_code = allowed_buckets[0]["field_code"]
 
-    # Other verifier attempts to save categorisation -> 403
+    # DEC-51: another eligible verifier may categorise a GS counted by Aman (no same-user lock).
+    other_state = await client.get(
+        f"/api/v1/gs/{gs_id}/categorisation", headers=_auth(other_verifier)
+    )
+    assert other_state.status_code == 200, other_state.text
+    assert other_state.json()["is_same_user_who_counted"] is False  # informational only
     other_save = await client.put(
         f"/api/v1/gs/{gs_id}/items/{item_id}/categorisation",
-        json={"buckets": [{"field_code": bucket_code, "qty": 10}], "counts": []},
+        json={"buckets": [{"field_code": bucket_code, "qty": 3}], "counts": []},
         headers=_auth(other_verifier, key()),
     )
-    assert other_save.status_code == 403, other_save.text
-
-    # Other verifier attempts to submit categorisation -> 403
-    other_sub = await client.post(
-        f"/api/v1/gs/{gs_id}/categorisation/submit",
-        json={"category_code": "REGULAR_RETURN"},
-        headers=_auth(other_verifier, key()),
-    )
-    assert other_sub.status_code == 403, other_sub.text
+    assert other_save.status_code == 200, other_save.text
 
     # Aman saves partial bucket quantity (5 out of 10) -> total != 10
     save_res = await client.put(
@@ -216,11 +213,11 @@ async def test_categorisation_same_user_guard_and_g19_conservation(
     )
     assert save_fixed.status_code == 200, save_fixed.text
 
-    # Aman submits categorisation -> SUCCESS, moves to RM_REVIEW
+    # DEC-51: the other verifier submits the GS Aman counted -> SUCCESS, moves to RM_REVIEW
     sub_ok = await client.post(
         f"/api/v1/gs/{gs_id}/categorisation/submit",
-        json={"category_code": "REGULAR_RETURN", "remarks": "Counted and sorted by Aman"},
-        headers=_auth(actors.aman, key()),
+        json={"category_code": "REGULAR_RETURN", "remarks": "Counted by Aman, sorted by Other"},
+        headers=_auth(other_verifier, key()),
     )
     assert sub_ok.status_code == 200, sub_ok.text
     assert sub_ok.json()["status"] == "RM_REVIEW"

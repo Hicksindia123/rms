@@ -374,6 +374,18 @@ async def test_complete_generates_dispatch_slip_then_dispatch_moves_stock_and_cl
             {"u": user_id, "t": ntype},
         ).scalar_one()
         assert n == 1, ntype
+    # The Dispatch alert says what to send per line with the challan Accounts entered (AMD-19).
+    title, body = c.execute(
+        text(
+            "select title, body from public.notifications"
+            " where user_id = cast(:u as uuid) and type = 'DISPATCH_SLIP_READY'"
+        ),
+        {"u": actors["dispatch_id"]},
+    ).one()
+    assert dslip["slip_no"] in title and "send 9 pc" in title
+    assert "Challan CH-SEND_NEW" in body and "Challan CH-SEND_REPAIRED" in body
+    assert ": 6 pc" in body and ": 3 pc" in body
+    assert body.count("•") == 2  # two shipping lines; the CN line ships no goods
 
     # Frozen: Accounts cannot edit, the RM cannot revise the A/c Actions slip (G-22).
     lines = _by_action(state)

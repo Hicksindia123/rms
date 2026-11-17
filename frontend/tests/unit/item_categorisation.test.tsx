@@ -219,19 +219,18 @@ describe('ItemCategorisationSection (AMD-09, AMD-11, G-19)', () => {
     expect(screen.getByText(/Mismatch: 5\/6/)).toBeInTheDocument();
   });
 
-  it('shows the authorisation notice and keeps submit disabled for another verifier (AMD-08)', async () => {
+  it('lets another verifier submit a GS counted by someone else (DEC-51)', async () => {
     serve(
       state([item({ is_conserved: true, total_bucket_qty: 6 })], {
         is_same_user_who_counted: false,
-        can_submit: false,
+        can_submit: true,
       }),
     );
     render(<ItemCategorisationSection gsId="gs-111" onDone={vi.fn()} />);
 
-    expect(
-      await screen.findByText(/Only the inward verifier who counted this slip can submit/),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Submit Categorisation/ })).toBeDisabled();
+    const submit = await screen.findByRole('button', { name: /Submit Categorisation/ });
+    expect(submit).not.toBeDisabled();
+    expect(screen.queryByText(/Only the inward verifier who counted/)).not.toBeInTheDocument();
   });
 
   it('submits a conserved GS to RM review', async () => {
