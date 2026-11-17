@@ -136,7 +136,6 @@ function GateFormBody({
   const [party, setParty] = useState<PartySelection | null>(null);
   const [transporterId, setTransporterId] = useState<string | null>(null);
   const [docs, setDocs] = useState<DocDraft[]>(() => [newDocDraft()]);
-  const [values, setValues] = useState<Record<string, unknown>>({});
   const [serverErrors, setServerErrors] = useState<Record<string, string[]> | undefined>();
   const [submitError, setSubmitError] = useState<ApiError | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -158,12 +157,6 @@ function GateFormBody({
     today && form.max_backdate_days !== null
       ? shiftDate(today, -form.max_backdate_days)
       : undefined;
-  const noDocument = values.no_document === true;
-  const noDocField = form.snapshot.fields.find((f) => f.field_key === 'no_document');
-
-  const onValuesChange = useCallback((v: Record<string, unknown>) => {
-    setValues(v);
-  }, []);
 
   const fieldRenderers: Record<
     string,
@@ -397,33 +390,42 @@ function GateFormBody({
       formSnapshot={snapshot}
       initialValues={initialValues}
       onSubmit={submit}
-      onValuesChange={onValuesChange}
       isSubmitting={submitting}
       submitLabel={phase ?? 'Create Goods Slip'}
       fieldRenderers={fieldRenderers}
       serverErrors={serverErrors}
       stickySubmit
       beforeSubmit={
-        noDocument || submitError ? (
+        submitError ? (
           <>
-            {noDocument ? (
-              <div className="banner" role="alert" data-testid="no-document-warning">
-                <AlertTriangle size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
-                <span>
-                  <strong>{noDocField?.label}</strong>
-                  {noDocField?.help_text ? ` · ${noDocField.help_text}` : null}
-                </span>
-              </div>
-            ) : null}
-            {submitError ? (
-              <div style={{ marginTop: noDocument ? '0.75rem' : 0 }}>
-                <ErrorState error={submitError} title="The goods slip was not created" />
-              </div>
-            ) : null}
+            <ErrorState error={submitError} title="The goods slip was not created" />
+            <FieldErrorList errors={submitError.fieldErrors} form={form} />
           </>
         ) : undefined
       }
     />
+  );
+}
+
+/** Every server field error next to the submit button, labelled from the form snapshot, so a
+ * problem on a field scrolled out of view (or not rendered, e.g. `documents`) is never hidden. */
+function FieldErrorList({ errors, form }: { errors: Record<string, string[]>; form: GateForm }) {
+  const entries = Object.entries(errors).filter(([, msgs]) => msgs.length > 0);
+  if (entries.length === 0) return null;
+  const labelOf = (key: string) => {
+    const doc = /^documents\.(\d+)\./.exec(key);
+    if (doc) return `Document ${String(Number(doc[1]) + 1)}`;
+    if (key === 'documents') return 'Documents';
+    return form.snapshot.fields.find((f) => f.field_key === key)?.label ?? key;
+  };
+  return (
+    <ul className="gate-field-errors" data-testid="gate-field-errors">
+      {entries.map(([key, msgs]) => (
+        <li key={key}>
+          <strong>{labelOf(key)}:</strong> {msgs.join('; ')}
+        </li>
+      ))}
+    </ul>
   );
 }
 

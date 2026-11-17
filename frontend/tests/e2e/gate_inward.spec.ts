@@ -65,10 +65,10 @@ test.describe('Gate inward (P2-02)', () => {
     await page.locator('#field-courier_name').fill('DTDC');
     await page.locator('#field-docket_no').fill(`E2E-${String(Date.now())}`);
 
-    // "No Document Attached" (BR-03 / DEC-03) replaces the document rows and warns before submit.
+    // "No Document Attached" (BR-03 / DEC-03) replaces the document rows; DEC-52: no extra
+    // acknowledgement checkbox.
     await page.getByLabel('No Document Attached').check();
-    await expect(page.getByTestId('no-document-warning')).toContainText('No Document Attached');
-    await page.getByLabel('Missing documentation warning acknowledged').check();
+    await expect(page.getByLabel('Missing documentation warning acknowledged')).toHaveCount(0);
 
     // The sticky submit bar stays reachable without horizontal scroll at phone width.
     const overflow = await page.evaluate(

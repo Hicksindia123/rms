@@ -315,9 +315,9 @@ test.describe('Phase 2 gate scenarios (P2-08)', () => {
     await gate.locator('#field-delivery_mode').selectOption('COURIER_PARCEL');
     await gate.locator('#field-courier_name').fill('DTDC');
     await gate.locator('#field-docket_no').fill(`E2E04-${String(Date.now())}`);
+    // DEC-52: ticking "No Document Attached" is enough; no acknowledgement checkbox.
     await gate.getByLabel('No Document Attached').check();
-    await expect(gate.getByTestId('no-document-warning')).toBeVisible();
-    await gate.getByLabel('Missing documentation warning acknowledged').check();
+    await expect(gate.getByLabel('Missing documentation warning acknowledged')).toHaveCount(0);
     await expectNoHorizontalOverflow(gate);
     await gate.getByRole('button', { name: 'Create Goods Slip' }).click();
     const gsNo = ((await gate.getByTestId('created-gs-no').textContent()) ?? '').trim();

@@ -90,8 +90,7 @@ def _values(
             "carton_count": 3,
             "delivery_mode": mode,
             **MODE_VALUES[mode],
-            "no_document": no_doc,
-            **({"missing_doc_warning_acknowledged": True} if no_doc else {}),
+            "no_document": no_doc,  # DEC-52: no separate acknowledgement
             "gs_creation_format": "AUTO_STANDARD",
             **extra,
         }
@@ -260,12 +259,6 @@ INVALID_CASES = [
         "INVOICE",
         {"doc_row": {"doc_type_code": "BOGUS"}},
         "documents.0.doc_type_code",
-    ),
-    (
-        "COURIER_PARCEL",
-        "NO_DOCUMENT",
-        {"missing_doc_warning_acknowledged": False},
-        "missing_doc_warning_acknowledged",
     ),
     ("COURIER_PARCEL", "INVOICE", {"carton_count": 0}, "carton_count"),  # AMD-03
     ("COURIER_PARCEL", "INVOICE", {"carton_count": None}, "carton_count"),
@@ -573,6 +566,9 @@ async def test_lookups(
     assert form.status_code == 200
     assert form.json()["snapshot"]["form_code"] == "S1_GATE_INWARD"
     assert form.json()["contact_phone_pattern"]
+    # DEC-52: the published gate form has no separate missing-documentation acknowledgement.
+    keys = {f["field_key"] for f in form.json()["snapshot"]["fields"]}
+    assert "no_document" in keys and "missing_doc_warning_acknowledged" not in keys
 
 
 # --- PATCH /gate and cancel ----------------------------------------------------------------------

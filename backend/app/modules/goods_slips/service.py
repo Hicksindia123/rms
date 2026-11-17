@@ -937,11 +937,9 @@ class GateInwardService:
         doc_code: str | None = None
         doc_date: date | None = None
         if is_v2:
+            # BR-03 / DEC-52: ticking "No Document Attached" is enough; no separate
+            # acknowledgement is asked for at the gate.
             no_document = clean.get("no_document") is True
-            if no_document and clean.get("missing_doc_warning_acknowledged") is not True:
-                errors.setdefault("missing_doc_warning_acknowledged", []).append(
-                    "Acknowledge the missing documentation warning"
-                )
             gate_entry = self._validate_gate_entry(session, clean, today, gs_id, errors)
             documents = _validate_documents(
                 repo.gate_document_types(session), payload.documents, today, errors
@@ -961,10 +959,6 @@ class GateInwardService:
                     "This goods slip uses gate form v1: use the accompanying document field"
                 )
             doc_code = clean.get("accompanying_doc")
-            if doc_code == DOC_NONE and clean.get("missing_doc_warning_acknowledged") is not True:
-                errors.setdefault("missing_doc_warning_acknowledged", []).append(
-                    "Acknowledge the missing documentation warning"
-                )
             raw_date = clean.get("gate_doc_date")
             if isinstance(raw_date, str) and raw_date.strip():
                 try:

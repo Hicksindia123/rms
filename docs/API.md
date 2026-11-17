@@ -106,7 +106,6 @@ A *GS admin* is a Super Admin or a holder of `goods_slips.configure` (DECISIONS 
     "delivery_mode": "COURIER_PARCEL",      // DIRECT_TRUCK | SELF_PARTY_REP
     "courier_name": "DTDC", "docket_no": "D-1",
     "accompanying_doc": "NO_DOCUMENT",      // INVOICE | DEBIT_NOTE | DELIVERY_CHALLAN | HANDWRITTEN_SLIP
-    "missing_doc_warning_acknowledged": true,
     "gs_creation_format": "AUTO_STANDARD"   // optional; the only option (DD r10)
   }
 }
@@ -119,7 +118,7 @@ Conditional fields, enforced by the form rules, the service and the DB CHECKs:
 * `SELF_PARTY_REP` needs `rep_name` and a `rep_contact` that matches the `contact_phone_pattern` setting.
 * `INVOICE` / `DEBIT_NOTE` / `DELIVERY_CHALLAN` need `gate_doc_no` and a `gate_doc_date` that is not in the future.
 * `HANDWRITTEN_SLIP` needs `gate_doc_remarks`.
-* `NO_DOCUMENT` needs the acknowledgement. It sets `missing_documentation`, adds the warning
+* `NO_DOCUMENT` (form v2+: `no_document: true`) needs no acknowledgement since DEC-52 (2026-11-17). It sets `missing_documentation`, adds the warning
   `MISSING_DOCUMENTATION` and sends a HIGH notification to `ACCOUNTS` and `REPLACEMENT_MANAGER` (DEC-05).
 
 The service validates the whole form and only then writes anything. A failure returns 422

@@ -238,8 +238,7 @@ export function gateBody(
       delivery_mode: 'COURIER_PARCEL',
       courier_name: 'DTDC',
       docket_no: `E2E-${tag}-${String(Date.now())}`,
-      no_document: noDoc,
-      ...(noDoc ? { missing_doc_warning_acknowledged: true } : {}),
+      no_document: noDoc, // DEC-52: no separate acknowledgement
       gs_creation_format: 'AUTO_STANDARD',
     },
     documents: noDoc
