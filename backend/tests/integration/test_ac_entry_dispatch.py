@@ -450,10 +450,13 @@ async def test_complete_generates_dispatch_slip_then_dispatch_moves_stock_and_cl
         "Vikas",
     )
 
-    # Stock (DEC-47 defaults): 3 repaired pieces shipped back, 1 credited, 6 (Send New: new stock
-    # ships, DEC-26) stay in the intermediate store for a disposition the closure checklist shows.
-    assert _balances(db_conn, gs_id) == {"DISPATCHED": 3, "CREDITED": 1, "INTERMEDIATE_STORE": 6}
-    assert _gs_status(db_conn, gs_id) == "IN_PROCESS"
+    # Stock (DEC-47 + DEC-57 Q12): 3 repaired pieces shipped back, 1 credited, and the 6 old pieces
+    # of Send New (new stock ships outside the ledger, DEC-26) go to the Non-Functional Store.
+    assert _balances(db_conn, gs_id) == {
+        "DISPATCHED": 3,
+        "CREDITED": 1,
+        "NON_FUNCTIONAL_STORE": 6,
+    }
     checklist = (
         await client.get(f"/api/v1/gs/{gs_id}/closure", headers=_auth(actors["rm"]))
     ).json()
@@ -461,7 +464,12 @@ async def test_complete_generates_dispatch_slip_then_dispatch_moves_stock_and_cl
     assert items["AC_ENTRY_COMPLETE"]["passed"] is True
     assert items["DISPATCH_SLIP_DISPATCHED"]["passed"] is True
     assert items["CN_DECISION_RECORDED"]["applicable"] is False
-    assert items["STOCK_ACCOUNTED"]["passed"] is False  # the 6 Send New pieces (DEC-47)
+    assert items["STOCK_ACCOUNTED"]["passed"] is True  # Non-Functional Store is accounted
+    assert items["NO_PENDING_REACTION"]["passed"] is True
+    # Every piece is accounted, so the closure engine moves on; the CN entered by Accounts still
+    # needs the prior party notification (BR-38).
+    assert items["PRIOR_NOTIFICATION"]["passed"] is False
+    assert _gs_status(db_conn, gs_id) == "AWAITING_NOTIFICATION"
 
     # Idempotent replay; a second dispatch with a new key is refused.
     again = await client.post(url, headers=_auth(actors["dispatch"], dkey), json=body)

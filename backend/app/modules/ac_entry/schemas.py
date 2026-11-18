@@ -20,6 +20,8 @@ class AcEntryQueueItem(BaseModel):
     ac_action_slip_id: UUID
     slip_no: str
     version_no: int
+    # DEC-57: 1 = first decision; 2+ = re-action of Pending pieces (follow-up round).
+    round_no: int = 1
     finalised_at: datetime
     lines_total: int
     lines_needing_data: int
@@ -38,6 +40,8 @@ class AcEntryLine(BaseModel):
     product_name: str
     action_code: str
     action_label: str
+    # DEC-57: the condition of the pieces (snapshot; None for items without a split).
+    condition_label: str | None = None
     qty: int
     # AMD-18: which fields this line needs comes from the action flags (snapshot, G-18).
     requires_cn: bool
@@ -75,6 +79,8 @@ class AcEntryState(BaseModel):
     ac_action_slip_id: UUID | None
     slip_no: str | None
     version_no: int | None
+    # DEC-57: the round of the slip shown (the latest round with a CURRENT slip).
+    round_no: int = 1
     lines: list[AcEntryLine]
     lines_needing_data: int
     lines_complete: int
@@ -120,6 +126,7 @@ class DispatchSlipLine(BaseModel):
     product_name: str
     action_code: str
     action_label: str
+    condition_label: str | None = None
     qty: int
     challan_no: str
     challan_date: date
@@ -132,6 +139,7 @@ class DispatchSlipOut(DispatchSlipSummary):
     party_name: str | None
     ac_slip_no: str
     ac_version_no: int
+    ac_round_no: int = 1
     dispatch_remarks: str | None
     generated_by_name: str | None
     dispatched_by_name: str | None

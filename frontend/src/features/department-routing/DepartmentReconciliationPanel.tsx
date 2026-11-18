@@ -134,7 +134,12 @@ export const DepartmentReconciliationPanel: React.FC<DepartmentReconciliationPan
             {total_in_store}
           </div>
           <div className="text-[10px] text-blue-600/80 dark:text-blue-400 mt-0.5">
-            Available to route
+            {reconciliation.total_planned
+              ? `${String(reconciliation.total_planned)} planned, not issued`
+              : 'Available to route'}
+            {reconciliation.total_no_work
+              ? ` · ${String(reconciliation.total_no_work)} no work`
+              : ''}
           </div>
         </div>
 
@@ -211,6 +216,11 @@ export const DepartmentReconciliationPanel: React.FC<DepartmentReconciliationPan
                 </td>
                 <td className="py-2.5 px-3 text-right text-blue-600 dark:text-blue-400 font-medium">
                   {it.in_store_qty}
+                  {it.planned_qty ? (
+                    <div className="text-[10px] font-normal text-amber-600 dark:text-amber-400">
+                      {it.planned_qty} planned
+                    </div>
+                  ) : null}
                 </td>
                 <td className="py-2.5 px-3 text-right text-amber-600 dark:text-amber-400 font-medium">
                   {it.at_departments_qty}

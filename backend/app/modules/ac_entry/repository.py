@@ -52,9 +52,11 @@ def current_ac_slip(session: Session, gs_id: UUID) -> dict[str, Any] | None:
     return _row(
         session,
         """
-        select id, gs_id, slip_no, version_no, finalised_at
+        select id, gs_id, slip_no, version_no, round_no, finalised_at
           from public.ac_action_slips
          where gs_id = :gs_id and status = 'CURRENT'
+         order by round_no desc
+         limit 1
         """,
         {"gs_id": gs_id},
     )
@@ -63,7 +65,8 @@ def current_ac_slip(session: Session, gs_id: UUID) -> dict[str, Any] | None:
 def get_ac_slip(session: Session, slip_id: UUID) -> dict[str, Any] | None:
     return _row(
         session,
-        "select id, gs_id, slip_no, version_no, status from public.ac_action_slips where id = :id",
+        "select id, gs_id, slip_no, version_no, round_no, status from public.ac_action_slips "
+        "where id = :id",
         {"id": slip_id},
     )
 
@@ -74,7 +77,7 @@ def list_queue(session: Session, *, completed: bool | None) -> list[dict[str, An
         session,
         """
         select gs.id as gs_id, gs.gs_no, gs.status as gs_status, p.name as party_name,
-               s.id as ac_action_slip_id, s.slip_no, s.version_no, s.finalised_at,
+               s.id as ac_action_slip_id, s.slip_no, s.version_no, s.round_no, s.finalised_at,
                coalesce(e.lines_total, 0)::int as lines_total,
                coalesce(e.lines_needing_data, 0)::int as lines_needing_data,
                coalesce(e.lines_complete, 0)::int as lines_complete,
@@ -112,7 +115,8 @@ def entry_lines(session: Session, ac_slip_id: UUID) -> list[dict[str, Any]]:
     return _rows(
         session,
         """
-        select e.id, e.gs_item_id, e.line_no, e.action_code, e.action_label, e.qty,
+        select e.id, e.gs_item_id, e.line_no, e.action_code, e.action_label,
+               e.condition_label, e.qty,
                e.requires_cn, e.requires_challan, e.cn_no, e.cn_date, e.cn_value,
                e.challan_no, e.challan_date, e.entered_at,
                rms_private.ac_entry_line_complete(e) as is_complete,
@@ -127,7 +131,8 @@ def entry_lines(session: Session, ac_slip_id: UUID) -> list[dict[str, Any]]:
           left join public.item_field_library lib
                  on lib.field_group = 'ACTION' and lib.code = e.action_code
          where e.ac_action_slip_id = :slip_id
-         order by e.line_no, coalesce(lib.sort_order, 0), e.action_code
+         order by e.line_no, e.condition_label nulls first, coalesce(lib.sort_order, 0),
+                  e.action_code
         """,
         {"slip_id": ac_slip_id},
     )
@@ -229,7 +234,7 @@ _DSLIP_SELECT = """
            d.docket_no, d.vehicle_no, d.dispatch_remarks, d.dispatched_at,
            gb.full_name as generated_by_name, db.full_name as dispatched_by_name,
            gs.gs_no, gs.status as gs_status, p.name as party_name,
-           s.slip_no as ac_slip_no, s.version_no as ac_version_no,
+           s.slip_no as ac_slip_no, s.version_no as ac_version_no, s.round_no as ac_round_no,
            a.bucket, a.object_path,
            (select coalesce(sum(l.qty), 0)::int from public.dispatch_slip_lines l
              where l.dispatch_slip_id = d.id) as total_qty,
@@ -287,14 +292,15 @@ def dispatch_slip_lines(session: Session, slip_id: UUID) -> list[dict[str, Any]]
         session,
         """
         select l.id, l.gs_item_id, l.line_no, l.action_code, l.action_label, l.qty,
-               l.challan_no, l.challan_date,
+               l.challan_no, l.challan_date, e.condition_label,
                coalesce(gi.product_code_snapshot, pr.code) as product_code,
                coalesce(gi.product_name_snapshot, pr.name, 'Item') as product_name
           from public.dispatch_slip_lines l
+          join public.ac_entry_lines e on e.id = l.ac_entry_line_id
           join public.gs_items gi on gi.id = l.gs_item_id
           left join public.products pr on pr.id = gi.product_id
          where l.dispatch_slip_id = :id
-         order by l.line_no, l.action_code
+         order by l.line_no, e.condition_label nulls first, l.action_code
         """,
         {"id": slip_id},
     )

@@ -12,11 +12,13 @@ import {
 } from 'lucide-react';
 import type { RmRoutingQueueItemOut, GsRoutingState } from './types';
 import { departmentRoutingApi, routingErrorMessage } from './api';
-import { RmRoutingDispatchModal } from './RmRoutingDispatchModal';
+import { RmRoutingPlanModal } from './RmRoutingPlanModal';
 import { DepartmentReconciliationPanel } from './DepartmentReconciliationPanel';
 import type { GsReconciliationOut } from './types';
 
 interface RmRoutingQueuePageProps {
+  /** T4: department_routing/create — the RM plans the routing (DEC-55). */
+  canPlan: boolean;
   onOpenGs: (gsId: string) => void;
   onOpenPrint?: (routingId: string) => void;
   /** Change plan Phase 7 (AMD-16): open the RM final actions of a held GS. */
@@ -24,6 +26,7 @@ interface RmRoutingQueuePageProps {
 }
 
 export const RmRoutingQueuePage: React.FC<RmRoutingQueuePageProps> = ({
+  canPlan,
   onOpenGs,
   onOpenFinalActions,
 }) => {
@@ -131,8 +134,8 @@ export const RmRoutingQueuePage: React.FC<RmRoutingQueuePageProps> = ({
             </h1>
           </div>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            AMD-10: Goods Slips held at intermediate store ready for dispatch to allowed departments
-            (Repair, Mercury Extraction, etc.).
+            Goods slips held at the intermediate store: plan where each condition goes. The Store
+            Manager issues the planned pieces to the departments.
           </p>
         </div>
 
@@ -246,6 +249,11 @@ export const RmRoutingQueuePage: React.FC<RmRoutingQueuePageProps> = ({
                     </span>
                     {' • '}Held since {new Date(item.held_since).toLocaleDateString()}
                   </div>
+                  {item.planned_qty ? (
+                    <div className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                      {item.planned_qty} pcs planned, waiting for the store issue
+                    </div>
+                  ) : null}
                 </div>
 
                 {/* Quantities breakdown */}
@@ -309,17 +317,19 @@ export const RmRoutingQueuePage: React.FC<RmRoutingQueuePageProps> = ({
                     </button>
                   ) : null}
 
-                  <button
-                    type="button"
-                    disabled={item.in_store_qty === 0 || loadingDispatchGs}
-                    onClick={() => {
-                      handleOpenDispatch(item.gs_id);
-                    }}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Send className="h-3.5 w-3.5" />
-                    <span>Route to Dept</span>
-                  </button>
+                  {canPlan ? (
+                    <button
+                      type="button"
+                      disabled={loadingDispatchGs}
+                      onClick={() => {
+                        handleOpenDispatch(item.gs_id);
+                      }}
+                      className="min-h-[44px] inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Send className="h-3.5 w-3.5" />
+                      <span>Plan Routing</span>
+                    </button>
+                  ) : null}
                 </div>
               </div>
 
@@ -343,8 +353,9 @@ export const RmRoutingQueuePage: React.FC<RmRoutingQueuePageProps> = ({
 
       {/* Dispatch Modal */}
       {dispatchModalState && (
-        <RmRoutingDispatchModal
+        <RmRoutingPlanModal
           state={dispatchModalState}
+          canPlan={canPlan}
           onClose={() => {
             setDispatchModalState(null);
           }}

@@ -248,6 +248,9 @@ def current_ac_slip(session: Session, gs_id: UUID) -> dict[str, Any] | None:
           from public.ac_action_slips s
           left join public.ac_entry_completions c on c.ac_action_slip_id = s.id
          where s.gs_id = :gs and s.status = 'CURRENT'
+         -- DEC-57: one CURRENT slip per round; the email covers the latest round.
+         order by s.round_no desc
+         limit 1
         """,
         {"gs": gs_id},
     )

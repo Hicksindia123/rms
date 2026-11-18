@@ -316,7 +316,8 @@ async def test_handover_exclusions_clean_accept_and_idempotency(
     reasons = sorted((x["reason_code"], x["qty"]) for x in preview["excluded"])
     assert reasons == [("HAZARD", 1), ("NOT_ALLOWED", 1), ("NOT_ALLOWED", 1), ("PENDING_BP", 2)]
     pend = next(x for x in preview["excluded"] if x["reason_code"] == "PENDING_BP")
-    assert pend["reason_label"] == "Pending (BP)" and "Repair Team" in (pend["detail"] or "")
+    # G4 (DEC-57): PENDING_BP is labelled "Pending" (code unchanged).
+    assert pend["reason_label"] == "Pending" and "Repair Team" in (pend["detail"] or "")
     hazard = next(x for x in preview["excluded"] if x["reason_code"] == "HAZARD")
     assert hazard["location_code"] == "HAZARD_QUARANTINE" and hazard["condition_label"]
 

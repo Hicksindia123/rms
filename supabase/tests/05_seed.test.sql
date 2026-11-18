@@ -92,9 +92,9 @@ select set_eq($$select code from public.roles$$,
         'TECHNICIAN_COORDINATOR','TECHNICIAN','SPARE_PARTS_TECHNICIAN','SPARE_PARTS_MANAGER','ACCOUNTS',
         'DISPATCH','MAIN_STORE','MANAGEMENT_VIEWER'],
   'roles match master plan §3.3');
-select is((select count(*)::int from public.permissions), 151, '20 modules × 7 actions + 4 department_routing + 4 final_actions + 3 ac_entry actions');
+select is((select count(*)::int from public.permissions), 152, '20 modules × 7 actions + 5 department_routing (G2 approve = Store issue) + 4 final_actions + 3 ac_entry actions');
 select is((select count(*)::int from public.role_permissions rp join public.roles r on r.id = rp.role_id
-            where r.code = 'SUPER_ADMIN'), 151, 'SUPER_ADMIN marker role holds every permission');
+            where r.code = 'SUPER_ADMIN'), 152, 'SUPER_ADMIN marker role holds every permission');
 select is((select count(*)::int from public.roles r
             where not exists (select 1 from public.role_permissions rp where rp.role_id = r.id)), 0,
           'every role has a default permission set');
@@ -119,6 +119,9 @@ select results_eq(
       left join public.roles r on r.id = l.custodian_role_id order by l.code$$,
   $$values ('BATTERY_STORE','SPARE_PARTS','SPARE_PARTS_MANAGER'),
            ('CREDITED','CREDITED',null::text),
+           ('DEPT_CLEANING','TECHNICIAN','INTERMEDIATE_STORE_MANAGER'),
+           ('DEPT_MERCURY_EXTRACTION','TECHNICIAN','INTERMEDIATE_STORE_MANAGER'),
+           ('DEPT_TECHNICIAN_REPAIR','TECHNICIAN','INTERMEDIATE_STORE_MANAGER'),
            ('DISPATCHED','DISPATCHED',null),
            ('HAZARD_QUARANTINE','HAZARD_QUARANTINE','SPARE_PARTS_MANAGER'),
            ('INTERMEDIATE_STORE','FUNCTIONAL','INTERMEDIATE_STORE_MANAGER'),

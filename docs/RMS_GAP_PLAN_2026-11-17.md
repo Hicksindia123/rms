@@ -87,6 +87,9 @@ match; this plan covers the gaps in steps 5–9 and the Accounts alert channel.
   RM later re-actions the piece); Not Allowed → **Rejected Hold**; Send New old piece →
   **Non-Functional Store**; Send Repaired → dispatched; Issue CN → credited
   (setting `dispatch.returned_goods_location_by_action`); closure checklist accepts these locations.
+- **Built 2026-11-18** (migration `20261118000300`). Re-action of Pending pieces (user decision
+  2026-11-18): a **follow-up round** with its own A/c Actions slip version, Accounts entry and
+  Dispatch Slip; see DEC-57 and the G4 rows of the technical decisions in `docs/DECISIONS.md`.
 
 ### G5 — Accounts email + reminder (DEC-58; Q13, Q14)
 - `AC_ACTIONS_SLIP_READY` / `SUPERSEDED` rules: channels IN_APP + EMAIL (needs `SMTP_HOST`,

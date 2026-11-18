@@ -265,6 +265,11 @@ export const DepartmentLegsTimeline: React.FC<DepartmentLegsTimelineProps> = ({
                                   <span className="font-medium text-slate-700 dark:text-slate-300">
                                     {ol.outcome_label}
                                   </span>
+                                  {ol.condition_label ? (
+                                    <span className="text-slate-500 dark:text-slate-400">
+                                      → {ol.condition_label}
+                                    </span>
+                                  ) : null}
                                 </div>
                                 <span className="font-bold text-slate-900 dark:text-slate-100">
                                   {ol.quantity} pcs

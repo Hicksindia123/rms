@@ -23,23 +23,108 @@ class DepartmentOutcomeHeadOut(BaseModel):
     returns_to_routing: bool
     sort_order: int
     is_active: bool
+    # DEC-56 Q8 / Q17: where the received pieces go (configuration; default wastage -> scrap,
+    # otherwise back to the Intermediate Store).
+    destination_location_code: str | None = None
+    destination_location_name: str | None = None
+
+
+class ConditionOptionOut(BaseModel):
+    """DEC-56 Q7: one condition of the product's categorisation list."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    field_id: UUID
+    code: str
+    label: str
+
+
+class ItemConditionOut(BaseModel):
+    """DEC-56: one condition of a GS item's current split (original = counting split)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    field_id: UUID
+    field_code: str
+    field_label: str
+    original_qty: int
+    current_qty: int
 
 
 # ---------------------------------------------------------------------------
-# Dispatch / Routing
+# DEC-55 (gap plan G2): RM routing plan + Store issue
 # ---------------------------------------------------------------------------
-class DepartmentRoutingLineIn(BaseModel):
+class RoutingPlanLineIn(BaseModel):
     gs_item_id: UUID
+    # The condition bucket the pieces come from (required when the item has buckets, Q6).
     source_bucket_field_id: UUID | None = None
-    qty_sent: int = Field(gt=0, description="Quantity to dispatch to department")
+    department_field_id: UUID
+    qty: int = Field(gt=0, description="Pieces of this item + condition routed to the department")
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class CreateRoutingPlanIn(BaseModel):
+    gs_id: UUID
+    lines: list[RoutingPlanLineIn] = Field(min_length=1)
+
+
+class CancelPlanLineIn(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class RoutingPlanLineOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    gs_id: UUID
+    gs_no: str
+    gs_item_id: UUID
+    line_no: int
+    item_name: str
+    sku_code: str | None = None
+    source_bucket_field_id: UUID | None = None
+    source_bucket_label: str | None = None
+    department_field_id: UUID
+    department_code: str
+    department_label: str
+    is_no_work: bool
+    qty: int
+    status: str
     notes: str | None = None
+    planned_at: datetime
+    planned_by_name: str | None = None
+    routing_id: UUID | None = None
+    routing_no: str | None = None
+    issued_at: datetime | None = None
+    issued_by_name: str | None = None
+    cancelled_at: datetime | None = None
+    cancel_reason: str | None = None
 
 
-class CreateDepartmentRoutingIn(BaseModel):
+class RoutingPlanOut(BaseModel):
+    gs_id: UUID
+    lines: list[RoutingPlanLineOut]
+
+
+class StoreIssueIn(BaseModel):
     gs_id: UUID
     department_field_id: UUID
-    lines: list[DepartmentRoutingLineIn] = Field(min_length=1)
-    remarks: str | None = None
+    plan_line_ids: list[UUID] = Field(min_length=1)
+    remarks: str | None = Field(default=None, max_length=500)
+
+
+class IssueQueueGroupOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    gs_id: UUID
+    gs_no: str
+    party_name: str | None = None
+    department_field_id: UUID
+    department_code: str
+    department_label: str
+    planned_since: datetime
+    total_qty: int
+    lines: list[RoutingPlanLineOut]
 
 
 class DepartmentRoutingLineOut(BaseModel):
@@ -58,6 +143,8 @@ class DepartmentRoutingLineOut(BaseModel):
     qty_received: int
     qty_pending: int
     notes: str | None = None
+    # DEC-56 Q7: conditions the pieces may come back in (empty = routed without a condition).
+    condition_options: list[ConditionOptionOut] = Field(default_factory=list)
 
 
 class DepartmentRoutingOut(BaseModel):
@@ -75,6 +162,9 @@ class DepartmentRoutingOut(BaseModel):
     dispatched_by: UUID | None = None
     dispatched_by_name: str | None = None
     remarks: str | None = None
+    # DEC-55: where the Store issue moved the stock (legacy routings: Technician Bench).
+    location_code: str | None = None
+    location_name: str | None = None
     lines: list[DepartmentRoutingLineOut] = Field(default_factory=list)
 
 
@@ -85,6 +175,8 @@ class DepartmentReceiptLineIn(BaseModel):
     routing_line_id: UUID
     outcome_head_id: UUID
     quantity: int = Field(gt=0, description="Quantity received under this outcome head")
+    # DEC-56 Q7: condition after work; required when the routing line came from a condition.
+    condition_field_id: UUID | None = None
     remarks: str | None = None
 
 
@@ -108,6 +200,12 @@ class DepartmentReceiptLineOut(BaseModel):
     quantity: int
     remarks: str | None = None
     created_at: datetime
+    # DEC-56: condition before / after work and where the stock went (NULL before G3).
+    source_condition_field_id: UUID | None = None
+    condition_field_id: UUID | None = None
+    condition_code: str | None = None
+    condition_label: str | None = None
+    destination_location_code: str | None = None
 
 
 class DepartmentReceiptOut(BaseModel):
@@ -138,6 +236,10 @@ class ItemReconciliationOut(BaseModel):
     at_departments_qty: int
     outcome_heads_qty: int
     actioned_qty: int
+    # DEC-55: parts of in_store_qty — planned (waiting for the Store issue) and no-work (STORE).
+    planned_qty: int = 0
+    no_work_qty: int = 0
+    unplanned_qty: int = 0
     is_conserved: bool
 
 
@@ -152,6 +254,9 @@ class GsReconciliationOut(BaseModel):
     total_at_departments: int
     total_outcomes: int
     total_actioned: int
+    total_planned: int = 0
+    total_no_work: int = 0
+    total_unplanned: int = 0
     items: list[ItemReconciliationOut]
 
 
@@ -188,6 +293,9 @@ class RmRoutingQueueItemOut(BaseModel):
     total_counted_qty: int
     in_store_qty: int
     at_departments_qty: int
+    planned_qty: int = 0
+    no_work_qty: int = 0
+    unplanned_qty: int = 0
     active_routings_count: int
     held_since: datetime
 

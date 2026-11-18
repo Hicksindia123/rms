@@ -199,7 +199,10 @@ STATIC_SYSTEM_GUARDS: list[dict[str, Any]] = [
             "Per GS item, the RM final action quantities sum to the quantity available for "
             "action (counted - at departments), use only actions of the resolved profile, and "
             "are finalised only when nothing is at a department; a finalised A/c Actions slip "
-            "is immutable and is superseded only by a reasoned revision (AMD-16, AMD-17)."
+            "is immutable and is superseded only by a reasoned revision (AMD-16, AMD-17). "
+            "Per item + current condition no condition gets more actions than it has; a "
+            "Pending re-action round re-actions exactly the pieces the previous round left "
+            "Pending, after Accounts completed and settled that round (DEC-57)."
         ),
         "enforcement_layer": "validate_final_action_split + rm_item_actions / ac_action_slips "
         "triggers",
@@ -212,7 +215,9 @@ STATIC_SYSTEM_GUARDS: list[dict[str, Any]] = [
             "current A/c Actions slip of a held goods slip, with a CN No. used by one goods slip "
             "only; completion needs every line complete and freezes the entries, the slip and the "
             "RM actions; the Dispatch Slip lists exactly the goods-shipping lines and is "
-            "dispatched once (AMD-18, AMD-19)."
+            "dispatched once (AMD-18, AMD-19). Each final-action round has its own slip, "
+            "completion and Dispatch Slip; a re-action round is entered while the goods slip is "
+            "open after the store stage (DEC-57)."
         ),
         "enforcement_layer": "ac_entry_lines / ac_entry_completions / dispatch_slips / "
         "dispatch_slip_lines triggers",

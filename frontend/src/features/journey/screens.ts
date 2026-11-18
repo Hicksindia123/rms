@@ -56,6 +56,7 @@ const SCREEN_PATHS: Record<string, string> = {
   approvals: '/approvals',
   'dispatch-queue': '/dispatch',
   'department-routing': '/department-routing',
+  'department-issue': '/department-issue',
   'department-receiving': '/department-receiving',
   'accounts-entry': '/accounts-entry',
   'accounts-docs': '/accounts',
@@ -94,6 +95,8 @@ export function itemPath(
       return `/accounts-entry/${item.gs_id}`;
     case 'department-receiving':
       return '/department-receiving';
+    case 'department-issue':
+      return '/department-issue';
     case 'accounts-docs':
       return '/accounts';
     case 'dispatch-slips':
@@ -118,6 +121,7 @@ const ICONS: Record<string, LucideIcon> = {
   RM_REVIEW: FileCheck2,
   STORE_ACCEPT: Warehouse,
   DEPT_ROUTING: Building2,
+  DEPT_ISSUE: FolderInput,
   DEPT_RECEIVING: CheckCircle2,
   FINAL_ACTIONS: Split,
   ACCOUNTS_DOCS: FileSpreadsheet,

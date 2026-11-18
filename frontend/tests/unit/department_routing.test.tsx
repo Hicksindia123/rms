@@ -4,12 +4,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { departmentRoutingApi } from '@/features/department-routing/api';
 import { DepartmentReconciliationPanel } from '@/features/department-routing/DepartmentReconciliationPanel';
 import { DepartmentLegsTimeline } from '@/features/department-routing/DepartmentLegsTimeline';
-import { RmRoutingDispatchModal } from '@/features/department-routing/RmRoutingDispatchModal';
+import { RmRoutingPlanModal } from '@/features/department-routing/RmRoutingPlanModal';
+import { DepartmentIssuePage } from '@/features/department-routing/DepartmentIssuePage';
 import type {
   GsReconciliationOut,
   DepartmentLegOut,
   DepartmentRoutingOut,
   GsRoutingState,
+  IssueQueueGroup,
 } from '@/features/department-routing/types';
 import { ApiError } from '@/lib/api/client';
 
@@ -141,18 +143,23 @@ describe('Phase 6: Department Routing & Receiving with Guard G-20', () => {
         at_departments_qty: 3,
         outcome_heads_qty: 3,
         actioned_qty: 0,
+        planned_qty: 1,
+        no_work_qty: 0,
+        unplanned_qty: 3,
         allowed_departments: [
           {
-            field_id: 'dept-f-1',
-            code: 'TESTING',
-            label: 'Testing & Repair Lab',
-            sort_order: 10,
+            field_id: 'dept-store',
+            code: 'STORE',
+            label: 'Store (no work)',
+            sort_order: 5,
+            is_no_work: true,
           },
           {
-            field_id: 'dept-f-2',
-            code: 'MERCURY',
-            label: 'Mercury Extraction',
-            sort_order: 20,
+            field_id: 'dept-f-1',
+            code: 'REPAIR',
+            label: 'Technician / Repair',
+            sort_order: 10,
+            is_no_work: false,
           },
         ],
         buckets: [
@@ -162,11 +169,90 @@ describe('Phase 6: Department Routing & Receiving with Guard G-20', () => {
             field_code: 'DEFECTIVE',
             field_label: 'Defective Units',
             qty: 10,
+            routed_qty: 7,
+            plannable_qty: 3,
+          },
+        ],
+        // DEC-56: current split (2 pcs came back from a department as "Good").
+        conditions: [
+          {
+            field_id: 'bf-1',
+            field_code: 'DEFECTIVE',
+            field_label: 'Defective Units',
+            original_qty: 10,
+            current_qty: 8,
+            committed_qty: 5,
+            free_qty: 3,
+            plannable_qty: 3,
+          },
+          {
+            field_id: 'bf-2',
+            field_code: 'GOOD',
+            field_label: 'Good',
+            original_qty: 0,
+            current_qty: 2,
+            committed_qty: 2,
+            free_qty: 0,
+            plannable_qty: 0,
           },
         ],
       },
     ],
+    plan_lines: [
+      {
+        id: 'pl-1',
+        gs_id: 'gs-test-01',
+        gs_no: 'GS/2026/042',
+        gs_item_id: 'item-1',
+        line_no: 1,
+        item_name: 'Smart Mixer Grinder 750W',
+        source_bucket_field_id: 'bf-1',
+        source_bucket_label: 'Defective Units',
+        department_field_id: 'dept-f-1',
+        department_code: 'REPAIR',
+        department_label: 'Technician / Repair',
+        is_no_work: false,
+        qty: 1,
+        status: 'PLANNED',
+        planned_at: '2026-11-18T09:00:00Z',
+      },
+    ],
   };
+
+  const mockIssueGroup: IssueQueueGroup = {
+    gs_id: 'gs-test-01',
+    gs_no: 'GS/2026/042',
+    party_name: 'Alpha Traders',
+    department_field_id: 'dept-f-1',
+    department_code: 'REPAIR',
+    department_label: 'Technician / Repair',
+    planned_since: '2026-11-18T09:00:00Z',
+    total_qty: 5,
+    lines: [
+      { ...mockPlanLine('pl-1', 2) },
+      { ...mockPlanLine('pl-2', 3) },
+    ],
+  };
+
+  function mockPlanLine(id: string, qty: number) {
+    return {
+      id,
+      gs_id: 'gs-test-01',
+      gs_no: 'GS/2026/042',
+      gs_item_id: 'item-1',
+      line_no: 1,
+      item_name: 'Smart Mixer Grinder 750W',
+      source_bucket_field_id: 'bf-1',
+      source_bucket_label: 'Defective Units',
+      department_field_id: 'dept-f-1',
+      department_code: 'REPAIR',
+      department_label: 'Technician / Repair',
+      is_no_work: false,
+      qty,
+      status: 'PLANNED' as const,
+      planned_at: '2026-11-18T09:00:00Z',
+    };
+  }
 
   it('renders Guard G-20 reconciliation panel with conserved status', () => {
     render(<DepartmentReconciliationPanel reconciliation={mockReconConserved} />);
@@ -228,60 +314,143 @@ describe('Phase 6: Department Routing & Receiving with Guard G-20', () => {
     expect(handleReceive).toHaveBeenCalledWith('rtg-1');
   });
 
-  it('enforces store quantity cap in RmRoutingDispatchModal', () => {
-    const handleClose = vi.fn();
-    const handleSuccess = vi.fn();
-
+  it('DEC-55: plan modal caps each condition at its free qty and lists the current plan', () => {
     render(
-      <RmRoutingDispatchModal
+      <RmRoutingPlanModal
         state={mockRoutingState}
-        onClose={handleClose}
-        onSuccess={handleSuccess}
+        canPlan={true}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
       />,
     );
 
-    // Modal title & GS no
-    expect(screen.getByText(/Route to Department \(Issue Note\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/GS\/2026\/042/i)).toBeInTheDocument();
+    expect(screen.getByText(/Plan Department Routing/i)).toBeInTheDocument();
+    // existing PLANNED line is shown with its status and can be cancelled
+    expect(screen.getByText('Waiting for store issue')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Cancel line/i })).toBeInTheDocument();
+    // department labels come from the payload; STORE is flagged "no work"
+    expect(screen.getByLabelText(/Store \(no work\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/no work · stays in store/i)).toBeInTheDocument();
+    // DEC-56: rows come from the current split; changed conditions show the counted qty.
+    expect(screen.getByText(/8 pcs now \(counted 10\)/)).toBeInTheDocument();
+    expect(screen.getByText(/2 pcs now \(counted 0\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Fully routed \(2 pcs\)/)).toBeInTheDocument();
 
-    // Available in store is 4
-    expect(screen.getByPlaceholderText(/Max 4/i)).toBeInTheDocument();
+    const repair = screen.getByLabelText(/Technician \/ Repair/i);
+    fireEvent.change(repair, { target: { value: '4' } });
+    expect(screen.getByText(/More than the 3 pcs not yet planned/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Save routing plan/i })).toBeDisabled();
 
-    // Allowed departments in select dropdown
-    expect(screen.getByRole('combobox')).toBeInTheDocument();
-    expect(screen.getByText(/Testing & Repair Lab/i)).toBeInTheDocument();
+    fireEvent.change(repair, { target: { value: '2' } });
+    expect(screen.getByRole('button', { name: /Save routing plan/i })).toBeEnabled();
   });
 
-  it('sends one stable Idempotency-Key per modal and shows the request id on errors (G-16)', async () => {
+  it('DEC-55: plan sends one stable Idempotency-Key per modal and shows the request id (G-16)', async () => {
     const handleSuccess = vi.fn();
     const spy = vi
-      .spyOn(departmentRoutingApi, 'dispatchRouting')
+      .spyOn(departmentRoutingApi, 'planRouting')
       .mockRejectedValueOnce(
-        new ApiError(409, 'G-20', 'G-20: only 4 pcs available', null, 'req-ph6-123'),
+        new ApiError(409, 'G-20', 'G-20: only 3 pcs left', null, 'req-g2-123'),
       )
-      .mockResolvedValueOnce({} as DepartmentRoutingOut);
+      .mockResolvedValueOnce({ gs_id: 'gs-test-01', lines: [] });
 
     render(
-      <RmRoutingDispatchModal
+      <RmRoutingPlanModal
         state={mockRoutingState}
+        canPlan={true}
         onClose={vi.fn()}
         onSuccess={handleSuccess}
       />,
     );
 
-    fireEvent.change(screen.getByPlaceholderText(/Max 4/i), { target: { value: '2' } });
-    fireEvent.click(screen.getByRole('button', { name: /Dispatch Issue Note/i }));
-    expect(await screen.findByText(/Request ID: req-ph6-123/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Store \(no work\)/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText(/Technician \/ Repair/i), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save routing plan/i }));
+    expect(await screen.findByText(/Request ID: req-g2-123/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Dispatch Issue Note/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Save routing plan/i }));
     await waitFor(() => {
       expect(handleSuccess).toHaveBeenCalledTimes(1);
     });
 
     expect(spy).toHaveBeenCalledTimes(2);
-    const firstKey = spy.mock.calls[0]?.[1];
+    const [payload, firstKey] = spy.mock.calls[0] ?? [];
     expect(firstKey).toMatch(/^web-/);
     expect(spy.mock.calls[1]?.[1]).toBe(firstKey);
+    expect(payload?.lines).toEqual(
+      expect.arrayContaining([
+        {
+          gs_item_id: 'item-1',
+          source_bucket_field_id: 'bf-1',
+          department_field_id: 'dept-store',
+          qty: 1,
+        },
+        {
+          gs_item_id: 'item-1',
+          source_bucket_field_id: 'bf-1',
+          department_field_id: 'dept-f-1',
+          qty: 2,
+        },
+      ]),
+    );
     spy.mockRestore();
+  });
+
+  it('DEC-55: Store issue page issues the selected lines and opens the DIN', async () => {
+    const queueSpy = vi
+      .spyOn(departmentRoutingApi, 'getIssueQueue')
+      .mockResolvedValue([mockIssueGroup]);
+    const issueSpy = vi
+      .spyOn(departmentRoutingApi, 'issueToDepartment')
+      .mockResolvedValue({ id: 'rtg-9' } as DepartmentRoutingOut);
+    const onOpenPrint = vi.fn();
+
+    render(<DepartmentIssuePage canIssue={true} onOpenGs={vi.fn()} onOpenPrint={onOpenPrint} />);
+
+    expect(await screen.findByText(/→ Technician \/ Repair/)).toBeInTheDocument();
+    const boxes = screen.getAllByRole('checkbox');
+    expect(boxes).toHaveLength(2);
+    fireEvent.click(boxes[1] as HTMLElement); // untick the 3-pc line
+    fireEvent.click(screen.getByRole('button', { name: /Issue 2 pcs & print DIN/i }));
+
+    await waitFor(() => {
+      expect(onOpenPrint).toHaveBeenCalledWith('rtg-9');
+    });
+    const [payload, key] = issueSpy.mock.calls[0] ?? [];
+    expect(payload).toEqual({
+      gs_id: 'gs-test-01',
+      department_field_id: 'dept-f-1',
+      plan_line_ids: ['pl-1'],
+      remarks: undefined,
+    });
+    expect(key).toMatch(/^web-/);
+    queueSpy.mockRestore();
+    issueSpy.mockRestore();
+  });
+
+  it('DEC-55: Store issue page without the approve permission shows no issue button', async () => {
+    const queueSpy = vi
+      .spyOn(departmentRoutingApi, 'getIssueQueue')
+      .mockResolvedValue([mockIssueGroup]);
+
+    render(<DepartmentIssuePage canIssue={false} onOpenGs={vi.fn()} onOpenPrint={vi.fn()} />);
+
+    expect(await screen.findByText(/→ Technician \/ Repair/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /print DIN/i })).not.toBeInTheDocument();
+    queueSpy.mockRestore();
+  });
+
+  it('DEC-55: Store issue page shows an empty state and a retry on errors', async () => {
+    const queueSpy = vi
+      .spyOn(departmentRoutingApi, 'getIssueQueue')
+      .mockRejectedValueOnce(new ApiError(500, 'INTERNAL', 'Boom', null, 'req-g2-err'))
+      .mockResolvedValueOnce([]);
+
+    render(<DepartmentIssuePage canIssue={true} onOpenGs={vi.fn()} onOpenPrint={vi.fn()} />);
+
+    expect(await screen.findByText(/Request ID: req-g2-err/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Retry/i }));
+    expect(await screen.findByText(/Nothing to issue/i)).toBeInTheDocument();
+    queueSpy.mockRestore();
   });
 });

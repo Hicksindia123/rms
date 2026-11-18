@@ -263,6 +263,12 @@ const DepartmentReceivingQueuePage = lazy(() =>
     default: m.DepartmentReceivingQueuePage,
   })),
 );
+// Gap plan G2 (DEC-55): Store Manager issues planned routing to departments.
+const DepartmentIssuePage = lazy(() =>
+  import('@/features/department-routing/DepartmentIssuePage').then((m) => ({
+    default: m.DepartmentIssuePage,
+  })),
+);
 const DepartmentIssueNotePrintPage = lazy(() =>
   import('@/features/department-routing/DepartmentIssueNotePrintPage').then((m) => ({
     default: m.DepartmentIssueNotePrintPage,
@@ -306,6 +312,7 @@ type NavTab =
   | 'store-issues'
   | 'dispatch'
   | 'department-routing'
+  | 'department-issue'
   | 'department-receiving'
   | 'accounts-entry'
   | 'dispatch-slips'
@@ -349,6 +356,7 @@ const STATIC_TABS: ReadonlySet<string> = new Set([
   'store-issues',
   'dispatch',
   'department-routing',
+  'department-issue',
   'department-receiving',
   'accounts-entry',
   'dispatch-slips',
@@ -1438,9 +1446,7 @@ function Shell() {
                   setActiveTab('login');
                 }}
               >
-                {can('department_routing', 'view') ||
-                can('department_routing', 'dispatch') ||
-                isSuperAdmin ? (
+                {can('department_routing', 'view') || isSuperAdmin ? (
                   second && third === 'print' ? (
                     <DepartmentIssueNotePrintPage
                       routingId={second}
@@ -1459,6 +1465,7 @@ function Shell() {
                     />
                   ) : (
                     <RmRoutingQueuePage
+                      canPlan={can('department_routing', 'create') || isSuperAdmin}
                       onOpenGs={(id: string) => {
                         navigate(`/gs/${id}`);
                       }}
@@ -1478,15 +1485,37 @@ function Shell() {
                 )}
               </RequireAuth>
             )}
+            {activeTab === 'department-issue' && (
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
+                {can('department_routing', 'view') || isSuperAdmin ? (
+                  <DepartmentIssuePage
+                    canIssue={can('department_routing', 'approve') || isSuperAdmin}
+                    onOpenGs={(id: string) => {
+                      navigate(`/gs/${id}`);
+                    }}
+                    onOpenPrint={(id: string) => {
+                      navigate(`/department-routing/${id}/print`);
+                    }}
+                  />
+                ) : (
+                  <EmptyState
+                    title="Access Restricted"
+                    hint="You do not have permission to view Department Issue."
+                  />
+                )}
+              </RequireAuth>
+            )}
             {activeTab === 'department-receiving' && (
               <RequireAuth
                 onSignIn={() => {
                   setActiveTab('login');
                 }}
               >
-                {can('department_routing', 'view') ||
-                can('department_routing', 'receive') ||
-                isSuperAdmin ? (
+                {can('department_routing', 'view') || isSuperAdmin ? (
                   <DepartmentReceivingQueuePage
                     onOpenGs={(id: string) => {
                       navigate(`/gs/${id}`);

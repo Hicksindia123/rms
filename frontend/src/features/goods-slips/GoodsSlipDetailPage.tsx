@@ -32,7 +32,7 @@ import type {
 } from '@/features/department-routing/types';
 import { DepartmentReconciliationPanel } from '@/features/department-routing/DepartmentReconciliationPanel';
 import { DepartmentLegsTimeline } from '@/features/department-routing/DepartmentLegsTimeline';
-import { RmRoutingDispatchModal } from '@/features/department-routing/RmRoutingDispatchModal';
+import { RmRoutingPlanModal } from '@/features/department-routing/RmRoutingPlanModal';
 import { DepartmentReceiveModal } from '@/features/department-routing/DepartmentReceiveModal';
 import { useApiQuery } from '@/hooks/useApiQuery';
 import { toApiError, type ApiError } from '@/lib/api/client';
@@ -134,6 +134,8 @@ export function GoodsSlipDetailPage({
 
   // Only users who may see department routing load it (e.g. Accounts got 403s here; Phase 7 check).
   const canViewRouting = isSuperAdmin || can('department_routing', 'view');
+  // T4 / DEC-55: the RM plans (department_routing/create); the store issues (approve).
+  const canPlanRouting = isSuperAdmin || can('department_routing', 'create');
   const loadDeptData = useCallback(() => {
     if (!canViewRouting) return;
     setLoadingRecon(true);
@@ -321,15 +323,11 @@ export function GoodsSlipDetailPage({
               <FileCheck2 size={16} aria-hidden="true" /> RM Review
             </Button>
           ) : null}
-          {gs.status === 'HELD_AT_INTERMEDIATE_STORE' && (
-            <Button
-              type="button"
-              variant="primary"
-              onClick={handleOpenDispatchModal}
-            >
-              <Send size={16} aria-hidden="true" /> Route to Department
+          {gs.status === 'HELD_AT_INTERMEDIATE_STORE' && canPlanRouting ? (
+            <Button type="button" variant="primary" onClick={handleOpenDispatchModal}>
+              <Send size={16} aria-hidden="true" /> Plan Routing
             </Button>
-          )}
+          ) : null}
           {gs.status === 'HELD_AT_INTERMEDIATE_STORE' &&
           onOpenFinalActions &&
           (can('final_actions', 'view') || isSuperAdmin) ? (
@@ -625,15 +623,11 @@ export function GoodsSlipDetailPage({
               <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>
                 Department Dispatches & Timeline Legs
               </h3>
-              {gs.status === 'HELD_AT_INTERMEDIATE_STORE' && (
-                <Button
-                  type="button"
-                  variant="primary"
-                  onClick={handleOpenDispatchModal}
-                >
-                  <Send size={16} aria-hidden="true" /> Route to Department
+              {gs.status === 'HELD_AT_INTERMEDIATE_STORE' && canPlanRouting ? (
+                <Button type="button" variant="primary" onClick={handleOpenDispatchModal}>
+                  <Send size={16} aria-hidden="true" /> Plan Routing
                 </Button>
-              )}
+              ) : null}
             </div>
             <DepartmentLegsTimeline
               legs={deptLegs}
@@ -643,12 +637,7 @@ export function GoodsSlipDetailPage({
               onReceiveRouting={(routingId) => {
                 departmentRoutingApi.getRouting(routingId).then(setReceiveModalRouting);
               }}
-              canReceive={
-                can('department_routing', 'receive') ||
-                can('department_routing', 'edit') ||
-                can('itemization', 'create') ||
-                isSuperAdmin
-              }
+              canReceive={can('department_routing', 'edit') || isSuperAdmin}
             />
           </div>
         </div>
@@ -678,8 +667,9 @@ export function GoodsSlipDetailPage({
         />
       ) : null}
       {dispatchModalState && (
-        <RmRoutingDispatchModal
+        <RmRoutingPlanModal
           state={dispatchModalState}
+          canPlan={canPlanRouting}
           onClose={() => setDispatchModalState(null)}
           onSuccess={() => {
             setDispatchModalState(null);

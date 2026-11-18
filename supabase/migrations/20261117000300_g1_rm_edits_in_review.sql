@@ -230,4 +230,6 @@ insert into public.notification_rules
   (event_type, name, include_context_recipients, recipient_role_codes, channels, priority, is_active)
 select 'RM_REVIEW_CHANGED', 'Verifier: RM modified items during review (DEC-54)', true,
        array['INWARD_VERIFIER'], array['IN_APP'], 'NORMAL', true
- where not exists (select 1 from public.notification_rules where event_type = 'RM_REVIEW_CHANGED');
+ where not exists (select 1 from public.notification_rules where event_type = 'RM_REVIEW_CHANGED')
+   -- 2026-11-18 (G2): roles are seed data; on a fresh reset seed.sql adds this rule instead.
+   and exists (select 1 from public.roles where code = 'INWARD_VERIFIER');

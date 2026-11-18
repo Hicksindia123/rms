@@ -212,8 +212,9 @@ select lives_ok(
 -- ---------------------------------------------------------------------------
 -- 4. Departments: available = counted - at departments; G-20 fix-forward
 -- ---------------------------------------------------------------------------
-insert into public.department_routings (id, routing_no, gs_id, department_field_id, department_code, department_label)
-select '77777777-7777-0000-0000-000000000d10', 'DIN/TEST/PH7/1', '77777777-7777-0000-0000-00000000000d', id, code, label
+insert into public.department_routings (id, routing_no, gs_id, department_field_id, department_code, department_label, location_id)
+select '77777777-7777-0000-0000-000000000d10', 'DIN/TEST/PH7/1', '77777777-7777-0000-0000-00000000000d', id, code, label,
+       (select id from public.inventory_locations where code = 'DEPT_TECHNICIAN_REPAIR')
   from public.item_field_library where field_group = 'DEPARTMENT' and code = 'REPAIR';
 insert into public.department_routing_lines (id, routing_id, gs_item_id, qty_sent)
 values ('77777777-7777-0000-0000-000000000d11', '77777777-7777-0000-0000-000000000d10', '77777777-7777-0000-0000-0000000000d1', 5);

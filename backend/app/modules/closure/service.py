@@ -55,7 +55,15 @@ CSR_FINAL_STATUS_SET = "CSR_FINAL_STATUS"  # DD r80 option set (label comes from
 DEFAULT_CLOSURE_ROLES = ["REPLACEMENT_MANAGER", "ACCOUNTS"]
 
 # Checklist groups driving the §6.5 status automation.
-STOCK_CODES = ("STOCK_NOT_IN_TRANSIT", "STOCK_ACCOUNTED", "NO_OPEN_PENDENCY", "NO_OPEN_DISCREPANCY")
+# DEC-57 (Q10): NO_PENDING_REACTION keeps the GS in process while pieces wait in Pending (even if
+# none of them is physically in the Pending Hold, e.g. scrapped at a department).
+STOCK_CODES = (
+    "STOCK_NOT_IN_TRANSIT",
+    "STOCK_ACCOUNTED",
+    "NO_OPEN_PENDENCY",
+    "NO_OPEN_DISCREPANCY",
+    "NO_PENDING_REACTION",
+)
 COMMERCIAL_CODES = (
     "CN_DECISION_RECORDED",
     "ALLOW_CN_COVERED",
@@ -83,6 +91,7 @@ def _fix(code: str, gs_id: UUID) -> ChecklistFix | None:
         "CSR_PACKAGING_CHECK": ("Handover", f"{gs}/handover"),
         "CSR_CN_ISSUED": ("Credit notes", "/credit-notes"),
         "AC_ENTRY_COMPLETE": ("Accounts entry", f"/accounts-entry/{gs_id}"),
+        "NO_PENDING_REACTION": ("Final actions", f"{gs}/final-actions"),
         "DISPATCH_SLIP_DISPATCHED": ("Dispatch slips", "/dispatch-slips"),
     }
     entry = links.get(code)

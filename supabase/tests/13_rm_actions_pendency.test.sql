@@ -31,8 +31,10 @@ select has_column('public', 'pendencies', 'resolution_action', 'public.pendencie
 select has_column('public', 'pendencies', 'lot_id', 'public.pendencies has lot_id column');
 select has_column('public', 'pendencies', 'stock_movement_id', 'public.pendencies has stock_movement_id column');
 
--- 5. Check index rm_item_actions_current_uq
-select has_index('public', 'rm_item_actions', 'rm_item_actions_current_uq', array['gs_item_id', 'action_code'], 'rm_item_actions has partial unique index on current actions');
+-- 5. Check index rm_item_actions_current_uq (gap plan G4 / DEC-57: per item, round, condition and
+--    action; the columns include an expression, so only the index itself is checked here, and
+--    44_g4_final_actions_per_condition covers the behaviour).
+select has_index('public', 'rm_item_actions', 'rm_item_actions_current_uq', 'rm_item_actions has partial unique index on current actions');
 
 -- 6. Check audit_log action check includes 'PRINT'
 select lives_ok(

@@ -115,7 +115,11 @@ export function AccountsEntryQueuePage({ onOpen }: Props) {
                       </p>
                     ) : null}
                     <p className="m-0 text-xs text-slate-500">
-                      {q.slip_no} v{q.version_no} · finalised {formatDateTime(q.finalised_at)}
+                      {q.slip_no} v{q.version_no}
+                      {(q.round_no ?? 1) > 1
+                        ? ` · Pending re-action (round ${String(q.round_no)})`
+                        : ''}{' '}
+                      · finalised {formatDateTime(q.finalised_at)}
                     </p>
                     <p className="m-0 mt-1 flex flex-wrap gap-1">
                       {q.is_completed ? (

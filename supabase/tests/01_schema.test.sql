@@ -75,7 +75,11 @@ select tables_are('public', array[
   -- Change plan Phase 9 (AMD-20)
   'party_emails',
   -- change plan Phase 10 (AMD-22)
-  'journey_steps', 'role_journey_steps'
+  'journey_steps', 'role_journey_steps',
+  -- gap plan G2 (DEC-55): RM routing plan
+  'department_routing_plan_lines',
+  -- gap plan G3 (DEC-56): current condition per item
+  'gs_item_conditions'
 ],'public schema holds foundation, inward and inventory ledger tables');
 
 select has_schema('rms_private');

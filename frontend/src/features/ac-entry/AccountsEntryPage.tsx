@@ -210,6 +210,9 @@ export function AccountsEntryPage({ gsId, onBack, onOpenGs, onOpenPartyNotificat
               {data.slip_no} v{data.version_no}
             </Badge>
           ) : null}
+          {(data.round_no ?? 1) > 1 ? (
+            <Badge variant="warning">Pending re-action · round {data.round_no}</Badge>
+          ) : null}
           <Button
             type="button"
             variant="ghost"
@@ -454,7 +457,7 @@ function EntryLineCard({
   return (
     <article
       className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900"
-      aria-label={`Line ${String(line.line_no)} ${line.action_label}`}
+      aria-label={`Line ${String(line.line_no)}${line.condition_label ? ` ${line.condition_label}` : ''} ${line.action_label}`}
     >
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
@@ -463,6 +466,7 @@ function EntryLineCard({
           </p>
           <p className="m-0 text-xs text-slate-500">
             {line.product_code ? `${line.product_code} · ` : ''}
+            {line.condition_label ? `${line.condition_label} · ` : ''}
             {line.action_label} · {line.qty} pc(s)
           </p>
         </div>

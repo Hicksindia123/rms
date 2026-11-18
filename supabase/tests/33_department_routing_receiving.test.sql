@@ -82,10 +82,12 @@ declare
 begin
   select id into v_dept_id from public.item_field_library where field_group = 'DEPARTMENT' and code = 'REPAIR' limit 1;
 
+  -- G2 (DEC-55): a routing carries its department location.
   insert into public.department_routings (
-    id, routing_no, gs_id, department_field_id, department_code, department_label, status
+    id, routing_no, gs_id, department_field_id, department_code, department_label, status, location_id
   ) values (
-    v_routing_id, 'DIN/TEST/001', v_gs_id, v_dept_id, 'REPAIR', 'Repair', 'DISPATCHED'
+    v_routing_id, 'DIN/TEST/001', v_gs_id, v_dept_id, 'REPAIR', 'Repair', 'DISPATCHED',
+    (select id from public.inventory_locations where code = 'DEPT_TECHNICIAN_REPAIR')
   );
 
   insert into public.department_routing_lines (
@@ -115,12 +117,16 @@ select lives_ok(
 );
 
 -- 8. Test G-20 rejects over-dispatch: trying to send 5 more when only 4 remain in store
+-- (G2 / DEC-55: the routing-line G-20 check is deferred to commit; forced immediate here.)
 select throws_matching(
-  $$insert into public.department_routing_lines (
-      routing_id, gs_item_id, qty_sent, qty_received
-    ) values (
-      '66666666-0000-0000-0000-000000000010', '66666666-0000-0000-0000-000000000002', 5, 0
-    )$$,
+  $q$do $x$ begin
+      insert into public.department_routing_lines (
+        routing_id, gs_item_id, qty_sent, qty_received
+      ) values (
+        '66666666-0000-0000-0000-000000000010', '66666666-0000-0000-0000-000000000002', 5, 0
+      );
+      set constraints trg_dept_routing_lines_g20 immediate;
+    end $x$ $q$,
   'G-20',
   'G-20: rejects routing lines that exceed available store quantity'
 );

@@ -28,7 +28,11 @@ from app.core.middleware import limiter
 from app.shared.storage import Bucket, get_storage
 from tests.conftest import JwtFactory
 from tests.integration.conftest import UserFactory, as_admin, build_test_app
-from tests.integration.test_department_routing import _seed_gs_held_at_intermediate_store
+from tests.integration.test_department_routing import (
+    _dispatch,
+    _plan,
+    _seed_gs_held_at_intermediate_store,
+)
 from tests.integration.test_gate_inward import _auth
 from tests.integration.test_unboxing import FakeStorage
 
@@ -75,8 +79,10 @@ def actors(users: UserFactory, make_token: JwtFactory) -> dict[str, Any]:
     rm_id = users.create(roles=["REPLACEMENT_MANAGER"], full_name="Pratham")
     acc_id = users.create(roles=["ACCOUNTS"], full_name="Deepak")
     tech_id = users.create(roles=["TECHNICIAN"], full_name="Ramesh")
+    store_id = users.create(roles=["INTERMEDIATE_STORE_MANAGER"], full_name="Sanjay")
     return {
         "aman": make_token(aman_id),
+        "store": make_token(store_id),
         "rm": make_token(rm_id),
         "rm_id": str(rm_id),
         "accounts": make_token(acc_id),
@@ -104,16 +110,9 @@ async def _dispatch_and_receive(
     sent: int,
     booked: dict[str, int],
 ) -> str:
-    """Send `sent` pcs to REPAIR (Phase 6) and book them back into the given outcome heads."""
-    res = await client.post(
-        "/api/v1/department-routing/dispatch",
-        headers=_auth(actors["rm"], _key()),
-        json={
-            "gs_id": fx["gs_id"],
-            "department_field_id": fx["repair_dept_id"],
-            "lines": [{"gs_item_id": fx["item_id"], "qty_sent": sent}],
-        },
-    )
+    """Send `sent` pcs to REPAIR (RM plans, Store Manager issues; DEC-55) and book them back
+    into the given outcome heads."""
+    res = await _dispatch(client, actors, fx, sent, _key())
     assert res.status_code == 200, res.text
     routing = res.json()
     if booked:
@@ -650,3 +649,60 @@ async def test_db_guards_reject_direct_writes(
         text("select rms_private.validate_final_action_split(cast(:g as uuid), true)"),
         {"g": fx["gs_id"]},
     )
+
+
+async def test_g21_finalise_blocked_while_routing_is_planned_not_issued(
+    client: AsyncClient, db_conn: Connection, actors: dict[str, Any]
+) -> None:
+    """DEC-55 / G-21: pieces planned for a department wait for the Store issue; finalising is
+    blocked (state blocker + 409) until they are issued (and received) or the plan is cancelled."""
+    fx = _seed_gs_held_at_intermediate_store(db_conn)
+    gs_id, item_id = fx["gs_id"], fx["item_id"]
+
+    # 2 pcs planned to REPAIR, not issued: the state shows the blocker ...
+    plan_res = await _plan(client, actors["rm"], fx, 2)
+    assert plan_res.status_code == 200, plan_res.text
+    state = (await client.get(_url(gs_id), headers=_auth(actors["rm"]))).json()
+    assert any("planned for a department" in b for b in state["finalise_blockers"])
+
+    # ... and the planned pieces cannot be actioned away (G-20: planned <= in store).
+    saved = await client.put(
+        _url(gs_id),
+        headers=_auth(actors["rm"], _key()),
+        json={"lines": [_split(item_id, SEND_NEW=10)]},
+    )
+    assert saved.status_code == 409, saved.text
+    assert saved.json()["error"]["code"] == "G-20"
+
+    # Once the store issues them, the 2 pcs are at the department: 8 are available for action.
+    plan_ids = [ln["id"] for ln in plan_res.json()["lines"]]
+    issue = await client.post(
+        "/api/v1/department-routing/issue",
+        headers=_auth(actors["store"], _key()),
+        json={
+            "gs_id": gs_id,
+            "department_field_id": fx["repair_dept_id"],
+            "plan_line_ids": plan_ids,
+        },
+    )
+    assert issue.status_code == 200, issue.text
+    state = (await client.get(_url(gs_id), headers=_auth(actors["rm"]))).json()
+    assert not any("planned for a department" in b for b in state["finalise_blockers"])
+    assert state["lines"][0]["available_qty"] == 8
+
+
+async def test_g21_plan_after_all_pieces_are_actioned_is_rejected(
+    client: AsyncClient, db_conn: Connection, actors: dict[str, Any]
+) -> None:
+    """DEC-55 / G-20: routing is planned before final actions; once every piece is actioned
+    nothing is left in the store to plan."""
+    fx = _seed_gs_held_at_intermediate_store(db_conn)
+    saved = await client.put(
+        _url(fx["gs_id"]),
+        headers=_auth(actors["rm"], _key()),
+        json={"lines": [_split(fx["item_id"], SEND_NEW=10)]},
+    )
+    assert saved.status_code == 200, saved.text
+    planned = await _plan(client, actors["rm"], fx, 2)
+    assert planned.status_code == 409, planned.text
+    assert "G-20" in planned.json()["error"]["message"]

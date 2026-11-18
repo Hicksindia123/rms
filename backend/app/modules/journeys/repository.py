@@ -54,33 +54,66 @@ _QUEUES: dict[str, str] = {
           from public.goods_slips g
           join public.custody_transfers t on t.id = g.transfer_slip_id {_GS_JOINS}
          where g.status = 'RM_REVIEW' and t.status = 'INITIATED'""",  # noqa: S608
-    # AMD-14: held at the store, nothing routed yet, not finalised (department_routing queue).
+    # AMD-14 / DEC-55: held at the store, nothing planned or routed yet, not finalised
+    # (department_routing queue).
     "DEPT_ROUTING": f"""
         select {_GS_COLS}, g.id as target_id, {_SINCE_STATUS} as since
           from public.goods_slips g {_GS_JOINS}
          where g.status = 'HELD_AT_INTERMEDIATE_STORE'
            and not exists (select 1 from public.department_routings dr
                             where dr.gs_id = g.id and dr.status <> 'CANCELLED')
+           and not exists (select 1 from public.department_routing_plan_lines p
+                            where p.gs_id = g.id and p.status <> 'CANCELLED')
            and not exists (select 1 from public.ac_action_slips s
                             where s.gs_id = g.id and s.status = 'CURRENT')""",  # noqa: S608
+    # DEC-55: planned lines waiting for the Store issue (department_routing issue queue).
+    "DEPT_ISSUE": f"""
+        select {_GS_COLS}, g.id as target_id, min(p.planned_at) as since
+          from public.department_routing_plan_lines p
+          join public.goods_slips g on g.id = p.gs_id {_GS_JOINS}
+         where p.status = 'PLANNED'
+         group by g.id, g.gs_no, pa.name, st.name""",  # noqa: S608
     # AMD-15: routings DISPATCHED / PARTIALLY_RECEIVED (department_routing receiving queue).
     "DEPT_RECEIVING": f"""
         select {_GS_COLS}, r.id as target_id, r.dispatched_at as since
           from public.department_routings r
           join public.goods_slips g on g.id = r.gs_id {_GS_JOINS}
          where r.status in ('DISPATCHED', 'PARTIALLY_RECEIVED')""",  # noqa: S608
-    # AMD-16 / DEC-46: held, routed before, nothing at a department now, not finalised yet.
+    # AMD-16 / DEC-46 / DEC-55: held, routed or planned before (a STORE "no work" plan counts),
+    # nothing at a department or waiting for the Store issue now, not finalised yet.
     "FINAL_ACTIONS": f"""
         select {_GS_COLS}, g.id as target_id, {_SINCE_STATUS} as since
           from public.goods_slips g {_GS_JOINS}
          where g.status = 'HELD_AT_INTERMEDIATE_STORE'
-           and exists (select 1 from public.department_routings dr
-                        where dr.gs_id = g.id and dr.status <> 'CANCELLED')
+           and (exists (select 1 from public.department_routings dr
+                         where dr.gs_id = g.id and dr.status <> 'CANCELLED')
+                or exists (select 1 from public.department_routing_plan_lines p
+                            where p.gs_id = g.id and p.status <> 'CANCELLED'))
            and not exists (select 1 from public.department_routings dr
                             where dr.gs_id = g.id
                               and dr.status in ('DISPATCHED', 'PARTIALLY_RECEIVED'))
+           and not exists (select 1 from public.department_routing_plan_lines p
+                            where p.gs_id = g.id and p.status = 'PLANNED')
            and not exists (select 1 from public.ac_action_slips s
-                            where s.gs_id = g.id and s.status = 'CURRENT')""",  # noqa: S608
+                            where s.gs_id = g.id and s.status = 'CURRENT')
+        union all
+        -- DEC-57 (Q10): Pending pieces to re-action — the last round is settled and left pieces
+        -- Pending, or a re-action round is saved but not finalised yet.
+        select {_GS_COLS}, g.id as target_id, {_SINCE_STATUS} as since
+          from public.goods_slips g {_GS_JOINS}
+          cross join lateral (
+            select coalesce(max(a.round_no), 0) as r
+              from public.rm_item_actions a
+              join public.gs_items gi on gi.id = a.gs_item_id
+             where gi.gs_id = g.id and a.is_current) lr
+         where g.status in ('IN_PROCESS', 'COMMERCIAL_RESOLUTION', 'AWAITING_NOTIFICATION')
+           and lr.r > 0
+           and ((rms_private.final_action_round_settled(g.id, lr.r)
+                 and rms_private.final_action_pending_qty(g.id, lr.r) > 0)
+                or (lr.r > 1
+                    and not exists (select 1 from public.ac_action_slips s
+                                     where s.gs_id = g.id and s.round_no = lr.r
+                                       and s.status = 'CURRENT')))""",  # noqa: S608
     # AMD-05 / BR-06: documents not yet acknowledged by Accounts (unboxing document queue).
     "ACCOUNTS_DOCS": f"""
         select {_GS_COLS}, g.id as target_id,

@@ -138,6 +138,11 @@ export const DepartmentIssueNotePrintPage: React.FC<DepartmentIssueNotePrintPage
             <span className="font-bold text-indigo-600 dark:text-indigo-400">
               {routing.department_label} ({routing.department_code})
             </span>
+            {routing.location_name ? (
+              <span className="block text-[11px] text-slate-500">
+                Stock location: {routing.location_name}
+              </span>
+            ) : null}
           </div>
 
           <div>
@@ -148,16 +153,16 @@ export const DepartmentIssueNotePrintPage: React.FC<DepartmentIssueNotePrintPage
           </div>
 
           <div>
-            <span className="text-slate-400 block font-medium">Dispatched By:</span>
+            <span className="text-slate-400 block font-medium">Issued By:</span>
             <span className="font-medium text-slate-800 dark:text-slate-200">
-              {routing.dispatched_by_name || 'Replacement Manager'}
+              {routing.dispatched_by_name || '—'}
             </span>
           </div>
         </div>
 
         {routing.remarks && (
           <div className="py-3 px-3.5 my-4 bg-slate-50 dark:bg-slate-800/40 rounded-lg text-xs italic text-slate-600 dark:text-slate-300 border border-slate-100 dark:border-slate-800">
-            <span className="font-semibold not-italic">RM Instructions:</span> {routing.remarks}
+            <span className="font-semibold not-italic">Remarks:</span> {routing.remarks}
           </div>
         )}
 
@@ -213,7 +218,7 @@ export const DepartmentIssueNotePrintPage: React.FC<DepartmentIssueNotePrintPage
           <div>
             <div className="h-14 border-b border-dashed border-slate-300 dark:border-slate-700" />
             <div className="mt-2 font-bold text-slate-800 dark:text-slate-200">
-              Dispatched By (Intermediate Store / RM)
+              Issued By (Intermediate Store)
             </div>
             <div className="text-[11px] text-slate-400">
               Name: {routing.dispatched_by_name || '______________________'}

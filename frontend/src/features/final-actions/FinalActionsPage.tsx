@@ -21,14 +21,22 @@ import { useAuth } from '@/features/auth/useAuth';
 import { finalActionsApi } from './api';
 import {
   allBalanced,
+  groupIssue,
+  groupKey,
+  groupsOf,
   initialAllocations,
   isDirty,
-  lineIssue,
   lineTotal,
   parseQty,
   toSavePayload,
 } from './rules';
-import type { AcSlipVersion, Allocations, FinalActionLine, FinalActionsState } from './types';
+import type {
+  AcSlipVersion,
+  Allocations,
+  FinalActionGroup,
+  FinalActionLine,
+  FinalActionsState,
+} from './types';
 
 interface Props {
   gsId: string;
@@ -37,8 +45,9 @@ interface Props {
 
 /**
  * RM Final Actions & "Replacement Slip – A/c Actions" (change plan Phase 7; AMD-16, AMD-17;
- * DEC-41; G-21). Per item the RM splits the qty available for action across the actions of the
- * resolved profile; finalising stores a server-side PDF that Accounts and the RM can print again.
+ * DEC-41; G-21). Per item + current condition (gap plan G4, DEC-57) the RM splits the qty available
+ * for action across the actions of the resolved profile; finalising stores a server-side PDF that
+ * Accounts and the RM can print again. Pieces left Pending are re-actioned in a later round.
  */
 export function FinalActionsPage({ gsId, onBack }: Props) {
   const { can } = useAuth();
@@ -114,8 +123,9 @@ export function FinalActionsPage({ gsId, onBack }: Props) {
   const editable = data.can_edit && !locked;
   const canPrint = can('final_actions', 'export');
 
-  const setQty = (itemId: string, code: string, raw: string) => {
-    setAllocs((prev) => ({ ...prev, [itemId]: { ...prev[itemId], [code]: parseQty(raw) } }));
+  const round = data.round_no ?? 1;
+  const setQty = (key: string, code: string, raw: string) => {
+    setAllocs((prev) => ({ ...prev, [key]: { ...prev[key], [code]: parseQty(raw) } }));
   };
 
   const save = () => {
@@ -201,9 +211,27 @@ export function FinalActionsPage({ gsId, onBack }: Props) {
             {data.current_revision_no > 0 ? (
               <Badge variant="neutral">Revision {data.current_revision_no}</Badge>
             ) : null}
+            {round > 1 ? <Badge variant="warning">Pending re-action · round {round}</Badge> : null}
           </p>
         </div>
       </div>
+
+      {round > 1 && !data.is_finalised ? (
+        <div
+          className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+          role="status"
+        >
+          <p className="m-0 font-semibold">
+            {String(data.pending_from_previous_round ?? 0)} pc(s) were left Pending in round{' '}
+            {round - 1}.
+          </p>
+          <p className="m-0 mt-1">
+            {data.waiting_for_previous_round
+              ? `They can be re-actioned once Accounts has completed round ${String(round - 1)} and its Dispatch Slip (if any) is dispatched.`
+              : 'They are in the Pending Hold. Choose their final action per condition; finalising sends a new A/c Actions slip to Accounts.'}
+          </p>
+        </div>
+      ) : null}
 
       {!data.on_final_action_flow ? (
         <ErrorState
@@ -232,6 +260,7 @@ export function FinalActionsPage({ gsId, onBack }: Props) {
                   ? ` · ${data.current_slip.finalised_by_name}`
                   : ''}
                 {` · ${String(data.current_slip.total_qty)} pc(s)`}
+                {data.is_completed ? ' · Accounts entry completed' : ''}
               </p>
             </div>
           </div>
@@ -300,14 +329,17 @@ export function FinalActionsPage({ gsId, onBack }: Props) {
       ) : null}
 
       {data.lines.length === 0 ? (
-        <p className="mt-4 text-sm text-slate-500">This goods slip has no item lines.</p>
+        <p className="mt-4 text-sm text-slate-500">
+          {round > 1 ? 'No pieces are waiting in Pending.' : 'This goods slip has no item lines.'}
+        </p>
       ) : (
         <div className="mt-4 flex flex-col gap-3">
           {data.lines.map((line) => (
             <LineCard
               key={line.gs_item_id}
               line={line}
-              row={allocs[line.gs_item_id] ?? {}}
+              allocs={allocs}
+              reaction={round > 1}
               editable={editable}
               onChange={setQty}
             />
@@ -321,8 +353,8 @@ export function FinalActionsPage({ gsId, onBack }: Props) {
             {locked
               ? 'Actions are finalised. Use Revise to change them.'
               : balanced
-                ? 'Every line is fully allocated (G-21).'
-                : 'Each line must allocate exactly its available qty (G-21).'}
+                ? 'Every line and condition is fully allocated (G-21).'
+                : 'Each line must allocate exactly its available qty, per condition (G-21).'}
           </p>
           <div className="flex flex-wrap gap-2">
             {!locked ? (
@@ -381,7 +413,9 @@ export function FinalActionsPage({ gsId, onBack }: Props) {
                   className="rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-800"
                 >
                   <p className="m-0 font-semibold">
-                    Revision {r.revision_no} · {formatDateTime(r.decided_at)}
+                    Revision {r.revision_no}
+                    {(r.round_no ?? 1) > 1 ? ` (round ${String(r.round_no)})` : ''} ·{' '}
+                    {formatDateTime(r.decided_at)}
                     {r.decided_by_name ? ` · ${r.decided_by_name}` : ''}
                   </p>
                   {r.reason ? (
@@ -389,7 +423,10 @@ export function FinalActionsPage({ gsId, onBack }: Props) {
                   ) : null}
                   <p className="m-0 mt-1 text-xs">
                     {r.lines
-                      .map((l) => `#${String(l.line_no)} ${l.action_label} ${String(l.qty)}`)
+                      .map(
+                        (l) =>
+                          `#${String(l.line_no)}${l.condition_label ? ` ${l.condition_label}` : ''} ${l.action_label} ${String(l.qty)}`,
+                      )
                       .join(' · ')}
                   </p>
                 </li>
@@ -424,7 +461,9 @@ export function FinalActionsPage({ gsId, onBack }: Props) {
         }
       >
         <p className="text-sm">
-          The Replacement Slip – A/c Actions PDF is generated and stored, and Accounts is notified.
+          {round > 1
+            ? `A new Replacement Slip – A/c Actions version for the re-actioned Pending pieces (round ${String(round)}) is generated and stored, and Accounts is notified.`
+            : 'The Replacement Slip – A/c Actions PDF is generated and stored, and Accounts is notified.'}{' '}
           Later changes need a reason and create a new slip version.
         </p>
         <label htmlFor="fa-finalise-remarks" className="mt-2 block text-sm font-medium">
@@ -445,24 +484,26 @@ export function FinalActionsPage({ gsId, onBack }: Props) {
 
 function LineCard({
   line,
-  row,
+  allocs,
+  reaction,
   editable,
   onChange,
 }: {
   line: FinalActionLine;
-  row: Record<string, number>;
+  allocs: Allocations;
+  reaction: boolean;
   editable: boolean;
-  onChange: (itemId: string, code: string, raw: string) => void;
+  onChange: (key: string, code: string, raw: string) => void;
 }) {
-  const issue = lineIssue(line, row);
-  const total = lineTotal(row);
-  // Saved actions no longer in the profile stay visible so the RM can move their qty.
-  const codes = [
-    ...line.allowed_actions.map((a) => ({ code: a.code, label: a.label, allowed: true })),
-    ...line.current_actions
-      .filter((c) => !line.allowed_actions.some((a) => a.code === c.action_code))
-      .map((c) => ({ code: c.action_code, label: c.label, allowed: false })),
-  ];
+  const groups = groupsOf(line);
+  const total = groups.reduce(
+    (sum, g) => sum + lineTotal(allocs[groupKey(line.gs_item_id, g.condition_field_id)]),
+    0,
+  );
+  const balanced = groups.every(
+    (g) =>
+      groupIssue(g.available_qty, allocs[groupKey(line.gs_item_id, g.condition_field_id)]) === null,
+  );
   return (
     <article
       className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900"
@@ -477,7 +518,7 @@ function LineCard({
             <p className="m-0 text-xs text-slate-500">{line.product_code}</p>
           ) : null}
         </div>
-        <Badge variant={issue ? 'warning' : 'success'}>
+        <Badge variant={balanced ? 'success' : 'warning'}>
           {String(total)} / {String(line.available_qty)} allocated
         </Badge>
       </header>
@@ -492,7 +533,7 @@ function LineCard({
           <dd className="m-0 font-bold">{line.at_departments_qty}</dd>
         </div>
         <div className="rounded-lg bg-sky-50 p-2 dark:bg-sky-950/30">
-          <dt className="text-sky-700 dark:text-sky-300">Available</dt>
+          <dt className="text-sky-700 dark:text-sky-300">{reaction ? 'Pending' : 'Available'}</dt>
           <dd className="m-0 font-bold">{line.available_qty}</dd>
         </div>
       </dl>
@@ -508,53 +549,125 @@ function LineCard({
         </p>
       ) : null}
 
-      {codes.length === 0 ? (
+      {(line.current_conditions ?? []).some((c) => c.current_qty > 0) ? (
+        <p className="mt-2 flex flex-wrap gap-1 text-xs">
+          <span className="text-slate-500">Current condition:</span>
+          {(line.current_conditions ?? [])
+            .filter((c) => c.current_qty > 0)
+            .map((c) => (
+              <Badge key={c.field_code} variant="neutral">
+                {c.field_label} {c.current_qty}
+                {c.original_qty !== c.current_qty ? ` (counted ${String(c.original_qty)})` : ''}
+              </Badge>
+            ))}
+        </p>
+      ) : null}
+
+      {line.allowed_actions.length === 0 && line.current_actions.length === 0 ? (
         <p className="mt-3 text-sm text-rose-700">
           No actions are configured for this product (Admin → Item Field Profiles).
         </p>
       ) : (
-        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {codes.map((c) => {
-            const id = `fa-${line.gs_item_id}-${c.code}`;
-            return (
-              <label
-                key={c.code}
-                htmlFor={id}
-                className="flex min-h-[44px] items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-1 text-sm dark:border-slate-700"
-              >
-                <span className="min-w-0">
-                  {c.label}
-                  {!c.allowed ? (
-                    <span className="block text-xs text-rose-600">No longer in the profile</span>
-                  ) : null}
-                </span>
-                <input
-                  id={id}
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  aria-label={`${c.label} qty, line ${String(line.line_no)}`}
-                  className="h-11 w-20 rounded-md border border-slate-300 bg-white px-2 text-right text-base dark:border-slate-600 dark:bg-slate-800"
-                  value={String(row[c.code] ?? 0)}
-                  disabled={!editable || (!c.allowed && (row[c.code] ?? 0) === 0)}
-                  onFocus={(e) => {
-                    e.target.select();
-                  }}
-                  onChange={(e) => {
-                    onChange(line.gs_item_id, c.code, e.target.value);
-                  }}
-                />
-              </label>
-            );
-          })}
-        </div>
+        groups.map((g) => (
+          <GroupInputs
+            key={g.condition_field_id ?? 'all'}
+            line={line}
+            group={g}
+            row={allocs[groupKey(line.gs_item_id, g.condition_field_id)] ?? {}}
+            single={groups.length === 1 && !g.condition_label}
+            editable={editable}
+            onChange={onChange}
+          />
+        ))
       )}
+    </article>
+  );
+}
+
+/** DEC-57: the action quantities of one item + condition group. */
+function GroupInputs({
+  line,
+  group,
+  row,
+  single,
+  editable,
+  onChange,
+}: {
+  line: FinalActionLine;
+  group: FinalActionGroup;
+  row: Record<string, number>;
+  single: boolean;
+  editable: boolean;
+  onChange: (key: string, code: string, raw: string) => void;
+}) {
+  const key = groupKey(line.gs_item_id, group.condition_field_id);
+  const issue = groupIssue(group.available_qty, row);
+  const where = group.condition_label ? ` · ${group.condition_label}` : '';
+  // Saved actions no longer in the profile stay visible so the RM can move their qty.
+  const codes = [
+    ...line.allowed_actions.map((a) => ({ code: a.code, label: a.label, allowed: true })),
+    ...group.current_actions
+      .filter((c) => !line.allowed_actions.some((a) => a.code === c.action_code))
+      .map((c) => ({ code: c.action_code, label: c.label, allowed: false })),
+  ];
+  return (
+    <section
+      className={
+        single ? 'mt-3' : 'mt-3 rounded-lg border border-slate-200 p-3 dark:border-slate-700'
+      }
+      aria-label={single ? undefined : `Line ${String(line.line_no)}${where}`}
+    >
+      {!single ? (
+        <header className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="m-0 text-sm font-semibold" style={{ wordBreak: 'break-word' }}>
+            {group.condition_label ?? 'All pieces'}
+          </p>
+          <Badge variant={issue ? 'warning' : 'success'}>
+            {String(lineTotal(row))} / {String(group.available_qty)}
+          </Badge>
+        </header>
+      ) : null}
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {codes.map((c) => {
+          const id = `fa-${key}-${c.code}`;
+          return (
+            <label
+              key={c.code}
+              htmlFor={id}
+              className="flex min-h-[44px] items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-1 text-sm dark:border-slate-700"
+            >
+              <span className="min-w-0">
+                {c.label}
+                {!c.allowed ? (
+                  <span className="block text-xs text-rose-600">No longer in the profile</span>
+                ) : null}
+              </span>
+              <input
+                id={id}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                aria-label={`${c.label} qty, line ${String(line.line_no)}${where}`}
+                className="h-11 w-20 rounded-md border border-slate-300 bg-white px-2 text-right text-base dark:border-slate-600 dark:bg-slate-800"
+                value={String(row[c.code] ?? 0)}
+                disabled={!editable || (!c.allowed && (row[c.code] ?? 0) === 0)}
+                onFocus={(e) => {
+                  e.target.select();
+                }}
+                onChange={(e) => {
+                  onChange(key, c.code, e.target.value);
+                }}
+              />
+            </label>
+          );
+        })}
+      </div>
       {issue && editable ? (
         <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300" role="status">
           {issue}
         </p>
       ) : null}
-    </article>
+    </section>
   );
 }
 
@@ -591,6 +704,10 @@ function SlipVersions({
                   <Badge variant={s.status === 'CURRENT' ? 'success' : 'neutral'}>
                     {s.status === 'CURRENT' ? 'Current' : 'Superseded'}
                   </Badge>
+                  {(s.round_no ?? 1) > 1 ? (
+                    <Badge variant="warning">Pending re-action · round {s.round_no}</Badge>
+                  ) : null}
+                  {s.is_completed ? <Badge variant="info">Accounts completed</Badge> : null}
                 </p>
                 <p className="m-0 text-xs text-slate-500">
                   {formatDateTime(s.finalised_at)}

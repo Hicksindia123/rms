@@ -56,8 +56,9 @@ select throws_matching(
 
 -- 3. Valid routing; client-supplied department label is replaced by the library snapshot (G-18).
 select lives_ok(
-  $$insert into public.department_routings (id, routing_no, gs_id, department_field_id, department_code, department_label)
-    select '77777777-0000-0000-0000-000000000100', 'DIN/TEST/H/3', '77777777-0000-0000-0000-00000000000a', id, 'FAKE', 'Fake label'
+  $$insert into public.department_routings (id, routing_no, gs_id, department_field_id, department_code, department_label, location_id)
+    select '77777777-0000-0000-0000-000000000100', 'DIN/TEST/H/3', '77777777-0000-0000-0000-00000000000a', id, 'FAKE', 'Fake label',
+           (select id from public.inventory_locations where code = 'DEPT_TECHNICIAN_REPAIR')
       from public.item_field_library where field_group = 'DEPARTMENT' and code = 'REPAIR'$$,
   'Routing accepted for a held GS and an active department'
 );

@@ -14,6 +14,11 @@ AMD-18, AMD-19; DEC-22, DEC-26, DEC-41, DEC-47; G-15, G-16, G-18, G-22).
   are issued from the intermediate store through `rms_move_stock` (G-16) to the location the
   `dispatch.returned_goods_location_by_action` setting names per action code (DEC-47), the slip
   becomes DISPATCHED and the goods slip continues to the existing closure engine (G-15).
+* Rounds (gap plan G4, DEC-57): pieces marked Pending go to the Pending Hold when their round
+  settles; the RM re-actions them later in a follow-up round with its own A/c Actions slip, Accounts
+  entry and (if goods ship) Dispatch Slip. Round 1 works while the goods slip is held at the
+  intermediate store; later rounds while it is open after that stage, moving stock out of the
+  Pending Hold. The screen shows the latest round's CURRENT slip.
 
 Each command runs in one transaction and is idempotent on `Idempotency-Key` (G-16). The DB enforces
 G-22 again with triggers, so no path can bypass it.
@@ -79,6 +84,11 @@ HELD_STATUS = "HELD_AT_INTERMEDIATE_STORE"
 CLOSURE_ENTRY_STATUS = "IN_PROCESS"
 ACCOUNTS_STEP = "S6_ACCOUNTS_CN"
 STORE_LOCATION = "INTERMEDIATE_STORE"
+# DEC-57: re-action rounds take their pieces from the Pending Hold (where round N-1 put them).
+PENDING_HOLD_LOCATION = "PENDING_HOLD"
+# DEC-57: statuses in which a re-action round (round >= 2) is entered / completed / dispatched; the
+# DB guards (G-22) check the same list.
+OPEN_AFTER_HOLD = frozenset({"IN_PROCESS", "COMMERCIAL_RESOLUTION", "AWAITING_NOTIFICATION"})
 RETURNED_GOODS_SETTING = "dispatch.returned_goods_location_by_action"
 PDF_MIME = "application/pdf"
 
@@ -135,6 +145,7 @@ def _line_out(row: dict[str, Any]) -> AcEntryLine:
         product_name=row["product_name"],
         action_code=row["action_code"],
         action_label=row["action_label"],
+        condition_label=row.get("condition_label"),
         qty=row["qty"],
         requires_cn=row["requires_cn"],
         requires_challan=row["requires_challan"],
@@ -174,6 +185,7 @@ def _dslip_out(session: Session, row: dict[str, Any]) -> DispatchSlipOut:
         party_name=row["party_name"],
         ac_slip_no=row["ac_slip_no"],
         ac_version_no=row["ac_version_no"],
+        ac_round_no=int(row.get("ac_round_no") or 1),
         dispatch_remarks=row["dispatch_remarks"],
         generated_by_name=row["generated_by_name"],
         dispatched_by_name=row["dispatched_by_name"],
@@ -182,6 +194,27 @@ def _dslip_out(session: Session, row: dict[str, Any]) -> DispatchSlipOut:
 
 
 # --- shared commercial-completion steps (service-level; used by both services below) -----------
+
+
+def _stage_ok(gs_status: str, round_no: int) -> bool:
+    """DEC-57: round 1 is handled while the goods slip is held at the intermediate store; a
+    re-action round while it is open after that stage."""
+    if round_no == 1:
+        return gs_status == HELD_STATUS
+    return gs_status in OPEN_AFTER_HOLD
+
+
+def _stage_text(round_no: int) -> str:
+    return (
+        "held at the intermediate store"
+        if round_no == 1
+        else "open after the store stage (Pending re-action)"
+    )
+
+
+def _source_location(round_no: int) -> str:
+    """Where a round's pieces wait: the intermediate store (round 1) or the Pending Hold."""
+    return STORE_LOCATION if round_no == 1 else PENDING_HOLD_LOCATION
 
 
 def _returned_goods_map(session: Session) -> dict[str, str]:
@@ -205,35 +238,35 @@ def _settle_returned_goods(
     session: Session,
     *,
     ac_slip_id: UUID,
+    source_code: str,
     lines: list[dict[str, Any]],
     reference_type: str,
     reference_id: UUID,
     reason: str,
     actor_id: UUID,
 ) -> list[dict[str, Any]]:
-    """Issue the returned pieces of each action line from the intermediate store (DEC-47).
+    """Move the returned pieces of each action line out of `source_code` (the intermediate store,
+    or the Pending Hold for a re-action round) to the location the setting names (DEC-47, DEC-57:
+    Pending -> Pending Hold, Not Allowed -> Rejected Hold, Send New -> Non-Functional Store).
 
-    Goods-shipping lines (requires_challan) go first and must find their full qty in the store
-    (rms_move_stock raises G-16 otherwise). Other lines move what is still in the store: pieces
-    already in a terminal location (e.g. wastage in SCRAP_DISPOSED, Phase 6) stay there.
-    Idempotent per entry line (G-16): the key is the A/c Actions slip + entry line.
+    Lines whose pieces themselves leave (destination class DISPATCHED, e.g. Send Repaired) go first
+    and must find their full qty at the source (rms_move_stock raises G-16 otherwise). Other lines
+    move what is still there: pieces already in a terminal location (e.g. wastage in SCRAP_DISPOSED,
+    Mercury Extracted in the Non-Functional Store) stay. A destination equal to the source is a
+    no-op (Pending again in a re-action round). Idempotent per entry line (G-16).
     """
     mapping = _returned_goods_map(session)
     if not mapping:
         return []
-    store = ledger_service.get_location_by_code(session, STORE_LOCATION)
+    store = ledger_service.get_location_by_code(session, source_code)
     if not store:
         raise Conflict(
-            f"Inventory location {STORE_LOCATION} is not configured", code="LOCATION_NOT_FOUND"
+            f"Inventory location {source_code} is not configured", code="LOCATION_NOT_FOUND"
         )
     targets: dict[str, dict[str, Any]] = {}
-    moves: list[dict[str, Any]] = []
-    ordered = sorted(lines, key=lambda ln: (not ln["requires_challan"], ln["line_no"]))
-    for ln in ordered:
+    for ln in lines:
         loc_code = mapping.get(ln["action_code"])
-        if not loc_code:
-            continue  # DEC-47: pieces stay where they are; the closure checklist shows them.
-        if loc_code not in targets:
+        if loc_code and loc_code not in targets:
             loc = ledger_service.get_location_by_code(session, loc_code)
             if not loc:
                 log.error("returned_goods_location_missing", location_code=loc_code)
@@ -243,9 +276,20 @@ def _settle_returned_goods(
                     details={"key": RETURNED_GOODS_SETTING, "location_code": loc_code},
                 )
             targets[loc_code] = loc
+
+    def ships(ln: dict[str, Any]) -> bool:
+        loc_code = mapping.get(ln["action_code"])
+        return bool(loc_code) and targets[str(loc_code)]["location_class"] == "DISPATCHED"
+
+    moves: list[dict[str, Any]] = []
+    ordered = sorted(lines, key=lambda ln: (not ships(ln), ln["line_no"]))
+    for ln in ordered:
+        loc_code = mapping.get(ln["action_code"])
+        if not loc_code or loc_code == source_code:
+            continue  # pieces stay where they are; the closure checklist shows them.
         target = targets[loc_code]
         lot_id = repo.find_lot_for_item(session, ln["gs_item_id"])
-        strict = bool(ln["requires_challan"])
+        strict = ships(ln)
         if lot_id is None:
             if strict:
                 raise ValidationFailed(
@@ -277,7 +321,10 @@ def _settle_returned_goods(
 
 def _to_closure(session: Session, gs: dict[str, Any], *, reason: str, by: UUID) -> str | None:
     """AMD-19 / G-15: the goods slip leaves the intermediate store stage for the closure engine,
-    which decides the next status from its single checklist (DB guards still apply)."""
+    which decides the next status from its single checklist (DB guards still apply). DEC-57: after
+    a re-action round the goods slip is already past the store stage; the engine re-evaluates."""
+    if gs["status"] != HELD_STATUS:
+        return closure_service.sync_status(session, gs["id"], by) or str(gs["status"])
     gs_service.change_status(
         session,
         gs_id=gs["id"],
@@ -321,7 +368,8 @@ class AcEntryService:
         completion = repo.get_completion(session, slip["id"]) if slip else None
         dslip = repo.get_dispatch_slip_for_ac_slip(session, slip["id"]) if slip else None
         needing = [ln for ln in lines if ln.requires_cn or ln.requires_challan]
-        held = gs["status"] == HELD_STATUS
+        round_no = int(slip["round_no"]) if slip else 1
+        stage_ok = _stage_ok(str(gs["status"]), round_no)
 
         blockers: list[str] = []
         if slip is None:
@@ -331,8 +379,8 @@ class AcEntryService:
             )
         elif completion is not None:
             blockers.append("The Accounts entry of this slip is already complete.")
-        elif not held:
-            blockers.append("The goods slip is not held at the intermediate store.")
+        elif not stage_ok:
+            blockers.append(f"The goods slip is not {_stage_text(round_no)}.")
         for ln in needing:
             if not ln.is_complete:
                 missing = [
@@ -347,7 +395,7 @@ class AcEntryService:
                     f"Line {ln.line_no} {ln.action_label}: {' and '.join(missing)} missing."
                 )
 
-        editable = slip is not None and completion is None and held
+        editable = slip is not None and completion is None and stage_ok
         return AcEntryState(
             gs_id=gs["id"],
             gs_no=gs["gs_no"],
@@ -357,6 +405,7 @@ class AcEntryService:
             ac_action_slip_id=slip["id"] if slip else None,
             slip_no=slip["slip_no"] if slip else None,
             version_no=slip["version_no"] if slip else None,
+            round_no=round_no,
             lines=lines,
             lines_needing_data=len(needing),
             lines_complete=sum(1 for ln in needing if ln.is_complete),
@@ -390,11 +439,12 @@ class AcEntryService:
                 f"G-22: the Accounts entry of {slip['slip_no']} v{slip['version_no']} is complete "
                 "and frozen",
             )
-        if gs["status"] != HELD_STATUS:
+        round_no = int(slip["round_no"])
+        if not _stage_ok(str(gs["status"]), round_no):
             raise SystemGuardViolation(
                 "G-22",
-                "G-22: Accounts data changes only while the goods slip is held at the "
-                f"intermediate store (status {gs['status']})",
+                f"G-22: Accounts data changes only while the goods slip is {_stage_text(round_no)}"
+                f" (status {gs['status']})",
             )
         return gs, slip
 
@@ -578,6 +628,7 @@ class AcEntryService:
             moves = _settle_returned_goods(
                 session,
                 ac_slip_id=slip["id"],
+                source_code=_source_location(int(slip["round_no"])),
                 lines=lines,
                 reference_type=repo.AC_SLIP_ENTITY,
                 reference_id=slip["id"],
@@ -653,6 +704,7 @@ class AcEntryService:
                     "product_name": ln["product_name"],
                     "action_code": ln["action_code"],
                     "action_label": ln["action_label"],
+                    "condition_label": ln.get("condition_label"),
                     "qty": ln["qty"],
                     "challan_no": ln["challan_no"],
                     "challan_date": _fmt_date(ln["challan_date"], fmt, tz),
@@ -695,6 +747,7 @@ class AcEntryService:
         to_send = "\n".join(
             f"• {ln['action_label']}: {ln['qty']} pc - "
             f"{' '.join(x for x in (ln['product_code'], ln['product_name']) if x)}"
+            + (f" [{ln['condition_label']}]" if ln.get("condition_label") else "")
             + (
                 f" (Challan {ln['challan_no']}"
                 + (f" dt {ln['challan_date']}" if ln["challan_date"] else "")
@@ -771,18 +824,20 @@ class AcEntryService:
                     title=title("items", "Goods to Ship"),
                     columns=[
                         SlipColumn("#", 0.4, "right"),
-                        SlipColumn("Code", 1.0),
-                        SlipColumn("Product", 2.4),
-                        SlipColumn("Action", 1.3),
-                        SlipColumn("Qty", 0.6, "right"),
-                        SlipColumn("Challan No.", 1.2),
-                        SlipColumn("Challan Date", 1.0),
+                        SlipColumn("Code", 0.9),
+                        SlipColumn("Product", 2.0),
+                        SlipColumn("Condition", 1.1),
+                        SlipColumn("Action", 1.1),
+                        SlipColumn("Qty", 0.5, "right"),
+                        SlipColumn("Challan No.", 1.1),
+                        SlipColumn("Challan Date", 0.9),
                     ],
                     rows=[
                         [
                             str(ln["line_no"]),
                             ln["product_code"],
                             ln["product_name"],
+                            ln.get("condition_label") or "",
                             ln["action_label"],
                             str(ln["qty"]),
                             ln["challan_no"],
@@ -790,7 +845,7 @@ class AcEntryService:
                         ]
                         for ln in c["lines"]
                     ],
-                    total_row=["", "", "Total", "", str(c["total_qty"]), "", ""],
+                    total_row=["", "", "Total", "", "", str(c["total_qty"]), "", ""],
                 )
             ],
             signatures=signatures,
@@ -853,10 +908,11 @@ class DispatchSlipService:
         gs = repo.get_gs_header(session, locked["gs_id"], lock=True)
         if not gs:
             raise NotFound("Goods slip not found", code="GS_NOT_FOUND")
-        if gs["status"] != HELD_STATUS:
+        ac_slip = repo.get_ac_slip(session, locked["ac_action_slip_id"])
+        round_no = int(ac_slip["round_no"]) if ac_slip else 1
+        if not _stage_ok(str(gs["status"]), round_no):
             raise Conflict(
-                f"Goods slip {gs['gs_no']} is not held at the intermediate store "
-                f"(status {gs['status']})",
+                f"Goods slip {gs['gs_no']} is not {_stage_text(round_no)} (status {gs['status']})",
                 code="INVALID_GS_STATUS",
             )
         today = datetime.now(_tz(session)).date()
@@ -879,6 +935,7 @@ class DispatchSlipService:
         moves = _settle_returned_goods(
             session,
             ac_slip_id=locked["ac_action_slip_id"],
+            source_code=_source_location(round_no),
             lines=lines,
             reference_type=repo.DISPATCH_SLIP_ENTITY,
             reference_id=slip_id,

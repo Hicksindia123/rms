@@ -49,7 +49,7 @@ set local session_replication_role = origin;
 
 select is(
   (select count(*)::int from rms_private.gs_closure_checklist('00000000-0000-0000-0000-00000000f730')),
-  14, 'the checklist evaluates 14 items (12 + AC_ENTRY_COMPLETE, DISPATCH_SLIP_DISPATCHED: Phase 8)');
+  15, 'the checklist evaluates 15 items (12 + AC_ENTRY_COMPLETE, DISPATCH_SLIP_DISPATCHED: Phase 8 + NO_PENDING_REACTION: G4)');
 
 -- G-15 / BR-38: an issued CN without a prior party notification blocks closure.
 select throws_matching(

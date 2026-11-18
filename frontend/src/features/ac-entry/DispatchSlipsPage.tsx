@@ -257,7 +257,8 @@ export function DispatchSlipsPage({ onOpenGs }: Props) {
                       className="flex flex-wrap justify-between gap-x-3 rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-800/50"
                     >
                       <span className="min-w-0" style={{ wordBreak: 'break-word' }}>
-                        #{ln.line_no} {ln.product_name} · {ln.action_label}
+                        #{ln.line_no} {ln.product_name}
+                        {ln.condition_label ? ` · ${ln.condition_label}` : ''} · {ln.action_label}
                       </span>
                       <span className="text-xs text-slate-600 dark:text-slate-300">
                         {ln.qty} pc(s) · Challan {ln.challan_no} ({formatDate(ln.challan_date)})

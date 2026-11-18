@@ -269,39 +269,41 @@ async def test_department_routing_dispatch_and_guard_g20(
     item_id = fixture["item_id"]
     repair_dept_id = fixture["repair_dept_id"]
 
-    # Over-dispatch: attempt to send 15 pcs when only 10 counted (G-20 guard violation)
-    res_over = await client.post(
-        "/api/v1/department-routing/dispatch",
-        headers=_auth(actors["rm"], _key()),
-        json={
-            "gs_id": gs_id,
-            "department_field_id": repair_dept_id,
-            "lines": [{"gs_item_id": item_id, "qty_sent": 15}],
-        },
-    )
-    assert res_over.status_code in (409, 422), res_over.text
+    # Over-plan: 15 pcs when only 10 counted (G-20 guard violation)
+    res_over = await _plan(client, actors["rm"], fixture, 15)
+    assert res_over.status_code == 409, res_over.text
     assert "G-20" in res_over.text
 
-    # Valid dispatch: send 6 pcs to REPAIR
-    res_dispatch = await client.post(
-        "/api/v1/department-routing/dispatch",
+    # Valid plan + Store issue: 6 pcs to Technician / Repair
+    res_plan = await client.post(
+        "/api/v1/department-routing/plan",
         headers=_auth(actors["rm"], _key()),
         json={
             "gs_id": gs_id,
-            "department_field_id": repair_dept_id,
-            "lines": [{"gs_item_id": item_id, "qty_sent": 6, "notes": "Check heating element"}],
-            "remarks": "Dispatched for initial heating test",
+            "lines": [
+                {
+                    "gs_item_id": item_id,
+                    "department_field_id": repair_dept_id,
+                    "qty": 6,
+                    "notes": "Check heating element",
+                }
+            ],
         },
     )
+    assert res_plan.status_code == 200, res_plan.text
+    plan_ids = [ln["id"] for ln in res_plan.json()["lines"]]
+    res_dispatch = await _issue(client, actors["store"], fixture, plan_ids, _key())
     assert res_dispatch.status_code == 200, res_dispatch.text
     routing = res_dispatch.json()
     assert routing["routing_no"].startswith("DIN/")
     assert routing["status"] == "DISPATCHED"
     assert routing["department_code"] == "REPAIR"
+    assert routing["location_code"] == "DEPT_TECHNICIAN_REPAIR"
     assert len(routing["lines"]) == 1
     assert routing["lines"][0]["qty_sent"] == 6
     assert routing["lines"][0]["qty_received"] == 0
     assert routing["lines"][0]["qty_pending"] == 6
+    assert routing["lines"][0]["notes"] == "Check heating element"
 
     # G-20 conservation verified: 4 in store + 6 at dept = 10
     res_recon = await client.get(
@@ -315,17 +317,9 @@ async def test_department_routing_dispatch_and_guard_g20(
     assert recon["total_at_departments"] == 6
     assert recon["total_outcomes"] == 0
 
-    # Over-dispatch second leg: only 4 left in store, try to send 5
-    res_over2 = await client.post(
-        "/api/v1/department-routing/dispatch",
-        headers=_auth(actors["rm"], _key()),
-        json={
-            "gs_id": gs_id,
-            "department_field_id": repair_dept_id,
-            "lines": [{"gs_item_id": item_id, "qty_sent": 5}],
-        },
-    )
-    assert res_over2.status_code in (409, 422)
+    # Over-plan second leg: only 4 left in store, try to plan 5
+    res_over2 = await _plan(client, actors["rm"], fixture, 5)
+    assert res_over2.status_code == 409, res_over2.text
     assert "G-20" in res_over2.text
 
 
@@ -337,20 +331,10 @@ async def test_department_receiving_and_outcome_heads(
     G-20 conservation."""
     fixture = _seed_gs_held_at_intermediate_store(db_conn)
     gs_id = fixture["gs_id"]
-    item_id = fixture["item_id"]
-    repair_dept_id = fixture["repair_dept_id"]
 
-    # Dispatch 6 pcs to REPAIR
-    res_dispatch = await client.post(
-        "/api/v1/department-routing/dispatch",
-        headers=_auth(actors["rm"], _key()),
-        json={
-            "gs_id": gs_id,
-            "department_field_id": repair_dept_id,
-            "lines": [{"gs_item_id": item_id, "qty_sent": 6}],
-        },
-    )
-    assert res_dispatch.status_code == 200
+    # Plan + issue 6 pcs to REPAIR (DEC-55)
+    res_dispatch = await _dispatch(client, actors, fixture, 6, _key())
+    assert res_dispatch.status_code == 200, res_dispatch.text
     routing = res_dispatch.json()
     routing_id = routing["id"]
     routing_line_id = routing["lines"][0]["id"]
@@ -544,18 +528,70 @@ def _head_id(conn: Connection, code: str) -> str:
     )
 
 
-async def _dispatch(
-    client: AsyncClient, token: str, fixture: dict[str, Any], qty: int, key: str | None
+async def _plan(
+    client: AsyncClient,
+    token: str,
+    fixture: dict[str, Any],
+    qty: int,
+    *,
+    dept_id: str | None = None,
+    bucket_id: str | None = None,
+    key: str | None = None,
 ) -> Any:
+    """DEC-55: the RM plans `qty` pcs of the fixture item to a department (no stock move)."""
+    line: dict[str, Any] = {
+        "gs_item_id": fixture["item_id"],
+        "department_field_id": dept_id or fixture["repair_dept_id"],
+        "qty": qty,
+    }
+    if bucket_id:
+        line["source_bucket_field_id"] = bucket_id
     return await client.post(
-        "/api/v1/department-routing/dispatch",
+        "/api/v1/department-routing/plan",
+        headers=_auth(token, key or _key()),
+        json={"gs_id": fixture["gs_id"], "lines": [line]},
+    )
+
+
+async def _issue(
+    client: AsyncClient,
+    token: str,
+    fixture: dict[str, Any],
+    plan_line_ids: list[str],
+    key: str | None,
+    dept_id: str | None = None,
+) -> Any:
+    """DEC-55: the Store Manager issues planned lines to one department (DIN, stock move)."""
+    return await client.post(
+        "/api/v1/department-routing/issue",
         headers=_auth(token, key),
         json={
             "gs_id": fixture["gs_id"],
-            "department_field_id": fixture["repair_dept_id"],
-            "lines": [{"gs_item_id": fixture["item_id"], "qty_sent": qty}],
+            "department_field_id": dept_id or fixture["repair_dept_id"],
+            "plan_line_ids": plan_line_ids,
         },
     )
+
+
+def _new_planned_ids(before: Any, after: Any) -> list[str]:
+    seen = {ln["id"] for ln in before}
+    return [ln["id"] for ln in after if ln["id"] not in seen and ln["status"] == "PLANNED"]
+
+
+async def _dispatch(
+    client: AsyncClient, actors: dict[str, Any], fixture: dict[str, Any], qty: int, key: str | None
+) -> Any:
+    """Send `qty` pcs to REPAIR the G2 way: RM plans, Store Manager issues with `key`.
+    Returns the issue response (the routing / DIN)."""
+    before = (
+        await client.get(
+            f"/api/v1/department-routing/gs/{fixture['gs_id']}/plan", headers=_auth(actors["rm"])
+        )
+    ).json()
+    planned = await _plan(client, actors["rm"], fixture, qty)
+    assert planned.status_code == 200, planned.text
+    ids = _new_planned_ids(before, planned.json()["lines"])
+    return await _issue(client, actors["store"], fixture, ids, key)
 
 
 async def _receive(
@@ -589,13 +625,13 @@ async def test_dispatch_and_receive_require_idempotency_key(
     """G-16 / CLAUDE.md rule f: stock-moving commands reject a missing Idempotency-Key."""
     fixture = _seed_gs_held_at_intermediate_store(db_conn)
 
-    res = await _dispatch(client, actors["rm"], fixture, 2, None)
+    res = await _dispatch(client, actors, fixture, 2, None)
     assert res.status_code == 422, res.text
     assert res.json()["error"]["code"] == "IDEMPOTENCY_KEY_REQUIRED"
     assert _routing_count(db_conn, fixture["gs_id"]) == 0
     assert _balance(db_conn, fixture["lot_id"], "INTERMEDIATE_STORE") == 10
 
-    ok = await _dispatch(client, actors["rm"], fixture, 2, _key())
+    ok = await _dispatch(client, actors, fixture, 2, _key())
     assert ok.status_code == 200, ok.text
     res_rec = await _receive(
         client, actors["aman"], ok.json(), _head_id(db_conn, "REPAIRED"), 1, None
@@ -612,18 +648,23 @@ async def test_dispatch_and_receive_replay_move_stock_once(
     fixture = _seed_gs_held_at_intermediate_store(db_conn)
     key = _key()
 
-    first = await _dispatch(client, actors["rm"], fixture, 3, key)
+    planned = await _plan(client, actors["rm"], fixture, 3)
+    assert planned.status_code == 200, planned.text
+    ids = [ln["id"] for ln in planned.json()["lines"]]
+    first = await _issue(client, actors["store"], fixture, ids, key)
     assert first.status_code == 200, first.text
-    replay = await _dispatch(client, actors["rm"], fixture, 3, key)
+    replay = await _issue(client, actors["store"], fixture, ids, key)
     assert replay.status_code == 200, replay.text
     assert replay.headers.get("Idempotency-Replayed") == "true"
     assert replay.json()["id"] == first.json()["id"]
     assert _routing_count(db_conn, fixture["gs_id"]) == 1
     assert _balance(db_conn, fixture["lot_id"], "INTERMEDIATE_STORE") == 7
-    assert _balance(db_conn, fixture["lot_id"], "TECHNICIAN_BENCH") == 3
+    assert _balance(db_conn, fixture["lot_id"], "DEPT_TECHNICIAN_REPAIR") == 3
 
     # Same key, different body -> 409 IDEMPOTENCY_CONFLICT, nothing booked.
-    conflict = await _dispatch(client, actors["rm"], fixture, 1, key)
+    more = await _plan(client, actors["rm"], fixture, 1)
+    more_ids = _new_planned_ids(planned.json()["lines"], more.json()["lines"])
+    conflict = await _issue(client, actors["store"], fixture, more_ids, key)
     assert conflict.status_code == 409, conflict.text
     assert conflict.json()["error"]["code"] == "IDEMPOTENCY_CONFLICT"
     assert _routing_count(db_conn, fixture["gs_id"]) == 1
@@ -642,7 +683,7 @@ async def test_dispatch_and_receive_replay_move_stock_once(
         f"/api/v1/department-routing/{routing['id']}", headers=_auth(actors["rm"])
     )
     assert detail.json()["lines"][0]["qty_received"] == 2
-    assert _balance(db_conn, fixture["lot_id"], "TECHNICIAN_BENCH") == 1
+    assert _balance(db_conn, fixture["lot_id"], "DEPT_TECHNICIAN_REPAIR") == 1
     assert _balance(db_conn, fixture["lot_id"], "INTERMEDIATE_STORE") == 9
 
     # Stock movements reference the routing / receipt documents, not the GS.
@@ -674,7 +715,7 @@ async def test_receiver_role_comes_from_setting_dec42(
 ) -> None:
     """DEC-42: only the role in `department.receiving_role` receives; bad setting is reported."""
     fixture = _seed_gs_held_at_intermediate_store(db_conn)
-    res = await _dispatch(client, actors["rm"], fixture, 2, _key())
+    res = await _dispatch(client, actors, fixture, 2, _key())
     assert res.status_code == 200, res.text
     routing = res.json()
     repaired = _head_id(db_conn, "REPAIRED")
@@ -744,7 +785,7 @@ async def test_dispatch_without_stock_lot_fails_loudly(
     )
     admin.execute(text("set session_replication_role = 'origin'"))
 
-    res = await _dispatch(client, actors["rm"], fixture, 2, _key())
+    res = await _dispatch(client, actors, fixture, 2, _key())
     assert res.status_code == 422, res.text
     assert res.json()["error"]["code"] == "LOT_NOT_FOUND"
     assert _routing_count(db_conn, fixture["gs_id"]) == 0
@@ -756,7 +797,7 @@ async def test_inactive_outcome_head_and_routing_id_mismatch_rejected(
 ) -> None:
     """DEC-43: inactive outcome heads cannot be booked; body/URL routing ids must match."""
     fixture = _seed_gs_held_at_intermediate_store(db_conn)
-    res = await _dispatch(client, actors["rm"], fixture, 2, _key())
+    res = await _dispatch(client, actors, fixture, 2, _key())
     assert res.status_code == 200, res.text
     routing = res.json()
 
@@ -785,3 +826,498 @@ async def test_inactive_outcome_head_and_routing_id_mismatch_rejected(
     )
     assert res_mismatch.status_code == 422, res_mismatch.text
     assert res_mismatch.json()["error"]["code"] == "ROUTING_ID_MISMATCH"
+
+
+# =================================================================================================
+# Gap plan G2 (DEC-55; Q3-Q6, Q15, Q16; T4): RM routing plan per item + condition -> Store issue
+# =================================================================================================
+
+
+def _dept_id(conn: Connection, code: str) -> str:
+    return str(
+        as_admin(conn)
+        .execute(
+            text(
+                "select id from public.item_field_library"
+                " where field_group = 'DEPARTMENT' and code = :c"
+            ),
+            {"c": code},
+        )
+        .scalar_one()
+    )
+
+
+def _add_buckets(conn: Connection, item_id: str, split: dict[int, int]) -> list[str]:
+    """Give the fixture item a condition split (DEC-53 buckets): {library index: qty}."""
+    admin = as_admin(conn)
+    fields = (
+        admin.execute(
+            text(
+                "select id, code, label from public.item_field_library"
+                " where field_group = 'CATEGORISATION' order by sort_order, code limit 3"
+            )
+        )
+        .mappings()
+        .all()
+    )
+    admin.execute(text("set session_replication_role = 'replica'"))
+    ids: list[str] = []
+    for idx, qty in split.items():
+        f = fields[idx]
+        admin.execute(
+            text(
+                """
+                insert into public.gs_item_buckets
+                  (gs_item_id, field_id, field_code, label_snapshot, qty)
+                values (cast(:i as uuid), :f, :c, :l, :q)
+                """
+            ),
+            {"i": item_id, "f": f["id"], "c": f["code"], "l": f["label"], "q": qty},
+        )
+        ids.append(str(f["id"]))
+    admin.execute(text("set session_replication_role = 'origin'"))
+    return ids
+
+
+@pytest.mark.asyncio
+async def test_g2_plan_moves_no_stock_and_alerts_store_manager(
+    client: AsyncClient, db_conn: Connection, actors: dict[str, Any]
+) -> None:
+    """DEC-55 Q5: planning moves no stock; the Store Manager is alerted and sees the issue queue."""
+    fixture = _seed_gs_held_at_intermediate_store(db_conn)
+    res = await _plan(client, actors["rm"], fixture, 4)
+    assert res.status_code == 200, res.text
+    line = res.json()["lines"][0]
+    assert (line["status"], line["department_code"], line["qty"]) == ("PLANNED", "REPAIR", 4)
+    assert line["department_label"] == "Technician / Repair"
+    assert _balance(db_conn, fixture["lot_id"], "INTERMEDIATE_STORE") == 10
+    assert _routing_count(db_conn, fixture["gs_id"]) == 0
+
+    alerted = (
+        as_admin(db_conn)
+        .execute(
+            text(
+                """
+                select count(*) from public.notifications n
+                 where n.user_id = cast(:u as uuid) and n.type = 'DEPT_ROUTING_PLANNED'
+                   and n.entity_id = cast(:g as uuid)
+                """
+            ),
+            {"u": actors["store_id"], "g": fixture["gs_id"]},
+        )
+        .scalar_one()
+    )
+    assert alerted == 1
+
+    queue = await client.get(
+        "/api/v1/department-routing/issue-queue", headers=_auth(actors["store"])
+    )
+    assert queue.status_code == 200, queue.text
+    group = next(g for g in queue.json() if g["gs_id"] == fixture["gs_id"])
+    assert (group["department_code"], group["total_qty"]) == ("REPAIR", 4)
+
+    recon = (
+        await client.get(
+            f"/api/v1/department-routing/gs/{fixture['gs_id']}/reconciliation",
+            headers=_auth(actors["rm"]),
+        )
+    ).json()
+    assert (recon["total_in_store"], recon["total_planned"], recon["total_unplanned"]) == (10, 4, 6)
+
+
+@pytest.mark.asyncio
+async def test_g2_permissions_rm_plans_store_issues_t4(
+    client: AsyncClient, db_conn: Connection, actors: dict[str, Any]
+) -> None:
+    """T4 / DEC-55 Q5: department_routing/create plans; /approve (Store Manager) issues."""
+    fixture = _seed_gs_held_at_intermediate_store(db_conn)
+    assert (await _plan(client, actors["store"], fixture, 1)).status_code == 403
+    planned = await _plan(client, actors["rm"], fixture, 2)
+    ids = [ln["id"] for ln in planned.json()["lines"]]
+    rm_issue = await _issue(client, actors["rm"], fixture, ids, _key())
+    assert rm_issue.status_code == 403, rm_issue.text
+    assert _routing_count(db_conn, fixture["gs_id"]) == 0
+    ok = await _issue(client, actors["store"], fixture, ids, _key())
+    assert ok.status_code == 200, ok.text
+    assert _balance(db_conn, fixture["lot_id"], "DEPT_TECHNICIAN_REPAIR") == 2
+
+
+@pytest.mark.asyncio
+async def test_g2_store_line_is_no_work_and_never_issued(
+    client: AsyncClient, db_conn: Connection, actors: dict[str, Any]
+) -> None:
+    """DEC-55 Q4: STORE = no work. The pieces stay in the store and cannot be issued."""
+    fixture = _seed_gs_held_at_intermediate_store(db_conn)
+    store_dept = _dept_id(db_conn, "STORE")
+    res = await _plan(client, actors["rm"], fixture, 3, dept_id=store_dept)
+    assert res.status_code == 200, res.text
+    line = res.json()["lines"][0]
+    assert (line["status"], line["is_no_work"]) == ("NO_WORK", True)
+    queue = (
+        await client.get("/api/v1/department-routing/issue-queue", headers=_auth(actors["store"]))
+    ).json()
+    assert not [g for g in queue if g["gs_id"] == fixture["gs_id"]]
+
+    issue = await _issue(client, actors["store"], fixture, [line["id"]], _key(), dept_id=store_dept)
+    assert issue.status_code == 409, issue.text
+    assert issue.json()["error"]["code"] == "PLAN_LINE_NOT_OPEN"
+    assert _balance(db_conn, fixture["lot_id"], "INTERMEDIATE_STORE") == 10
+
+    # 3 no-work + 8 to repair > 10 in store: the RM cannot plan the same pieces twice.
+    over = await _plan(client, actors["rm"], fixture, 8)
+    assert over.status_code == 409 and "G-20" in over.text
+
+
+@pytest.mark.asyncio
+async def test_g2_plan_is_per_condition_q6(
+    client: AsyncClient, db_conn: Connection, actors: dict[str, Any]
+) -> None:
+    """DEC-55 Q6: an item split by condition is routed per condition, capped by that condition."""
+    fixture = _seed_gs_held_at_intermediate_store(db_conn)
+    good, damaged = _add_buckets(db_conn, fixture["item_id"], {0: 7, 1: 3})
+
+    missing = await _plan(client, actors["rm"], fixture, 1)
+    assert missing.status_code == 422, missing.text
+    assert missing.json()["error"]["code"] == "CONDITION_REQUIRED"
+
+    over = await _plan(client, actors["rm"], fixture, 4, bucket_id=damaged)
+    assert over.status_code == 409, over.text
+    assert "G-20" in over.json()["error"]["message"]
+
+    ok = await _plan(client, actors["rm"], fixture, 3, bucket_id=damaged)
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["lines"][0]["source_bucket_label"]
+
+    state = (
+        await client.get(
+            f"/api/v1/department-routing/gs/{fixture['gs_id']}/state", headers=_auth(actors["rm"])
+        )
+    ).json()
+    free = {b["field_id"]: b["plannable_qty"] for b in state["items"][0]["buckets"]}
+    assert (free[good], free[damaged]) == (7, 0)
+    assert {d["code"]: d["is_no_work"] for d in state["items"][0]["allowed_departments"]}[
+        "STORE"
+    ] is True
+
+
+@pytest.mark.asyncio
+async def test_g2_cancel_plan_line_with_reason(
+    client: AsyncClient, db_conn: Connection, actors: dict[str, Any]
+) -> None:
+    """DEC-55: the RM withdraws an un-issued plan line (reason required); issued lines stay."""
+    fixture = _seed_gs_held_at_intermediate_store(db_conn)
+    planned = (await _plan(client, actors["rm"], fixture, 5)).json()["lines"][0]
+    url = f"/api/v1/department-routing/plan-lines/{planned['id']}/cancel"
+    assert (
+        await client.post(url, headers=_auth(actors["rm"]), json={"reason": ""})
+    ).status_code == 422
+    ok = await client.post(url, headers=_auth(actors["rm"]), json={"reason": "Wrong department"})
+    assert ok.status_code == 200, ok.text
+    assert (ok.json()["status"], ok.json()["cancel_reason"]) == ("CANCELLED", "Wrong department")
+
+    res = await _dispatch(client, actors, fixture, 2, _key())
+    assert res.status_code == 200, res.text
+    issued = next(
+        ln
+        for ln in (
+            await client.get(
+                f"/api/v1/department-routing/gs/{fixture['gs_id']}/plan",
+                headers=_auth(actors["rm"]),
+            )
+        ).json()
+        if ln["status"] == "ISSUED"
+    )
+    again = await client.post(
+        f"/api/v1/department-routing/plan-lines/{issued['id']}/cancel",
+        headers=_auth(actors["rm"]),
+        json={"reason": "Too late"},
+    )
+    assert again.status_code == 409, again.text
+    assert again.json()["error"]["code"] == "PLAN_LINE_NOT_OPEN"
+
+
+@pytest.mark.asyncio
+async def test_g2_missing_department_location_is_reported(
+    client: AsyncClient, db_conn: Connection, actors: dict[str, Any]
+) -> None:
+    """DEC-55 Q16: a work department without a configured location is reported, never guessed."""
+    fixture = _seed_gs_held_at_intermediate_store(db_conn)
+    admin = as_admin(db_conn)
+    admin.execute(
+        text(
+            "update public.system_settings set value = value - 'REPAIR'"
+            " where key = 'department.location_by_code'"
+        )
+    )
+    try:
+        res = await _plan(client, actors["rm"], fixture, 1)
+        assert res.status_code == 409, res.text
+        assert res.json()["error"]["code"] == "SETTING_INVALID"
+    finally:
+        admin.execute(
+            text(
+                "update public.system_settings"
+                ' set value = value || \'{"REPAIR": "DEPT_TECHNICIAN_REPAIR"}\'::jsonb'
+                " where key = 'department.location_by_code'"
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_g2_receipt_returns_stock_from_department_location(
+    client: AsyncClient, db_conn: Connection, actors: dict[str, Any]
+) -> None:
+    """DEC-55: receiving books the pieces back from the department's own location."""
+    fixture = _seed_gs_held_at_intermediate_store(db_conn)
+    res = await _dispatch(client, actors, fixture, 4, _key())
+    assert res.status_code == 200, res.text
+    assert _balance(db_conn, fixture["lot_id"], "DEPT_TECHNICIAN_REPAIR") == 4
+    rec = await _receive(
+        client, actors["aman"], res.json(), _head_id(db_conn, "REPAIRED"), 3, _key()
+    )
+    assert rec.status_code == 200, rec.text
+    assert _balance(db_conn, fixture["lot_id"], "DEPT_TECHNICIAN_REPAIR") == 1
+    assert _balance(db_conn, fixture["lot_id"], "INTERMEDIATE_STORE") == 9
+
+
+# =================================================================================================
+# Gap plan G3 (DEC-56; Q7, Q8, Q17): receiving with the condition after work
+# =================================================================================================
+
+
+async def _receive_lines(
+    client: AsyncClient, token: str, routing: dict[str, Any], lines: list[dict[str, Any]]
+) -> Any:
+    return await client.post(
+        f"/api/v1/department-routing/{routing['id']}/receive",
+        headers=_auth(token, _key()),
+        json={"routing_id": routing["id"], "lines": lines},
+    )
+
+
+async def _plan_and_issue(
+    client: AsyncClient,
+    actors: dict[str, Any],
+    fixture: dict[str, Any],
+    lines: list[tuple[str | None, int]],
+) -> dict[str, Any]:
+    """RM plans (condition, qty) lines to Technician / Repair; the Store issues them in ONE DIN."""
+    res = await client.post(
+        "/api/v1/department-routing/plan",
+        headers=_auth(actors["rm"], _key()),
+        json={
+            "gs_id": fixture["gs_id"],
+            "lines": [
+                {
+                    "gs_item_id": fixture["item_id"],
+                    "department_field_id": fixture["repair_dept_id"],
+                    "source_bucket_field_id": cond,
+                    "qty": qty,
+                }
+                for cond, qty in lines
+            ],
+        },
+    )
+    assert res.status_code == 200, res.text
+    ids = [ln["id"] for ln in res.json()["lines"] if ln["status"] == "PLANNED"]
+    issued = await _issue(client, actors["store"], fixture, ids, _key())
+    assert issued.status_code == 200, issued.text
+    return dict(issued.json())
+
+
+async def _state_item(client: AsyncClient, actors: dict[str, Any], gs_id: str) -> dict[str, Any]:
+    res = await client.get(
+        f"/api/v1/department-routing/gs/{gs_id}/state", headers=_auth(actors["rm"])
+    )
+    assert res.status_code == 200, res.text
+    return dict(res.json()["items"][0])
+
+
+@pytest.mark.asyncio
+async def test_g2_store_issues_two_conditions_of_one_item_in_one_din(
+    client: AsyncClient, db_conn: Connection, actors: dict[str, Any]
+) -> None:
+    """G2 fix (migration 20261118000200): 7 Good + 3 Damaged = all 10 pcs in one DIN. Before the
+    fix the immediate plan-line G-20 check rejected it ("3 planned but only 0 in the store")."""
+    fixture = _seed_gs_held_at_intermediate_store(db_conn)
+    good, damaged = _add_buckets(db_conn, fixture["item_id"], {0: 7, 1: 3})
+    routing = await _plan_and_issue(client, actors, fixture, [(good, 7), (damaged, 3)])
+    assert sorted(ln["qty_sent"] for ln in routing["lines"]) == [3, 7]
+    assert _balance(db_conn, fixture["lot_id"], "DEPT_TECHNICIAN_REPAIR") == 10
+    assert _balance(db_conn, fixture["lot_id"], "INTERMEDIATE_STORE") == 0
+
+
+@pytest.mark.asyncio
+async def test_g3_receive_records_condition_and_updates_current_split(
+    client: AsyncClient, db_conn: Connection, actors: dict[str, Any]
+) -> None:
+    """DEC-56 Q7: outcome + condition after work; the current split changes, the counting split
+    stays as history; RM routing and Final Actions show the current split."""
+    fixture = _seed_gs_held_at_intermediate_store(db_conn)
+    good, damaged = _add_buckets(db_conn, fixture["item_id"], {0: 7, 1: 3})
+    routing = await _plan_and_issue(client, actors, fixture, [(damaged, 3)])
+    line = routing["lines"][0]
+    options = [o["field_id"] for o in line["condition_options"]]
+    assert options, "pieces routed from a condition are offered the product conditions"
+    new_cond = next(o for o in options if o != damaged)
+    repaired = _head_id(db_conn, "REPAIRED")
+
+    missing = await _receive_lines(
+        client,
+        actors["aman"],
+        routing,
+        [{"routing_line_id": line["id"], "outcome_head_id": repaired, "quantity": 1}],
+    )
+    assert missing.status_code == 422, missing.text
+    assert missing.json()["error"]["code"] == "CONDITION_REQUIRED"
+
+    wrong = await _receive_lines(
+        client,
+        actors["aman"],
+        routing,
+        [
+            {
+                "routing_line_id": line["id"],
+                "outcome_head_id": repaired,
+                "quantity": 1,
+                "condition_field_id": fixture["repair_dept_id"],
+            }
+        ],
+    )
+    assert wrong.status_code == 422, wrong.text
+    assert wrong.json()["error"]["code"] == "CONDITION_NOT_ALLOWED"
+
+    ok = await _receive_lines(
+        client,
+        actors["aman"],
+        routing,
+        [
+            {
+                "routing_line_id": line["id"],
+                "outcome_head_id": repaired,
+                "quantity": 2,
+                "condition_field_id": new_cond,
+            }
+        ],
+    )
+    assert ok.status_code == 200, ok.text
+    rl = ok.json()["lines"][0]
+    assert rl["condition_field_id"] == new_cond and rl["condition_label"]
+    assert rl["source_condition_field_id"] == damaged
+    assert rl["destination_location_code"] == "INTERMEDIATE_STORE"
+    # Q8: back in the Intermediate Store at once (no Store Manager acceptance).
+    assert _balance(db_conn, fixture["lot_id"], "INTERMEDIATE_STORE") == 9
+
+    item = await _state_item(client, actors, fixture["gs_id"])
+    cur = {c["field_id"]: c for c in item["conditions"]}
+    assert cur[damaged]["original_qty"] == 3 and cur[damaged]["current_qty"] == 1
+    assert cur[new_cond]["current_qty"] == cur[new_cond]["original_qty"] + 2
+    assert sum(c["current_qty"] for c in item["conditions"]) == 10
+    assert {b["field_id"]: b["qty"] for b in item["buckets"]} == {good: 7, damaged: 3}
+
+    fa = await client.get(
+        f"/api/v1/gs/{fixture['gs_id']}/final-actions", headers=_auth(actors["rm"])
+    )
+    assert fa.status_code == 200, fa.text
+    fa_cur = {
+        c["field_label"]: c["current_qty"] for c in fa.json()["lines"][0]["current_conditions"]
+    }
+    assert sum(fa_cur.values()) == 10
+    assert fa_cur[cur[damaged]["field_label"]] == 1
+
+
+@pytest.mark.asyncio
+async def test_g3_mercury_extracted_goes_to_non_functional_store(
+    client: AsyncClient, db_conn: Connection, actors: dict[str, Any]
+) -> None:
+    """DEC-56 Q17: "Mercury Extracted" moves the pieces to the Non-Functional Store; wastage still
+    goes to scrap. An item routed without a condition takes no condition after work."""
+    fixture = _seed_gs_held_at_intermediate_store(db_conn)
+    routing = await _plan_and_issue(client, actors, fixture, [(None, 3)])
+    line = routing["lines"][0]
+    assert line["condition_options"] == []
+
+    heads = (
+        await client.get("/api/v1/department-routing/outcome-heads", headers=_auth(actors["aman"]))
+    ).json()
+    dest = {h["code"]: h["destination_location_code"] for h in heads}
+    assert dest["MERCURY_EXTRACTED"] == "NON_FUNCTIONAL_STORE"
+    assert (dest["WASTAGE"], dest["REPAIRED"]) == ("SCRAP_DISPOSED", "INTERMEDIATE_STORE")
+
+    mercury = _head_id(db_conn, "MERCURY_EXTRACTED")
+    na = await _receive_lines(
+        client,
+        actors["aman"],
+        routing,
+        [
+            {
+                "routing_line_id": line["id"],
+                "outcome_head_id": mercury,
+                "quantity": 1,
+                "condition_field_id": fixture["repair_dept_id"],
+            }
+        ],
+    )
+    assert na.status_code == 422, na.text
+    assert na.json()["error"]["code"] == "CONDITION_NOT_APPLICABLE"
+
+    ok = await _receive_lines(
+        client,
+        actors["aman"],
+        routing,
+        [
+            {"routing_line_id": line["id"], "outcome_head_id": mercury, "quantity": 2},
+            {
+                "routing_line_id": line["id"],
+                "outcome_head_id": _head_id(db_conn, "WASTAGE"),
+                "quantity": 1,
+            },
+        ],
+    )
+    assert ok.status_code == 200, ok.text
+    assert _balance(db_conn, fixture["lot_id"], "NON_FUNCTIONAL_STORE") == 2
+    assert _balance(db_conn, fixture["lot_id"], "SCRAP_DISPOSED") == 1
+    assert _balance(db_conn, fixture["lot_id"], "DEPT_TECHNICIAN_REPAIR") == 0
+    assert _balance(db_conn, fixture["lot_id"], "INTERMEDIATE_STORE") == 7
+
+
+@pytest.mark.asyncio
+async def test_g3_rerouted_piece_is_planned_from_its_new_condition(
+    client: AsyncClient, db_conn: Connection, actors: dict[str, Any]
+) -> None:
+    """DEC-56: a piece back with "Return to RM Routing Queue" is free again in the condition it
+    came back in; the old condition is not freed twice (G-20 per condition, service + DB)."""
+    fixture = _seed_gs_held_at_intermediate_store(db_conn)
+    _good, damaged = _add_buckets(db_conn, fixture["item_id"], {0: 7, 1: 3})
+    routing = await _plan_and_issue(client, actors, fixture, [(damaged, 3)])
+    line = routing["lines"][0]
+    new_cond = next(o["field_id"] for o in line["condition_options"] if o["field_id"] != damaged)
+    before_item = await _state_item(client, actors, fixture["gs_id"])
+    before = {c["field_id"]: c for c in before_item["conditions"]}
+
+    res = await _receive_lines(
+        client,
+        actors["aman"],
+        routing,
+        [
+            {
+                "routing_line_id": line["id"],
+                "outcome_head_id": _head_id(db_conn, "RE_ROUTE"),
+                "quantity": 1,
+                "condition_field_id": new_cond,
+            }
+        ],
+    )
+    assert res.status_code == 200, res.text
+
+    after_item = await _state_item(client, actors, fixture["gs_id"])
+    after = {c["field_id"]: c for c in after_item["conditions"]}
+    assert after[damaged]["plannable_qty"] == 0  # 2 still at the department, 1 moved away
+    free_before = before[new_cond]["plannable_qty"] if new_cond in before else 0
+    assert after[new_cond]["plannable_qty"] == free_before + 1
+
+    again = await _plan(client, actors["rm"], fixture, 1, bucket_id=damaged)
+    assert again.status_code == 409, again.text
+    assert "G-20" in again.json()["error"]["message"]
+    ok = await _plan(client, actors["rm"], fixture, 1, bucket_id=new_cond)
+    assert ok.status_code == 200, ok.text

@@ -9,6 +9,8 @@ export interface AcEntryQueueItem {
   ac_action_slip_id: string;
   slip_no: string;
   version_no: number;
+  /** DEC-57: 1 = first decision; 2+ = re-action of Pending pieces. */
+  round_no?: number;
   finalised_at: string;
   lines_total: number;
   lines_needing_data: number;
@@ -27,6 +29,8 @@ export interface AcEntryLine {
   product_name: string;
   action_code: string;
   action_label: string;
+  /** DEC-57: condition of the pieces (null for items without a condition split). */
+  condition_label?: string | null;
   qty: number;
   /** AMD-18: which fields the line takes comes from the action flags (snapshot, G-18). */
   requires_cn: boolean;
@@ -65,6 +69,8 @@ export interface AcEntryState {
   ac_action_slip_id: string | null;
   slip_no: string | null;
   version_no: number | null;
+  /** DEC-57: the round of the slip shown (latest round with a current slip). */
+  round_no?: number;
   lines: AcEntryLine[];
   lines_needing_data: number;
   lines_complete: number;
@@ -100,6 +106,7 @@ export interface DispatchSlipLine {
   product_name: string;
   action_code: string;
   action_label: string;
+  condition_label?: string | null;
   qty: number;
   challan_no: string;
   challan_date: string;
@@ -112,6 +119,7 @@ export interface DispatchSlipOut extends DispatchSlipSummary {
   party_name: string | null;
   ac_slip_no: string;
   ac_version_no: number;
+  ac_round_no?: number;
   dispatch_remarks: string | null;
   generated_by_name: string | null;
   dispatched_by_name: string | null;

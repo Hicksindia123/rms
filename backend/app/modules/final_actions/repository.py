@@ -113,6 +113,81 @@ def outcome_breakdown(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
     )
 
 
+def condition_quantities(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
+    """DEC-57: round-1 G-21 quantities per item + current condition (NULL = item without split)."""
+    return _rows(
+        session,
+        """
+        select gs_item_id, line_no, condition_field_id, condition_code, condition_label,
+               current_qty, at_dept_qty, available_qty, actioned_qty
+          from rms_private.final_action_condition_quantities(:gs_id)
+        """,
+        {"gs_id": gs_id},
+    )
+
+
+def action_groups(
+    session: Session, gs_id: UUID, round_no: int, action_code: str
+) -> list[dict[str, Any]]:
+    """Current qty of one action in one round, per item + condition (DEC-57: Pending pieces)."""
+    return _rows(
+        session,
+        """
+        select ra.gs_item_id, gi.line_no, ra.condition_field_id,
+               max(ra.condition_code) as condition_code,
+               max(ra.condition_label) as condition_label,
+               sum(ra.qty)::int as qty
+          from public.rm_item_actions ra
+          join public.gs_items gi on gi.id = ra.gs_item_id
+         where gi.gs_id = :gs_id and ra.is_current and ra.round_no = :round
+           and ra.action_code = :code
+         group by ra.gs_item_id, gi.line_no, ra.condition_field_id
+         order by gi.line_no, max(ra.condition_label)
+        """,
+        {"gs_id": gs_id, "round": round_no, "code": action_code},
+    )
+
+
+def max_round(session: Session, gs_id: UUID) -> int:
+    return int(
+        session.execute(
+            text(
+                """
+                select coalesce(max(ra.round_no), 0)
+                  from public.rm_item_actions ra
+                  join public.gs_items gi on gi.id = ra.gs_item_id
+                 where gi.gs_id = :gs_id and ra.is_current
+                """
+            ),
+            {"gs_id": gs_id},
+        ).scalar_one()
+    )
+
+
+def round_settled(session: Session, gs_id: UUID, round_no: int) -> bool:
+    return bool(
+        session.execute(
+            text("select rms_private.final_action_round_settled(:gs_id, :round)"),
+            {"gs_id": gs_id, "round": round_no},
+        ).scalar()
+    )
+
+
+def current_conditions(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
+    """DEC-56: current condition split per item (counting split until the first receipt)."""
+    return _rows(
+        session,
+        """
+        select gi.id as gs_item_id, c.field_code, c.field_label, c.original_qty, c.current_qty
+          from public.gs_items gi
+          cross join lateral rms_private.item_current_conditions(gi.id) c
+         where gi.gs_id = :gs_id
+         order by gi.line_no, c.sort_order, c.field_label
+        """,
+        {"gs_id": gs_id},
+    )
+
+
 def allowed_actions(
     session: Session, product_id: UUID, version_id: UUID | None
 ) -> list[dict[str, Any]]:
@@ -144,18 +219,22 @@ def action_library_labels(session: Session) -> dict[str, dict[str, Any]]:
 # --- RM action rows -----------------------------------------------------------------------------
 
 
-def current_actions(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
+def current_actions(session: Session, gs_id: UUID, round_no: int) -> list[dict[str, Any]]:
+    """Current action rows of one round (DEC-57), with their condition snapshot."""
     return _rows(
         session,
         """
         select ra.gs_item_id, ra.action_code, coalesce(ra.action_label, ra.action_code) as label,
-               ra.qty, ra.revision_no, ra.decided_by, ra.decided_at
+               ra.qty, ra.revision_no, ra.decided_by, ra.decided_at, ra.round_no,
+               ra.condition_field_id, ra.condition_code, ra.condition_label
           from public.rm_item_actions ra
           join public.gs_items gi on gi.id = ra.gs_item_id
-         where gi.gs_id = :gs_id and ra.is_current
-         order by gi.line_no, ra.action_code
+          left join public.item_field_library cl on cl.id = ra.condition_field_id
+         where gi.gs_id = :gs_id and ra.is_current and ra.round_no = :round
+         order by gi.line_no, coalesce(cl.sort_order, 0), ra.condition_label nulls first,
+                  ra.action_code
         """,
-        {"gs_id": gs_id},
+        {"gs_id": gs_id, "round": round_no},
     )
 
 
@@ -163,14 +242,15 @@ def revision_rows(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
     return _rows(
         session,
         """
-        select ra.revision_no, ra.reason, ra.decided_at, pr.full_name as decided_by_name,
+        select ra.revision_no, ra.round_no, ra.reason, ra.decided_at,
+               pr.full_name as decided_by_name,
                gi.line_no, ra.action_code, coalesce(ra.action_label, ra.action_code) as label,
-               ra.qty
+               ra.condition_label, ra.qty
           from public.rm_item_actions ra
           join public.gs_items gi on gi.id = ra.gs_item_id
           left join public.profiles pr on pr.id = ra.decided_by
          where gi.gs_id = :gs_id
-         order by ra.revision_no desc, gi.line_no, ra.action_code
+         order by ra.revision_no desc, gi.line_no, ra.condition_label nulls first, ra.action_code
         """,
         {"gs_id": gs_id},
     )
@@ -192,17 +272,17 @@ def max_revision(session: Session, gs_id: UUID) -> int:
     )
 
 
-def retire_current_actions(session: Session, gs_id: UUID) -> None:
+def retire_current_actions(session: Session, gs_id: UUID, round_no: int) -> None:
     session.execute(
         text(
             """
             update public.rm_item_actions
                set is_current = false
-             where is_current
+             where is_current and round_no = :round
                and gs_item_id in (select id from public.gs_items where gs_id = :gs_id)
             """
         ),
-        {"gs_id": gs_id},
+        {"gs_id": gs_id, "round": round_no},
     )
 
 
@@ -211,23 +291,29 @@ def insert_action(
     *,
     gs_item_id: UUID,
     revision_no: int,
+    round_no: int,
+    condition_field_id: UUID | None,
     action_code: str,
     qty: int,
     reason: str | None,
     decided_by: UUID,
 ) -> None:
-    # action_label is the G-18 snapshot taken by the rm_item_actions_label_snapshot trigger.
+    # G-18 snapshots by trigger: action_label (rm_item_actions_label_snapshot) and the condition
+    # code / label (rm_item_actions_final_guard, DEC-57).
     session.execute(
         text(
             """
             insert into public.rm_item_actions
-                   (gs_item_id, revision_no, action_code, qty, is_current, reason, decided_by)
-            values (:item, :rev, :code, :qty, true, :reason, :by)
+                   (gs_item_id, revision_no, round_no, condition_field_id, action_code, qty,
+                    is_current, reason, decided_by)
+            values (:item, :rev, :round, :cond, :code, :qty, true, :reason, :by)
             """
         ),
         {
             "item": gs_item_id,
             "rev": revision_no,
+            "round": round_no,
+            "cond": condition_field_id,
             "code": action_code,
             "qty": qty,
             "reason": reason,
@@ -254,7 +340,10 @@ def validate_reconciliation(session: Session, gs_id: UUID) -> None:
 # --- slips --------------------------------------------------------------------------------------
 
 _SLIP_SELECT = """
-    select s.id, s.gs_id, s.slip_no, s.version_no, s.revision_no, s.status, s.attachment_id,
+    select s.id, s.gs_id, s.slip_no, s.version_no, s.revision_no, s.round_no, s.status,
+           s.attachment_id,
+           exists (select 1 from public.ac_entry_completions c
+                    where c.ac_action_slip_id = s.id) as is_completed,
            s.template_version_no, s.totals, s.remarks, s.finalised_at, s.superseded_at,
            s.supersede_reason, fb.full_name as finalised_by_name,
            sb.full_name as superseded_by_name,
@@ -290,11 +379,17 @@ def get_slip(session: Session, gs_id: UUID, slip_id: UUID) -> dict[str, Any] | N
     )
 
 
-def current_slip(session: Session, gs_id: UUID) -> dict[str, Any] | None:
+def current_slip(session: Session, gs_id: UUID, round_no: int) -> dict[str, Any] | None:
+    """The CURRENT slip of one final-action round (DEC-57: one per round)."""
     return _row(
         session,
-        _SLIP_SELECT + " where s.gs_id = :gs_id and s.status = 'CURRENT'",
-        {"gs_id": gs_id, "template": AC_SLIP_TEMPLATE, "entity": AC_SLIP_ENTITY},
+        _SLIP_SELECT + " where s.gs_id = :gs_id and s.round_no = :round and s.status = 'CURRENT'",
+        {
+            "gs_id": gs_id,
+            "round": round_no,
+            "template": AC_SLIP_TEMPLATE,
+            "entity": AC_SLIP_ENTITY,
+        },
     )
 
 
@@ -376,6 +471,7 @@ def insert_slip(
     slip_no: str,
     version_no: int,
     revision_no: int,
+    round_no: int,
     attachment_id: UUID,
     template_version_no: int,
     content: dict[str, Any],
@@ -388,11 +484,12 @@ def insert_slip(
         text(
             """
             insert into public.ac_action_slips
-                   (id, gs_id, slip_no, version_no, revision_no, attachment_id, template_code,
-                    template_version_no, content, totals, sha256, remarks, finalised_by)
-            values (:id, :gs_id, :slip_no, :version_no, :revision_no, :attachment_id, :template,
-                    :template_version_no, cast(:content as jsonb), cast(:totals as jsonb), :sha256,
-                    :remarks, :by)
+                   (id, gs_id, slip_no, version_no, revision_no, round_no, attachment_id,
+                    template_code, template_version_no, content, totals, sha256, remarks,
+                    finalised_by)
+            values (:id, :gs_id, :slip_no, :version_no, :revision_no, :round_no, :attachment_id,
+                    :template, :template_version_no, cast(:content as jsonb),
+                    cast(:totals as jsonb), :sha256, :remarks, :by)
             """
         ),
         {
@@ -401,6 +498,7 @@ def insert_slip(
             "slip_no": slip_no,
             "version_no": version_no,
             "revision_no": revision_no,
+            "round_no": round_no,
             "attachment_id": attachment_id,
             "template": AC_SLIP_TEMPLATE,
             "template_version_no": template_version_no,

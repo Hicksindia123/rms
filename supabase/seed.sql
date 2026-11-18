@@ -188,7 +188,8 @@ insert into _seed_role_matrix values
   -- which inserts nothing on a fresh `supabase db reset` (roles are seed data); the grants live here.
   ('REPLACEMENT_MANAGER',        'department_routing', array['view','create','export']),
   ('INWARD_VERIFIER',            'department_routing', array['view','edit']),
-  ('INTERMEDIATE_STORE_MANAGER', 'department_routing', array['view']),
+  -- DEC-55 (gap plan G2): the Store Manager issues planned goods to departments (DIN).
+  ('INTERMEDIATE_STORE_MANAGER', 'department_routing', array['view','approve']),
 
   -- Change plan Phase 7 (AMD-16, AMD-17): RM final actions and the A/c Actions slip.
   ('REPLACEMENT_MANAGER',        'final_actions',   array['view','edit','approve','export']),
@@ -270,6 +271,7 @@ select r.id, s.id, m.ord
     ('REPLACEMENT_MANAGER',        'AUDIT',          150),
 
     ('INTERMEDIATE_STORE_MANAGER', 'STORE_ACCEPT',    10),
+    ('INTERMEDIATE_STORE_MANAGER', 'DEPT_ISSUE',      20),   -- DEC-55
     ('INTERMEDIATE_STORE_MANAGER', 'CUSTODY',        100),
     ('INTERMEDIATE_STORE_MANAGER', 'INVENTORY',      110),
     ('INTERMEDIATE_STORE_MANAGER', 'STORE_ISSUES',   120),
@@ -574,6 +576,14 @@ on conflict (code) do nothing;
 -- so it is one profile version.
 -- -----------------------------------------------------------------------------
 select rms_private.seed_item_field_library_from_options();
+-- Gap plan G4 (DEC-57): the final action PENDING_BP is shown as "Pending" (code unchanged). Same
+-- update as migration 20261118000300, which runs before this library exists on a fresh reset.
+update public.item_field_library
+   set label = 'Pending'
+ where field_group = 'ACTION' and code = 'PENDING_BP' and label = 'Pending (BP)';
+-- DEC-55: every active department enabled for every category by default (admin may restrict).
+-- The category insert trigger already does this; repeated for clarity / idempotence.
+select rms_private.enable_departments_for_categories();
 
 -- -----------------------------------------------------------------------------
 -- Inventory locations (§8.2; custodians per P1-02 prompt and DEC-10)
@@ -585,6 +595,10 @@ from (values
   ('TRANSIT',              'In Transit',           'TRANSIT',           null,                         null),
   ('INTERMEDIATE_STORE',   'Intermediate Store',   'FUNCTIONAL',        'INTERMEDIATE_STORE_MANAGER', 'INTERMEDIATE_STORE'),
   ('TECHNICIAN_BENCH',     'Technician Bench',     'TECHNICIAN',        null,                         null),
+  -- DEC-55 Q16: one location per department (Store issue moves stock here).
+  ('DEPT_CLEANING',           'Department: Cleaning',            'TECHNICIAN', 'INTERMEDIATE_STORE_MANAGER', null),
+  ('DEPT_TECHNICIAN_REPAIR',  'Department: Technician / Repair', 'TECHNICIAN', 'INTERMEDIATE_STORE_MANAGER', null),
+  ('DEPT_MERCURY_EXTRACTION', 'Department: Mercury Extraction',  'TECHNICIAN', 'INTERMEDIATE_STORE_MANAGER', null),
   ('NON_FUNCTIONAL_STORE', 'Non-Functional Store', 'NON_FUNCTIONAL',    'SPARE_PARTS_MANAGER',        'REPLACEMENT_DEPT'),
   ('BATTERY_STORE',        'Battery Store',        'SPARE_PARTS',       'SPARE_PARTS_MANAGER',        'REPLACEMENT_DEPT'),
   ('SPARE_PARTS_STORE',    'Spare Parts Store',    'SPARE_PARTS',       'SPARE_PARTS_MANAGER',        'REPLACEMENT_DEPT'),
@@ -3449,6 +3463,20 @@ select v.event_type, v.name, true, v.roles, array['IN_APP'], v.priority, true
     ('DISPATCH_SLIP_DISPATCHED', 'RM & Accounts: goods dispatched (AMD-19)',
      array['REPLACEMENT_MANAGER', 'ACCOUNTS'], 'NORMAL')
   ) as v(event_type, name, roles, priority)
+ where not exists (select 1 from public.notification_rules r where r.event_type = v.event_type);
+
+-- Gap plan G1 (DEC-54): the verifier is told when the RM changes a slip in review.
+-- Gap plan G2 (DEC-55): the Intermediate Store Manager is told when routing is planned (issue it).
+-- Here because they name roles (seed data); the migrations add them only when the roles exist.
+insert into public.notification_rules
+  (event_type, name, include_context_recipients, recipient_role_codes, channels, priority, is_active)
+select v.event_type, v.name, true, v.roles, array['IN_APP'], 'NORMAL', true
+  from (values
+    ('RM_REVIEW_CHANGED',    'Verifier: RM modified items during review (DEC-54)',
+     array['INWARD_VERIFIER']),
+    ('DEPT_ROUTING_PLANNED', 'Store Manager: routing planned, issue the goods (DEC-55)',
+     array['INTERMEDIATE_STORE_MANAGER'])
+  ) as v(event_type, name, roles)
  where not exists (select 1 from public.notification_rules r where r.event_type = v.event_type);
 
 -- -----------------------------------------------------------------------------
