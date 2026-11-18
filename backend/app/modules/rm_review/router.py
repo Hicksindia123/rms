@@ -13,9 +13,12 @@ from app.core.idempotency import IdempotencyKeyDep
 from app.core.permissions import EffectivePermissionsDep, require
 from app.core.security import CurrentUser
 from app.modules.rm_review.schemas import (
+    RmAddLineIn,
     RmApproveIn,
     RmApproveOut,
+    RmChangeProductIn,
     RmEditItemIn,
+    RmRemoveLineIn,
     RmReviewDataOut,
     RmSendBackIn,
 )
@@ -60,6 +63,47 @@ def rm_edit_item(
     (audit + revision kept, G-19 enforced).
     """
     return service.edit_item(user, perms, gs_id, item_id, payload, idem).to_response()
+
+
+@router.post("/gs/{gs_id}/rm-add-line")
+def rm_add_line(
+    gs_id: UUID,
+    payload: RmAddLineIn,
+    user: ApproveUser,
+    perms: EffectivePermissionsDep,
+    idem: IdempotencyKeyDep,
+    service: ServiceDep,
+) -> JSONResponse:
+    """DEC-54: RM adds an item line during review with a mandatory reason."""
+    return service.add_line(user, perms, gs_id, payload, idem).to_response()
+
+
+@router.post("/gs/{gs_id}/items/{item_id}/rm-remove-line")
+def rm_remove_line(
+    gs_id: UUID,
+    item_id: UUID,
+    payload: RmRemoveLineIn,
+    user: ApproveUser,
+    perms: EffectivePermissionsDep,
+    idem: IdempotencyKeyDep,
+    service: ServiceDep,
+) -> JSONResponse:
+    """DEC-54: RM removes an item line during review with a mandatory reason."""
+    return service.remove_line(user, perms, gs_id, item_id, payload, idem).to_response()
+
+
+@router.post("/gs/{gs_id}/items/{item_id}/rm-change-product")
+def rm_change_product(
+    gs_id: UUID,
+    item_id: UUID,
+    payload: RmChangeProductIn,
+    user: ApproveUser,
+    perms: EffectivePermissionsDep,
+    idem: IdempotencyKeyDep,
+    service: ServiceDep,
+) -> JSONResponse:
+    """DEC-54: RM changes the product of an item line during review with a mandatory reason."""
+    return service.change_product(user, perms, gs_id, item_id, payload, idem).to_response()
 
 
 @router.post("/gs/{gs_id}/rm-send-back")

@@ -89,6 +89,9 @@ const mockData: RmReviewData = {
 
 const getReviewDataFn = vi.fn<() => Promise<RmReviewData>>();
 const editItemFn = vi.fn<(...args: unknown[]) => Promise<RmReviewItem>>();
+const addLineFn = vi.fn<(...args: unknown[]) => Promise<RmReviewItem>>();
+const removeLineFn = vi.fn<(...args: unknown[]) => Promise<{ goods_slip_id: string; item_id: string; status: string }>>();
+const changeProductFn = vi.fn<(...args: unknown[]) => Promise<RmReviewItem>>();
 const sendBackFn = vi.fn<(...args: unknown[]) => Promise<{ gs_id: string; status: string; remarks: string }>>();
 const approveFn = vi.fn<(...args: unknown[]) => Promise<RmApproveResult>>();
 
@@ -96,9 +99,50 @@ vi.mock('@/features/rm-review/api', () => ({
   rmReviewApi: {
     getReviewData: () => getReviewDataFn(),
     editItem: (...args: unknown[]) => editItemFn(...args),
+    addLine: (...args: unknown[]) => addLineFn(...args),
+    removeLine: (...args: unknown[]) => removeLineFn(...args),
+    changeProduct: (...args: unknown[]) => changeProductFn(...args),
     sendBack: (...args: unknown[]) => sendBackFn(...args),
     approve: (...args: unknown[]) => approveFn(...args),
   },
+}));
+
+vi.mock('@/features/itemization/api', () => ({
+  itemizationApi: {
+    categories: () =>
+      Promise.resolve([
+        {
+          id: 'cat-1',
+          code: 'DMT',
+          name: 'Domestic Appliances',
+          subcategories: [{ id: 'sub-1', code: 'IRN', name: 'Electric Irons' }],
+        },
+      ]),
+    products: () =>
+      Promise.resolve([
+        {
+          id: 'prod-20',
+          code: 'SKU-STEAM-01',
+          name: 'Steam Iron 2000W',
+          category_id: 'cat-1',
+          category_name: 'Domestic Appliances',
+          subcategory_id: 'sub-1',
+          subcategory_name: 'Electric Irons',
+        },
+      ]),
+    productFields: (productId: string) =>
+      Promise.resolve({
+        product_id: productId,
+        allowed_buckets: [
+          { field_id: 'f-1', field_code: 'OK_PACKED', field_label: 'OK and Packed', sort_order: 10 },
+          { field_id: 'f-2', field_code: 'DAMAGED', field_label: 'Damaged', sort_order: 20 },
+        ],
+        allowed_counts: [
+          { field_id: 'fc-1', field_code: 'PACKAGING', field_label: 'Packaging', sort_order: 10 },
+        ],
+      }),
+  },
+  newIdempotencyKey: () => 'web-test-key',
 }));
 
 vi.mock('@/features/goods-slips/statusLabels', () => ({
@@ -252,5 +296,275 @@ describe('RmReviewPage (AMD-12, AMD-13, G-19)', () => {
 
     expect(screen.getByText(/Revision #1/i)).toBeInTheDocument();
     expect(screen.getByText(/"Initial submission by Aman"/i)).toBeInTheDocument();
+  });
+
+  it('allows RM to open Add Line modal, choose product, enter split & reason, and submit (DEC-54)', async () => {
+    addLineFn.mockResolvedValue({
+      item_id: 'item-20',
+      product_id: 'prod-20',
+      sku_code: 'SKU-STEAM-01',
+      sku_name: 'Steam Iron 2000W',
+      documented_qty: 5,
+      received_qty: 5,
+      short_qty: 0,
+      excess_qty: 0,
+      allowed_buckets: [
+        { field_id: 'f-1', field_code: 'OK_PACKED', field_label: 'OK and Packed', sort_order: 10 },
+      ],
+      allowed_counts: [],
+      buckets: [
+        { id: 'b-20', item_id: 'item-20', field_code: 'OK_PACKED', field_label: 'OK and Packed', qty: 5 },
+      ],
+      total_bucket_qty: 5,
+      is_conserved: true,
+      counts: [],
+    });
+
+    render(<RmReviewPage gsId="gs-222" onBack={vi.fn()} />);
+
+    expect(await screen.findByText(/RM Review: GS\/2026\/042/i)).toBeInTheDocument();
+
+    const addLineBtn = screen.getByRole('button', { name: /Add line/i });
+    fireEvent.click(addLineBtn);
+
+    expect(screen.getByText(/Add Line in RM Review \(DEC-54\)/i)).toBeInTheDocument();
+
+    // Select product from combobox
+    const productInput = screen.getByPlaceholderText(/Search product name, code…/i);
+    fireEvent.change(productInput, { target: { value: 'Steam' } });
+
+    const option = await screen.findByText('Steam Iron 2000W');
+    fireEvent.click(option);
+
+    // Enter Documented and Received quantities using element IDs
+    const docInput = document.getElementById('add-line-doc') as HTMLInputElement;
+    fireEvent.change(docInput, { target: { value: '5' } });
+
+    const recvInput = document.getElementById('add-line-recv') as HTMLInputElement;
+    fireEvent.change(recvInput, { target: { value: '5' } });
+
+    // Enter Condition Split (OK and Packed = 5)
+    await waitFor(() => {
+      expect(document.getElementById('add-line-bucket-OK_PACKED')).toBeInTheDocument();
+    });
+    const bucketInput = document.getElementById('add-line-bucket-OK_PACKED') as HTMLInputElement;
+    fireEvent.change(bucketInput, { target: { value: '5' } });
+
+    // Reason is mandatory
+    const reasonInput = document.getElementById('add-line-reason') as HTMLTextAreaElement;
+    fireEvent.change(reasonInput, { target: { value: 'Found extra carton with goods' } });
+
+    const submitBtn = screen.getByRole('button', { name: /Add Line \(RM_ADD_LINE\)/i });
+    expect(submitBtn).not.toBeDisabled();
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(addLineFn).toHaveBeenCalledWith(
+        'gs-222',
+        expect.objectContaining({
+          product_id: 'prod-20',
+          documented_qty: 5,
+          received_qty: 5,
+          buckets: expect.arrayContaining([{ field_code: 'OK_PACKED', qty: 5 }]),
+          reason: 'Found extra carton with goods',
+        }),
+        expect.any(String),
+      );
+    });
+  });
+
+  it('allows RM to open Change Product modal on a line, pick new product, enter split & reason, and submit (DEC-54)', async () => {
+    changeProductFn.mockResolvedValue({
+      ...mockData.items[0]!,
+      product_id: 'prod-20',
+      sku_code: 'SKU-STEAM-01',
+      sku_name: 'Steam Iron 2000W',
+    });
+
+    render(<RmReviewPage gsId="gs-222" onBack={vi.fn()} />);
+
+    expect(await screen.findByText(/Electric Iron 1000W/i)).toBeInTheDocument();
+
+    const changeBtn = screen.getByRole('button', { name: /Change product/i });
+    fireEvent.click(changeBtn);
+
+    expect(screen.getByText(/Change Product: Electric Iron 1000W/i)).toBeInTheDocument();
+
+    // Select new product
+    const prodSearchWrapper = document.getElementById('change-prod-search')!;
+    const productInput = prodSearchWrapper.querySelector('input')!;
+    fireEvent.change(productInput, { target: { value: 'Steam' } });
+
+    const option = await screen.findByText('Steam Iron 2000W');
+    fireEvent.click(option);
+
+    // Existing received_qty is 8, so set OK and Packed to 8 for G-19 conservation
+    await waitFor(() => {
+      expect(document.getElementById('change-prod-bucket-OK_PACKED')).toBeInTheDocument();
+    });
+    const bucketInput = document.getElementById('change-prod-bucket-OK_PACKED') as HTMLInputElement;
+    fireEvent.change(bucketInput, { target: { value: '8' } });
+
+    const reasonInput = document.getElementById('change-prod-reason') as HTMLTextAreaElement;
+    fireEvent.change(reasonInput, { target: { value: 'Carton marked Steam Iron 2000W not 1000W' } });
+
+    const submitBtn = screen.getByRole('button', { name: /Change Product \(RM_CHANGE_PRODUCT\)/i });
+    expect(submitBtn).not.toBeDisabled();
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(changeProductFn).toHaveBeenCalledWith(
+        'gs-222',
+        'item-10',
+        expect.objectContaining({
+          product_id: 'prod-20',
+          buckets: expect.arrayContaining([{ field_code: 'OK_PACKED', qty: 8 }]),
+          reason: 'Carton marked Steam Iron 2000W not 1000W',
+        }),
+        expect.any(String),
+      );
+    });
+  });
+
+  it('allows RM to open Remove Line modal on a line, enter mandatory reason, and submit (DEC-54)', async () => {
+    // Provide 2 items so that remaining count > 1 (BR-07)
+    getReviewDataFn.mockResolvedValue({
+      ...mockData,
+      items: [
+        mockData.items[0]!,
+        {
+          item_id: 'item-20',
+          product_id: 'prod-20',
+          sku_code: 'SKU-STEAM-01',
+          sku_name: 'Steam Iron 2000W',
+          documented_qty: 4,
+          received_qty: 4,
+          short_qty: 0,
+          excess_qty: 0,
+          allowed_buckets: [
+            { field_id: 'f-1', field_code: 'OK_PACKED', field_label: 'OK and Packed', sort_order: 10 },
+          ],
+          allowed_counts: [],
+          buckets: [
+            { id: 'b-20', item_id: 'item-20', field_code: 'OK_PACKED', field_label: 'OK and Packed', qty: 4 },
+          ],
+          total_bucket_qty: 4,
+          is_conserved: true,
+          counts: [],
+        },
+      ],
+    });
+
+    removeLineFn.mockResolvedValue({
+      goods_slip_id: 'gs-222',
+      item_id: 'item-10',
+      status: 'REMOVED',
+    });
+
+    render(<RmReviewPage gsId="gs-222" onBack={vi.fn()} />);
+
+    expect(await screen.findByText(/Electric Iron 1000W/i)).toBeInTheDocument();
+
+    const removeBtns = screen.getAllByRole('button', { name: /Remove line/i });
+    fireEvent.click(removeBtns[0]!);
+
+    expect(screen.getByText(/Remove Item Line \(DEC-54\)/i)).toBeInTheDocument();
+
+    const reasonInput = document.getElementById('remove-line-reason') as HTMLTextAreaElement;
+    fireEvent.change(reasonInput, { target: { value: 'Item belongs to another party shipment' } });
+
+    const confirmBtn = screen.getByRole('button', { name: /Remove Line \(RM_REMOVE_LINE\)/i });
+    expect(confirmBtn).not.toBeDisabled();
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(removeLineFn).toHaveBeenCalledWith(
+        'gs-222',
+        'item-10',
+        { reason: 'Item belongs to another party shipment' },
+        expect.any(String),
+      );
+    });
+  });
+
+  it('disables / hides all review edit, add, remove, send-back, and approve actions when transfer slip is present (DEC-54 T2)', async () => {
+    getReviewDataFn.mockResolvedValue({
+      ...mockData,
+      transfer_slip: {
+        id: 'trf-999',
+        transfer_no: 'TRF/2026/0001',
+        status: 'INITIATED',
+        from_location_code: 'INWARD_STAGING',
+        to_location_code: 'INTERMEDIATE_STORE',
+        total_lines: 1,
+        total_qty: 8,
+      },
+      can_review: false,
+    });
+
+    render(<RmReviewPage gsId="gs-222" onBack={vi.fn()} />);
+
+    expect(await screen.findByText(/Transfer Slip Auto-Generated: TRF\/2026\/0001/i)).toBeInTheDocument();
+
+    // Review modification and workflow action buttons must be completely absent (strictly read-only)
+    expect(screen.queryByRole('button', { name: /Add line/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Change product/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Remove line/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Edit Qty\/Buckets/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Send Back/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Approve & Handover/i })).not.toBeInTheDocument();
+  });
+
+  it('displays revision history badges for RM_ADD_LINE, RM_CHANGE_PRODUCT, and RM_REMOVE_LINE (DEC-54)', async () => {
+    getReviewDataFn.mockResolvedValue({
+      ...mockData,
+      revisions: [
+        ...mockData.revisions,
+        {
+          id: 'rev-2',
+          revision_no: 2,
+          action: 'RM_ADD_LINE',
+          items_snapshot: [],
+          remarks: 'Added line 2',
+          created_by: 'user-rm',
+          created_by_name: 'Pratham',
+          created_at: '2026-11-13T11:00:00Z',
+        },
+        {
+          id: 'rev-3',
+          revision_no: 3,
+          action: 'RM_CHANGE_PRODUCT',
+          items_snapshot: [],
+          remarks: 'Changed product to 2000W',
+          created_by: 'user-rm',
+          created_by_name: 'Pratham',
+          created_at: '2026-11-13T11:10:00Z',
+        },
+        {
+          id: 'rev-4',
+          revision_no: 4,
+          action: 'RM_REMOVE_LINE',
+          items_snapshot: [],
+          remarks: 'Removed wrong line',
+          created_by: 'user-rm',
+          created_by_name: 'Pratham',
+          created_at: '2026-11-13T11:20:00Z',
+        },
+      ],
+    });
+
+    render(<RmReviewPage gsId="gs-222" onBack={vi.fn()} />);
+
+    expect(await screen.findByText(/Revision Audit Trail/i)).toBeInTheDocument();
+
+    const expandBtn = screen.getByRole('button', { name: /Revision Audit Trail/i });
+    fireEvent.click(expandBtn);
+
+    expect(screen.getByText('RM_ADD_LINE')).toBeInTheDocument();
+    expect(screen.getByText('RM_CHANGE_PRODUCT')).toBeInTheDocument();
+    expect(screen.getByText('RM_REMOVE_LINE')).toBeInTheDocument();
+    expect(screen.getByText(/"Added line 2"/i)).toBeInTheDocument();
+    expect(screen.getByText(/"Changed product to 2000W"/i)).toBeInTheDocument();
+    expect(screen.getByText(/"Removed wrong line"/i)).toBeInTheDocument();
   });
 });

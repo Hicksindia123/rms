@@ -33,9 +33,12 @@ from app.modules.itemization.schemas import (
 from app.modules.notifications import service as notifications
 from app.modules.rm_review import repository as repo
 from app.modules.rm_review.schemas import (
+    RmAddLineIn,
     RmApproveIn,
     RmApproveOut,
+    RmChangeProductIn,
     RmEditItemIn,
+    RmRemoveLineIn,
     RmReviewCartonVideoOut,
     RmReviewDataOut,
     RmReviewDocumentOut,
@@ -166,10 +169,14 @@ class RmReviewService:
                     transfer_slip = TransferSlipSummaryOut.model_validate(ts)
 
             can_rev = (
-                user.is_super_admin
-                or RM_ROLE in user.role_codes
-                or perms.allows("itemization", "approve")
-            ) and header_dict["status"] == RM_REVIEW_STATUS
+                (
+                    user.is_super_admin
+                    or RM_ROLE in user.role_codes
+                    or perms.allows("itemization", "approve")
+                )
+                and header_dict["status"] == RM_REVIEW_STATUS
+                and not header_dict.get("transfer_slip_id")
+            )
 
             return RmReviewDataOut(
                 goods_slip=header,
@@ -181,6 +188,47 @@ class RmReviewService:
                 all_conserved=all_conserved,
                 can_review=can_rev,
             )
+
+    def _get_items_snapshot(self, session: Session, gs_id: UUID) -> list[dict[str, Any]]:
+        all_items = item_repo.list_items(session, gs_id)
+        all_buckets = item_repo.get_buckets_for_items(session, [i["id"] for i in all_items])
+        return [
+            {
+                "item_id": str(i["id"]),
+                "sku_code": item_service.item_display(i)[0],
+                "sku_name": item_service.item_display(i)[1],
+                "documented_qty": i["documented_qty"],
+                "received_qty": i["received_qty"],
+                "buckets": [
+                    {"code": b["field_code"], "label": b["label_snapshot"], "qty": b["qty"]}
+                    for b in all_buckets
+                    if b["gs_item_id"] == i["id"]
+                ],
+            }
+            for i in all_items
+        ]
+
+    def _notify_verifier_of_change(
+        self,
+        session: Session,
+        gs: dict[str, Any],
+        action_name: str,
+        reason: str,
+    ) -> None:
+        verifier_ids = [gs["counted_by"]] if gs.get("counted_by") else []
+        notifications.publish(
+            session,
+            "RM_REVIEW_CHANGED",
+            user_ids=verifier_ids,
+            role_codes=["INWARD_VERIFIER"] if not verifier_ids else [],
+            notification_type="RM_REVIEW_CHANGED",
+            title=f"{gs['gs_no']}: RM Review updated ({action_name})",
+            body=f"{action_name} on {gs['gs_no']}: {reason}",
+            entity_type="goods_slips",
+            entity_id=gs["id"],
+            gs_id=gs["id"],
+            priority="NORMAL",
+        )
 
     def edit_item(
         self,
@@ -212,6 +260,11 @@ class RmReviewService:
         gs = gs_service.lock_goods_slip(session, gs_id)
         if gs["status"] != RM_REVIEW_STATUS:
             raise Conflict("Goods slip must be in RM_REVIEW to edit items", code="INVALID_STATUS")
+        if gs.get("transfer_slip_id"):
+            raise Conflict(
+                "Goods slip is read-only once transfer slip is generated",
+                code="TRANSFER_SLIP_EXISTS",
+            )
 
         item = item_repo.get_item(session, item_id)
         if not item or item["gs_id"] != gs_id:
@@ -226,8 +279,6 @@ class RmReviewService:
         if new_doc < 0 or new_recv < 0:
             raise ValidationFailed("Quantities must be 0 or more", code="INVALID_QUANTITY")
 
-        old_recv = item["received_qty"]
-
         # Update item line if changed
         if new_doc != item["documented_qty"] or new_recv != item["received_qty"]:
             session.execute(
@@ -241,30 +292,10 @@ class RmReviewService:
                 {"doc": new_doc, "recv": new_recv, "id": item_id},
             )
 
-            # If stock lot exists and received quantity changed, adjust lot quantity
-            if new_recv != old_recv:
-                lot_id = ledger_service.find_inward_lot(session, item_id)
-                if lot_id:
-                    delta = new_recv - old_recv
-                    inward_loc = ledger_service.get_location_by_code(session, INWARD_LOCATION)
-                    if delta != 0 and inward_loc:
-                        from_loc = inward_loc["id"] if delta < 0 else None
-                        to_loc = None if delta < 0 else inward_loc["id"]
-                        ledger_service.move_stock(
-                            session,
-                            lot_id=lot_id,
-                            from_location_id=from_loc,
-                            to_location_id=to_loc,
-                            movement_type="ADJUST",
-                            qty=abs(delta),
-                            reference_type="gs_items",
-                            reference_id=item_id,
-                            idempotency_key=f"{item_id}:rm_edit:{new_recv}",
-                            actor_id=user.id,
-                            reason=f"RM Review quantity update: {old_recv} -> {new_recv}",
-                        )
+        # Update buckets and counts - split always replaced whole (T3, DEC-54)
+        item_repo.delete_item_buckets(session, item_id)
+        item_repo.delete_item_counts(session, item_id)
 
-        # Update buckets and counts
         fields = item_service.resolve_item_fields(
             session, item["product_id"], item_repo.get_profile_version_id(session, gs_id)
         )
@@ -301,23 +332,7 @@ class RmReviewService:
 
         # Record revision in rm_review_revisions
         rev_no = repo.get_next_revision_no(session, gs_id)
-        all_items = item_repo.list_items(session, gs_id)
-        all_buckets = item_repo.get_buckets_for_items(session, [i["id"] for i in all_items])
-        snapshot = [
-            {
-                "item_id": str(i["id"]),
-                "sku_code": item_service.item_display(i)[0],
-                "sku_name": item_service.item_display(i)[1],
-                "documented_qty": i["documented_qty"],
-                "received_qty": i["received_qty"],
-                "buckets": [
-                    {"code": b["field_code"], "label": b["label_snapshot"], "qty": b["qty"]}
-                    for b in all_buckets
-                    if b["gs_item_id"] == i["id"]
-                ],
-            }
-            for i in all_items
-        ]
+        snapshot = self._get_items_snapshot(session, gs_id)
         repo.insert_revision(
             session,
             gs_id=gs_id,
@@ -328,8 +343,397 @@ class RmReviewService:
             created_by=user.id,
         )
 
+        self._notify_verifier_of_change(
+            session,
+            gs,
+            "Edited line quantities/buckets",
+            payload.remarks or f"RM edited item {item_service.item_display(item)[0]}",
+        )
+
         log.info(
             "rm_review_item_edited", gs_id=str(gs_id), item_id=str(item_id), revision_no=rev_no
+        )
+        return {
+            "goods_slip_id": str(gs_id),
+            "item_id": str(item_id),
+            "revision_no": rev_no,
+            "status": "SAVED",
+        }
+
+    def add_line(
+        self,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        gs_id: UUID,
+        payload: RmAddLineIn,
+        idem: IdempotencyKey,
+    ) -> IdempotentResult:
+        with self._uow.transaction(user.id) as session:
+            return run_idempotent(
+                session,
+                idem,
+                user.id,
+                lambda: (200, self._add_line(session, user, perms, gs_id, payload)),
+            )
+
+    def _add_line(
+        self,
+        session: Session,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        gs_id: UUID,
+        payload: RmAddLineIn,
+    ) -> dict[str, Any]:
+        self._assert_rm_or_admin(user, perms)
+        gs = gs_service.lock_goods_slip(session, gs_id)
+        if gs["status"] != RM_REVIEW_STATUS:
+            raise Conflict("Goods slip must be in RM_REVIEW to add items", code="INVALID_STATUS")
+        if gs.get("transfer_slip_id"):
+            raise Conflict(
+                "Goods slip is read-only once transfer slip is generated",
+                code="TRANSFER_SLIP_EXISTS",
+            )
+        reason = payload.reason.strip()
+        if not reason:
+            raise ValidationFailed(
+                "A reason is required to add an item line (DEC-54)", code="REASON_REQUIRED"
+            )
+
+        product = item_repo.get_product(session, payload.product_id)
+        if not product or not product["is_active"]:
+            raise ValidationFailed("Product not found or inactive", code="FORM_VALIDATION_FAILED")
+
+        if payload.documented_qty < 0 or payload.received_qty < 0:
+            raise ValidationFailed("Quantities must be 0 or more", code="INVALID_QUANTITY")
+
+        tot_b = sum(b.qty for b in payload.buckets)
+        if tot_b != payload.received_qty:
+            raise SystemGuardViolation(
+                "G-19",
+                f"Sum of bucket quantities ({tot_b}) must equal "
+                f"received quantity ({payload.received_qty}) (G-19)",
+                details={"received_qty": payload.received_qty, "bucket_total": tot_b},
+            )
+
+        fields = item_service.resolve_item_fields(
+            session, product["id"], item_repo.get_profile_version_id(session, gs_id)
+        )
+        cat_map = fields.bucket_ids()
+        count_map = fields.count_ids()
+
+        item_id = item_repo.insert_item(
+            session,
+            gs_id=gs_id,
+            product=product,
+            documented_qty=payload.documented_qty,
+            received_qty=payload.received_qty,
+            remarks=reason,
+            by=user.id,
+        )
+
+        for b in payload.buckets:
+            field_id = cat_map.get(b.field_code)
+            if not field_id:
+                raise ValidationFailed(
+                    f"Bucket {b.field_code} is not enabled in this product's item field profile",
+                    code="INVALID_FIELD",
+                )
+            item_repo.upsert_item_bucket(session, item_id, field_id, b.qty, user.id)
+
+        for c in payload.counts:
+            field_id = count_map.get(c.count_type)
+            if not field_id:
+                raise ValidationFailed(
+                    f"Count {c.count_type} is not enabled in this product's item field profile",
+                    code="INVALID_COUNT_TYPE",
+                )
+            item_repo.upsert_item_count(session, item_id, field_id, c.count_value, user.id)
+
+        rev_no = repo.get_next_revision_no(session, gs_id)
+        snapshot = self._get_items_snapshot(session, gs_id)
+        repo.insert_revision(
+            session,
+            gs_id=gs_id,
+            revision_no=rev_no,
+            action="RM_ADD_LINE",
+            items_snapshot=snapshot,
+            remarks=reason,
+            created_by=user.id,
+        )
+
+        self._notify_verifier_of_change(session, gs, "Added line", reason)
+
+        log.info("rm_review_add_line", gs_id=str(gs_id), item_id=str(item_id), revision_no=rev_no)
+        return {
+            "goods_slip_id": str(gs_id),
+            "item_id": str(item_id),
+            "revision_no": rev_no,
+            "status": "SAVED",
+        }
+
+    def remove_line(
+        self,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        gs_id: UUID,
+        item_id: UUID,
+        payload: RmRemoveLineIn,
+        idem: IdempotencyKey,
+    ) -> IdempotentResult:
+        with self._uow.transaction(user.id) as session:
+            return run_idempotent(
+                session,
+                idem,
+                user.id,
+                lambda: (200, self._remove_line(session, user, perms, gs_id, item_id, payload)),
+            )
+
+    def _remove_line(
+        self,
+        session: Session,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        gs_id: UUID,
+        item_id: UUID,
+        payload: RmRemoveLineIn,
+    ) -> dict[str, Any]:
+        self._assert_rm_or_admin(user, perms)
+        gs = gs_service.lock_goods_slip(session, gs_id)
+        if gs["status"] != RM_REVIEW_STATUS:
+            raise Conflict("Goods slip must be in RM_REVIEW to remove items", code="INVALID_STATUS")
+        if gs.get("transfer_slip_id"):
+            raise Conflict(
+                "Goods slip is read-only once transfer slip is generated",
+                code="TRANSFER_SLIP_EXISTS",
+            )
+        reason = payload.reason.strip()
+        if not reason:
+            raise ValidationFailed(
+                "A reason is required to remove an item line (DEC-54)", code="REASON_REQUIRED"
+            )
+
+        item = item_repo.get_item(session, item_id)
+        if not item or item["gs_id"] != gs_id:
+            raise NotFound(f"Item {item_id} not found on goods slip {gs_id}", code="ITEM_NOT_FOUND")
+
+        all_items = item_repo.list_items(session, gs_id)
+        if len(all_items) <= 1:
+            raise ValidationFailed(
+                "Cannot remove the only item line on the goods slip "
+                "(BR-07 requires at least one line)",
+                code="ITEMS_REQUIRED",
+            )
+
+        # If a legacy inward lot exists, clear its balance in INWARD_STAGING
+        lot_id = ledger_service.find_inward_lot(session, item_id)
+        if lot_id:
+            inward_loc = ledger_service.get_location_by_code(session, INWARD_LOCATION)
+            if inward_loc:
+                bal = ledger_service.get_balance(session, lot_id, inward_loc["id"])
+                if bal > 0:
+                    ledger_service.move_stock(
+                        session,
+                        lot_id=lot_id,
+                        from_location_id=inward_loc["id"],
+                        to_location_id=None,
+                        movement_type="ADJUST",
+                        qty=bal,
+                        reference_type="gs_items",
+                        reference_id=item_id,
+                        idempotency_key=f"{item_id}:rm_remove_line:{bal}",
+                        actor_id=user.id,
+                        reason=f"RM removed line; reversed legacy inward lot: {reason}",
+                    )
+
+        item_repo.delete_item_buckets(session, item_id)
+        item_repo.delete_item_counts(session, item_id)
+        item_repo.delete_item(session, item_id)
+
+        rev_no = repo.get_next_revision_no(session, gs_id)
+        snapshot = self._get_items_snapshot(session, gs_id)
+        repo.insert_revision(
+            session,
+            gs_id=gs_id,
+            revision_no=rev_no,
+            action="RM_REMOVE_LINE",
+            items_snapshot=snapshot,
+            remarks=reason,
+            created_by=user.id,
+        )
+
+        self._notify_verifier_of_change(session, gs, "Removed line", reason)
+
+        log.info(
+            "rm_review_remove_line", gs_id=str(gs_id), item_id=str(item_id), revision_no=rev_no
+        )
+        return {
+            "goods_slip_id": str(gs_id),
+            "item_id": str(item_id),
+            "revision_no": rev_no,
+            "status": "DELETED",
+        }
+
+    def change_product(
+        self,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        gs_id: UUID,
+        item_id: UUID,
+        payload: RmChangeProductIn,
+        idem: IdempotencyKey,
+    ) -> IdempotentResult:
+        with self._uow.transaction(user.id) as session:
+            return run_idempotent(
+                session,
+                idem,
+                user.id,
+                lambda: (200, self._change_product(session, user, perms, gs_id, item_id, payload)),
+            )
+
+    def _change_product(
+        self,
+        session: Session,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        gs_id: UUID,
+        item_id: UUID,
+        payload: RmChangeProductIn,
+    ) -> dict[str, Any]:
+        self._assert_rm_or_admin(user, perms)
+        gs = gs_service.lock_goods_slip(session, gs_id)
+        if gs["status"] != RM_REVIEW_STATUS:
+            raise Conflict(
+                "Goods slip must be in RM_REVIEW to change product", code="INVALID_STATUS"
+            )
+        if gs.get("transfer_slip_id"):
+            raise Conflict(
+                "Goods slip is read-only once transfer slip is generated",
+                code="TRANSFER_SLIP_EXISTS",
+            )
+        reason = payload.reason.strip()
+        if not reason:
+            raise ValidationFailed(
+                "A reason is required to change product (DEC-54)", code="REASON_REQUIRED"
+            )
+
+        item = item_repo.get_item(session, item_id)
+        if not item or item["gs_id"] != gs_id:
+            raise NotFound(f"Item {item_id} not found on goods slip {gs_id}", code="ITEM_NOT_FOUND")
+
+        product = item_repo.get_product(session, payload.product_id)
+        if not product or not product["is_active"]:
+            raise ValidationFailed("Product not found or inactive", code="FORM_VALIDATION_FAILED")
+
+        new_doc = (
+            payload.documented_qty if payload.documented_qty is not None else item["documented_qty"]
+        )
+        new_recv = (
+            payload.received_qty if payload.received_qty is not None else item["received_qty"]
+        )
+        if new_doc < 0 or new_recv < 0:
+            raise ValidationFailed("Quantities must be 0 or more", code="INVALID_QUANTITY")
+
+        tot_b = sum(b.qty for b in payload.buckets)
+        if tot_b != new_recv:
+            raise SystemGuardViolation(
+                "G-19",
+                f"Sum of bucket quantities ({tot_b}) must equal "
+                f"received quantity ({new_recv}) (G-19)",
+                details={"item_id": str(item_id), "received_qty": new_recv, "bucket_total": tot_b},
+            )
+
+        fields = item_service.resolve_item_fields(
+            session, product["id"], item_repo.get_profile_version_id(session, gs_id)
+        )
+        cat_map = fields.bucket_ids()
+        count_map = fields.count_ids()
+
+        # If legacy lot exists with old product, reverse it
+        lot_id = ledger_service.find_inward_lot(session, item_id)
+        if lot_id and product["id"] != item["product_id"]:
+            inward_loc = ledger_service.get_location_by_code(session, INWARD_LOCATION)
+            if inward_loc:
+                bal = ledger_service.get_balance(session, lot_id, inward_loc["id"])
+                if bal > 0:
+                    ledger_service.move_stock(
+                        session,
+                        lot_id=lot_id,
+                        from_location_id=inward_loc["id"],
+                        to_location_id=None,
+                        movement_type="ADJUST",
+                        qty=bal,
+                        reference_type="gs_items",
+                        reference_id=item_id,
+                        idempotency_key=f"{item_id}:rm_change_product:{bal}",
+                        actor_id=user.id,
+                        reason=f"RM changed product; reversed legacy inward lot: {reason}",
+                    )
+
+        session.execute(
+            text(
+                """
+                update public.gs_items
+                   set product_id = :pid,
+                       category_id = :cid,
+                       product_code_snapshot = :pcode,
+                       product_name_snapshot = :pname,
+                       category_code_snapshot = :ccode,
+                       documented_qty = :doc,
+                       received_qty = :recv,
+                       updated_at = now()
+                 where id = :id
+                """
+            ),
+            {
+                "pid": product["id"],
+                "cid": product["category_id"],
+                "pcode": product["code"],
+                "pname": product["name"],
+                "ccode": product["category_code"],
+                "doc": new_doc,
+                "recv": new_recv,
+                "id": item_id,
+            },
+        )
+
+        # Replace split whole
+        item_repo.delete_item_buckets(session, item_id)
+        item_repo.delete_item_counts(session, item_id)
+
+        for b in payload.buckets:
+            field_id = cat_map.get(b.field_code)
+            if not field_id:
+                raise ValidationFailed(
+                    f"Bucket {b.field_code} is not enabled in this product's item field profile",
+                    code="INVALID_FIELD",
+                )
+            item_repo.upsert_item_bucket(session, item_id, field_id, b.qty, user.id)
+
+        for c in payload.counts:
+            field_id = count_map.get(c.count_type)
+            if not field_id:
+                raise ValidationFailed(
+                    f"Count {c.count_type} is not enabled in this product's item field profile",
+                    code="INVALID_COUNT_TYPE",
+                )
+            item_repo.upsert_item_count(session, item_id, field_id, c.count_value, user.id)
+
+        rev_no = repo.get_next_revision_no(session, gs_id)
+        snapshot = self._get_items_snapshot(session, gs_id)
+        repo.insert_revision(
+            session,
+            gs_id=gs_id,
+            revision_no=rev_no,
+            action="RM_CHANGE_PRODUCT",
+            items_snapshot=snapshot,
+            remarks=reason,
+            created_by=user.id,
+        )
+
+        self._notify_verifier_of_change(session, gs, "Changed product", reason)
+
+        log.info(
+            "rm_review_change_product", gs_id=str(gs_id), item_id=str(item_id), revision_no=rev_no
         )
         return {
             "goods_slip_id": str(gs_id),
@@ -366,6 +770,11 @@ class RmReviewService:
         gs = gs_service.lock_goods_slip(session, gs_id)
         if gs["status"] != RM_REVIEW_STATUS:
             raise Conflict("Goods slip must be in RM_REVIEW to send back", code="INVALID_STATUS")
+        if gs.get("transfer_slip_id"):
+            raise Conflict(
+                "Goods slip cannot be sent back once transfer slip is generated",
+                code="TRANSFER_SLIP_EXISTS",
+            )
 
         rev_no = repo.get_next_revision_no(session, gs_id)
         all_items = item_repo.list_items(session, gs_id)
@@ -456,6 +865,11 @@ class RmReviewService:
         gs = gs_service.lock_goods_slip(session, gs_id)
         if gs["status"] != RM_REVIEW_STATUS:
             raise Conflict("Goods slip must be in RM_REVIEW to approve", code="INVALID_STATUS")
+        if gs.get("transfer_slip_id"):
+            raise Conflict(
+                "Goods slip has already been approved (transfer slip generated)",
+                code="ALREADY_APPROVED",
+            )
 
         items = item_repo.list_items(session, gs_id)
         if not items:
@@ -481,13 +895,13 @@ class RmReviewService:
                 )
             if recv > 0:
                 lot_id = ledger_service.find_inward_lot(session, it["id"])
+                inward_loc = ledger_service.get_location_by_code(session, INWARD_LOCATION)
+                if not inward_loc:
+                    raise NotFound(
+                        f"Location {INWARD_LOCATION} not found", code="LOCATION_NOT_FOUND"
+                    )
                 if not lot_id:
-                    # Inward lot if not yet created
-                    inward_loc = ledger_service.get_location_by_code(session, INWARD_LOCATION)
-                    if not inward_loc:
-                        raise NotFound(
-                            f"Location {INWARD_LOCATION} not found", code="LOCATION_NOT_FOUND"
-                        )
+                    # Inward lot if not yet created (DEC-54: stock booked at RM approval)
                     stock_item = ledger_service.finished_good_item(
                         session, it["product_id"], user.id
                     )
@@ -512,6 +926,24 @@ class RmReviewService:
                         actor_id=user.id,
                         reason="Inward staging",
                     )
+                else:
+                    # Legacy GS already in RM_REVIEW with stock keep working (existing lot reused)
+                    balance = ledger_service.get_balance(session, lot_id, inward_loc["id"])
+                    if balance != recv:
+                        delta = recv - balance
+                        ledger_service.move_stock(
+                            session,
+                            lot_id=lot_id,
+                            from_location_id=inward_loc["id"] if delta < 0 else None,
+                            to_location_id=None if delta < 0 else inward_loc["id"],
+                            movement_type="ADJUST",
+                            qty=abs(delta),
+                            reference_type="gs_items",
+                            reference_id=it["id"],
+                            idempotency_key=f"{it['id']}:rm_approve_adjust:{recv}",
+                            actor_id=user.id,
+                            reason=f"Legacy lot balance adjusted to match received qty {recv}",
+                        )
                 transfer_lines.append(TransferLineIn(lot_id=lot_id, qty=recv))
 
         if not transfer_lines:

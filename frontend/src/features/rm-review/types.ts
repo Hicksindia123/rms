@@ -60,7 +60,14 @@ export interface RmReviewItem {
 export interface RmReviewRevision {
   id: string;
   revision_no: number;
-  action: 'SUBMITTED' | 'RM_EDIT' | 'RM_SENT_BACK' | 'RM_APPROVED';
+  action:
+    | 'SUBMITTED'
+    | 'RM_EDIT'
+    | 'RM_SENT_BACK'
+    | 'RM_APPROVED'
+    | 'RM_ADD_LINE'
+    | 'RM_REMOVE_LINE'
+    | 'RM_CHANGE_PRODUCT';
   items_snapshot: Array<{
     item_id?: string;
     sku_code?: string | null;
@@ -102,6 +109,28 @@ export interface RmEditItemPayload {
   buckets: Array<{ field_code: string; qty: number }>;
   counts?: Array<{ count_type: string; count_value: number }>;
   remarks?: string | null;
+}
+
+export interface RmAddLinePayload {
+  product_id: string;
+  documented_qty: number;
+  received_qty: number;
+  buckets: Array<{ field_code: string; qty: number }>;
+  counts?: Array<{ count_type: string; count_value: number }>;
+  reason: string;
+}
+
+export interface RmRemoveLinePayload {
+  reason: string;
+}
+
+export interface RmChangeProductPayload {
+  product_id: string;
+  documented_qty?: number;
+  received_qty?: number;
+  buckets: Array<{ field_code: string; qty: number }>;
+  counts?: Array<{ count_type: string; count_value: number }>;
+  reason: string;
 }
 
 export interface RmSendBackPayload {

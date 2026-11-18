@@ -1,8 +1,11 @@
 import { apiRequest } from '@/lib/api/client';
 import type {
+  RmAddLinePayload,
   RmApprovePayload,
   RmApproveResult,
+  RmChangeProductPayload,
   RmEditItemPayload,
+  RmRemoveLinePayload,
   RmReviewData,
   RmReviewItem,
   RmSendBackPayload,
@@ -19,6 +22,41 @@ export const rmReviewApi = {
       body,
       idempotencyKey,
     }),
+
+  addLine: (gsId: string, body: RmAddLinePayload, idempotencyKey: string) =>
+    apiRequest<{ goods_slip_id: string; item_id: string; revision_no: number; status: string }>(
+      `${gs(gsId)}/rm-add-line`,
+      {
+        method: 'POST',
+        body,
+        idempotencyKey,
+      },
+    ),
+
+  removeLine: (gsId: string, itemId: string, body: RmRemoveLinePayload, idempotencyKey: string) =>
+    apiRequest<{ goods_slip_id: string; item_id: string; revision_no: number; status: string }>(
+      `${gs(gsId)}/items/${encodeURIComponent(itemId)}/rm-remove-line`,
+      {
+        method: 'POST',
+        body,
+        idempotencyKey,
+      },
+    ),
+
+  changeProduct: (
+    gsId: string,
+    itemId: string,
+    body: RmChangeProductPayload,
+    idempotencyKey: string,
+  ) =>
+    apiRequest<{ goods_slip_id: string; item_id: string; revision_no: number; status: string }>(
+      `${gs(gsId)}/items/${encodeURIComponent(itemId)}/rm-change-product`,
+      {
+        method: 'POST',
+        body,
+        idempotencyKey,
+      },
+    ),
 
   sendBack: (gsId: string, body: RmSendBackPayload, idempotencyKey: string) =>
     apiRequest<{ gs_id: string; status: string; remarks: string }>(
