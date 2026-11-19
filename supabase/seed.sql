@@ -599,6 +599,10 @@ from (values
   ('DEPT_CLEANING',           'Department: Cleaning',            'TECHNICIAN', 'INTERMEDIATE_STORE_MANAGER', null),
   ('DEPT_TECHNICIAN_REPAIR',  'Department: Technician / Repair', 'TECHNICIAN', 'INTERMEDIATE_STORE_MANAGER', null),
   ('DEPT_MERCURY_EXTRACTION', 'Department: Mercury Extraction',  'TECHNICIAN', 'INTERMEDIATE_STORE_MANAGER', null),
+  -- DEC-59: Grading / Repackaging / Waste Management departments (migration 20261119000100).
+  ('DEPT_GRADING',            'Department: Grading',             'TECHNICIAN', 'INTERMEDIATE_STORE_MANAGER', null),
+  ('DEPT_REPACKAGING',        'Department: Repackaging',         'TECHNICIAN', 'INTERMEDIATE_STORE_MANAGER', null),
+  ('DEPT_WASTE_MANAGEMENT',   'Department: Waste Management',    'TECHNICIAN', 'INTERMEDIATE_STORE_MANAGER', null),
   ('NON_FUNCTIONAL_STORE', 'Non-Functional Store', 'NON_FUNCTIONAL',    'SPARE_PARTS_MANAGER',        'REPLACEMENT_DEPT'),
   ('BATTERY_STORE',        'Battery Store',        'SPARE_PARTS',       'SPARE_PARTS_MANAGER',        'REPLACEMENT_DEPT'),
   ('SPARE_PARTS_STORE',    'Spare Parts Store',    'SPARE_PARTS',       'SPARE_PARTS_MANAGER',        'REPLACEMENT_DEPT'),

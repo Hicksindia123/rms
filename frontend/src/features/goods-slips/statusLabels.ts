@@ -14,7 +14,7 @@ let cache: Promise<Map<string, string>> | null = null;
 
 function load(): Promise<Map<string, string>> {
   cache ??= apiRequest<StatusLabel[]>('/gs/lookups/statuses')
-    .then((rows) => new Map(rows.map((r) => [r.code, r.label])))
+    .then((rows) => new Map(Array.isArray(rows) ? rows.map((r) => [r.code, r.label]) : []))
     .catch((err: unknown) => {
       // Allow a retry on the next use; until then the code is shown in words.
       console.error('Status labels could not be loaded', err);
