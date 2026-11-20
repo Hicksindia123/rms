@@ -479,25 +479,22 @@ async def test_confirm_checks_object(
 
 
 # --- G-02 ----------------------------------------------------------------------------------------
-async def test_g02_complete_requires_video_and_classified_photo(
+async def test_g02_complete_requires_a_video_per_carton_only(
     client: AsyncClient,
     actors: Actors,
     masters: Masters,
     storage: FakeStorage,
     db_conn: Connection,
 ) -> None:
+    """G-02 after DEC-63 (user Q8 + Q25): one confirmed video per carton, nothing else."""
     gs_id = await started_gs(client, actors, masters)
 
     res = await complete(client, actors.aman, gs_id)
     assert res.status_code == 422, res.text
     err = res.json()["error"]
     assert err["code"] == "G-02"
-    # Requirement B: with no video at all, every box is also reported as missing its video.
-    assert set(err["details"]["missing"]) == {
-        "UNBOXING_VIDEO",
-        "VIDEO_PER_CARTON",
-        "CLASSIFIED_DOC_PHOTO",
-    }
+    # With no video at all, every carton is also reported as missing its video.
+    assert set(err["details"]["missing"]) == {"UNBOXING_VIDEO", "VIDEO_PER_CARTON"}
 
     # Requirement B (2026-11-10): one video for box 1 of 3 is not enough; every box needs its own.
     await upload(
@@ -507,47 +504,27 @@ async def test_g02_complete_requires_video_and_classified_photo(
     assert res.status_code == 422, res.text
     err = res.json()["error"]
     assert err["code"] == "G-02"
-    assert err["details"]["missing"] == ["VIDEO_PER_CARTON", "CLASSIFIED_DOC_PHOTO"]
+    assert err["details"]["missing"] == ["VIDEO_PER_CARTON"]
     assert err["details"]["checklist"]["boxes_missing_video"] == [2, 3]
-
-    await upload_videos(client, storage, actors.aman, gs_id)
-    res = await complete(client, actors.aman, gs_id)
-    assert res.status_code == 422 and res.json()["error"]["details"]["missing"] == [
-        "CLASSIFIED_DOC_PHOTO"
-    ]
-
-    photo = await upload(client, storage, actors.aman, gs_id, "DOC_PHOTO", "image/jpeg")
-    res = await complete(client, actors.aman, gs_id)
-    assert res.status_code == 422 and set(res.json()["error"]["details"]["missing"]) == {
-        "UNCLASSIFIED_DOC_PHOTO",
-        "CLASSIFIED_DOC_PHOTO",
-    }
     # A Super Admin cannot bypass G-02 either.
     res = await complete(client, actors.admin, gs_id)
     assert res.status_code == 422 and res.json()["error"]["code"] == "G-02"
 
+    # Legacy DOC_PHOTO classification still works (existing data stays usable) ...
+    photo = await upload(client, storage, actors.aman, gs_id, "DOC_PHOTO", "image/jpeg")
     res = await classify(client, actors.aman, gs_id, photo["id"], INVOICE)
     assert res.status_code == 201, res.text
     doc = res.json()
     assert doc["classification_label"] == "Invoice"
     assert doc["seller_gstin"] == "07AAACB1234C1Z5"  # normalised before validation
     assert doc["doc_no"] == "INV-501" and doc["items_verified"] is True
+    # ... but an unclassified photo no longer blocks (DEC-63 b).
+    await upload(client, storage, actors.aman, gs_id, "DOC_PHOTO", "application/pdf")
 
-    # Every confirmed document photo must be classified (not just one).
-    second = await upload(client, storage, actors.aman, gs_id, "DOC_PHOTO", "application/pdf")
-    res = await complete(client, actors.aman, gs_id)
-    assert res.status_code == 422 and res.json()["error"]["details"]["missing"] == [
-        "UNCLASSIFIED_DOC_PHOTO"
-    ]
-    res = await classify(
-        client,
-        actors.aman,
-        gs_id,
-        second["id"],
-        {"doc_classification": "DEBIT_NOTE", "dn_number": "DN-7", "dn_amount": 1250.5},
-    )
-    assert res.status_code == 201, res.text
-
+    await upload_videos(client, storage, actors.aman, gs_id)
+    state = (await client.get(f"/api/v1/gs/{gs_id}/unboxing", headers=_auth(actors.aman))).json()
+    assert state["checklist"]["ready"] is True and state["checklist"]["missing"] == []
+    assert "can_approve_exception" not in state["permissions"]
     res = await complete(client, actors.aman, gs_id)
     assert res.status_code == 200, res.text
     out = res.json()
@@ -572,7 +549,7 @@ async def test_g02_complete_requires_video_and_classified_photo(
     assert len(notes) == 2
     evidence = [n for n in notes if n["title"].startswith("Documents received for GS ")]
     assert len(evidence) == 1
-    assert "Invoice" in evidence[0]["body"] and "Debit Note" in evidence[0]["body"]
+    assert "Invoice" in evidence[0]["body"]
     # AMD-05: the gate alert is per document row and asks Accounts for the GST input check.
     assert "GST input" in next(n for n in notes if n not in evidence)["body"]
 
@@ -679,86 +656,38 @@ async def test_classification_valid_types_and_edit(
 
 
 # --- DEC-03 missing documentation ----------------------------------------------------------------
-async def test_missing_doc_exception_path(
+async def test_missing_documentation_gs_completes_on_videos_only(
     client: AsyncClient,
     actors: Actors,
     masters: Masters,
     storage: FakeStorage,
     db_conn: Connection,
 ) -> None:
+    """DEC-63 (user Q8): no RM Missing Document Exception. A GS flagged "No Documents From Party"
+    leaves UNBOXING on a video per carton alone; the flag and the Accounts alert stay."""
     gs_id = await started_gs(client, actors, masters, doc="NO_DOCUMENT")
-    for box in (1, 2, 3):  # G-02 / Requirement B: one video per box
-        await upload(
-            client, storage, actors.aman, gs_id, "UNBOXING_VIDEO", "video/quicktime", box_no=box
-        )
     res = await complete(client, actors.aman, gs_id)
     assert res.status_code == 422
-    assert res.json()["error"]["details"]["missing"] == ["MISSING_DOC_EXCEPTION"]
+    assert set(res.json()["error"]["details"]["missing"]) == {"UNBOXING_VIDEO", "VIDEO_PER_CARTON"}
 
-    video = (await client.get(f"/api/v1/gs/{gs_id}/unboxing", headers=_auth(actors.aman))).json()
-    video_id = video["attachments"][0]["id"]
-    res = await client.post(
-        f"/api/v1/gs/{gs_id}/missing-doc-exception",
-        json={"parcel_attachment_id": video_id, "remark": "No papers in the box"},
-        headers=_auth(actors.aman),
-    )
-    assert res.status_code == 422 and res.json()["error"]["code"] == "PARCEL_PHOTO_REQUIRED"
-
+    # The exception endpoints are gone (request, decision, RM queue).
     parcel = await upload(client, storage, actors.aman, gs_id, "PARCEL_PHOTO", "image/jpeg")
-    res = await client.post(
-        f"/api/v1/gs/{gs_id}/missing-doc-exception",
-        json={"parcel_attachment_id": parcel["id"], "remark": "   "},
-        headers=_auth(actors.aman),
-    )
-    assert res.status_code == 422  # mandatory remark
     res = await client.post(
         f"/api/v1/gs/{gs_id}/missing-doc-exception",
         json={"parcel_attachment_id": parcel["id"], "remark": "No papers in the box"},
         headers=_auth(actors.aman),
     )
-    assert res.status_code == 201, res.text
-    exc = res.json()
-    assert exc["status"] == "REQUESTED"
-    rm_notes = fetch_all(
-        db_conn,
-        "select type from public.notifications where user_id = :u and entity_id = :g",
-        u=actors.rm_id,
-        g=gs_id,
-    )
-    assert "MISSING_DOC_EXCEPTION_REQUESTED" in {n["type"] for n in rm_notes}
-    # A second live request is refused; the parcel photo cannot be deleted while referenced.
-    res = await client.post(
-        f"/api/v1/gs/{gs_id}/missing-doc-exception",
-        json={"parcel_attachment_id": parcel["id"], "remark": "again"},
-        headers=_auth(actors.aman),
-    )
-    assert res.status_code == 409
-    res = await client.delete(f"/api/v1/attachments/{parcel['id']}", headers=_auth(actors.aman))
-    assert res.status_code == 409 and res.json()["error"]["code"] == "ATTACHMENT_IN_USE"
+    assert res.status_code in (404, 405)
+    res = await client.get("/api/v1/missing-doc-exceptions/pending", headers=_auth(actors.rm))
+    assert res.status_code in (404, 405)
 
-    pending = await client.get("/api/v1/missing-doc-exceptions/pending", headers=_auth(actors.rm))
-    assert pending.status_code == 200 and exc["id"] in {e["id"] for e in pending.json()}
-
-    decision = f"/api/v1/gs/{gs_id}/missing-doc-exception/{exc['id']}/decision"
-    res = await client.post(decision, json={"decision": "APPROVE"}, headers=_auth(actors.aman))
-    assert res.status_code == 403  # Aman lacks unboxing.approve
-    res = await client.post(decision, json={"decision": "REJECT"}, headers=_auth(actors.rm))
-    assert res.status_code == 422  # a rejection needs a reason
-    res = await complete(client, actors.aman, gs_id)
-    assert res.status_code == 422  # still REQUESTED
-    res = await client.post(
-        decision,
-        json={"decision": "APPROVE", "remarks": "Party confirmed"},
-        headers=_auth(actors.rm),
-    )
-    assert res.status_code == 200 and res.json()["status"] == "APPROVED"
-    res = await client.post(
-        decision, json={"decision": "REJECT", "remarks": "x"}, headers=_auth(actors.rm)
-    )
-    assert res.status_code == 409
-
+    for box in (1, 2, 3):
+        await upload(
+            client, storage, actors.aman, gs_id, "UNBOXING_VIDEO", "video/quicktime", box_no=box
+        )
     res = await complete(client, actors.aman, gs_id)
     assert res.status_code == 200, res.text
+    assert res.json()["goods_slip"]["missing_documentation"] is True  # BR-03 flag kept
     notes = fetch_all(
         db_conn,
         "select priority, body from public.notifications where user_id = :u and entity_id = :g "
@@ -767,19 +696,60 @@ async def test_missing_doc_exception_path(
         g=gs_id,
     )
     assert notes and notes[0]["priority"] == "HIGH"
-
-
-async def test_exception_rejected_for_gs_with_documents(
-    client: AsyncClient, actors: Actors, masters: Masters, storage: FakeStorage
-) -> None:
-    gs_id = await started_gs(client, actors, masters)
-    parcel = await upload(client, storage, actors.aman, gs_id, "PARCEL_PHOTO", "image/png")
-    res = await client.post(
-        f"/api/v1/gs/{gs_id}/missing-doc-exception",
-        json={"parcel_attachment_id": parcel["id"], "remark": "no papers"},
-        headers=_auth(actors.aman),
+    assert "No documents from party" in notes[0]["body"]
+    assert "Exception" not in notes[0]["body"]
+    rm_notes = fetch_all(
+        db_conn,
+        "select type from public.notifications where user_id = :u and entity_id = :g",
+        u=actors.rm_id,
+        g=gs_id,
     )
-    assert res.status_code == 409 and res.json()["error"]["code"] == "NOT_MISSING_DOCUMENTATION"
+    assert not any(n["type"].startswith("MISSING_DOC_EXCEPTION") for n in rm_notes)
+
+
+async def test_legacy_gs_blocked_on_exception_is_released(
+    client: AsyncClient,
+    actors: Actors,
+    masters: Masters,
+    storage: FakeStorage,
+    db_conn: Connection,
+) -> None:
+    """DEC-63 / migration 20261120000300: a GS that waited for a REQUESTED exception completes on
+    its carton videos; the exception row stays as read-only history and can no longer change."""
+    gs_id = await started_gs(client, actors, masters, doc="NO_DOCUMENT")
+    parcel = await upload(client, storage, actors.aman, gs_id, "PARCEL_PHOTO", "image/jpeg")
+    conn = as_admin(db_conn)
+    conn.execute(
+        text(
+            "alter table public.missing_doc_exceptions disable trigger missing_doc_exceptions_guard"
+        )
+    )
+    conn.execute(
+        text(
+            "insert into public.missing_doc_exceptions (gs_id, parcel_attachment_id, remark) "
+            "values (:g, :a, 'No papers (before DEC-63)')"
+        ),
+        {"g": gs_id, "a": parcel["id"]},
+    )
+    conn.execute(
+        text(
+            "alter table public.missing_doc_exceptions enable trigger missing_doc_exceptions_guard"
+        )
+    )
+    with pytest.raises(DBAPIError, match="DEC-63"), conn.begin_nested():
+        conn.execute(
+            text(
+                "update public.missing_doc_exceptions set status = 'REJECTED', "
+                "decided_by = :u, decided_at = now(), decision_remarks = 'x' where gs_id = :g"
+            ),
+            {"u": actors.rm_id, "g": gs_id},
+        )
+    await upload_videos(client, storage, actors.aman, gs_id)
+    state = (await client.get(f"/api/v1/gs/{gs_id}/unboxing", headers=_auth(actors.aman))).json()
+    assert [e["status"] for e in state["exceptions"]] == ["REQUESTED"]
+    assert state["checklist"]["ready"] is True
+    res = await complete(client, actors.aman, gs_id)
+    assert res.status_code == 200, res.text
 
 
 # --- downloads -----------------------------------------------------------------------------------

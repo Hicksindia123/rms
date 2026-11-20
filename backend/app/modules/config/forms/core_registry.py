@@ -43,9 +43,8 @@ FORM_CORE_FIELDS: dict[str, dict[str, CoreFieldDef]] = {
             "unboxing_video", "file", guarded_required=True, system_guard="G-02"
         ),
         "doc_classification": CoreFieldDef("doc_classification", "dropdown", guarded_required=True),
-        "document_photo": CoreFieldDef(
-            "document_photo", "file", guarded_required=True, system_guard="G-02"
-        ),
+        # DEC-63: G-02 no longer requires a document photo (legacy DOCUMENT_PHOTO form).
+        "document_photo": CoreFieldDef("document_photo", "file", guarded_required=True),
     },
     "S1_ITEMIZE": {
         "return_category": CoreFieldDef("return_category", "dropdown", guarded_required=True),

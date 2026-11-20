@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -27,18 +27,16 @@ class UnboxingGs(BaseModel):
 
 
 class Checklist(BaseModel):
-    """'Video ✔/✖ · Documents ✔/✖ · Classified ✔/✖' (G-02). `missing` lists the codes the
-    backend would reject /unboxing/complete with."""
+    """Carton videos (G-02, DEC-63: one confirmed video per carton is the only requirement).
+    `missing` lists the codes the backend would reject /unboxing/complete with. The document photo
+    counts are informational (legacy DOC_PHOTO evidence)."""
 
     video_ok: bool
-    documents_ok: bool
-    classified_ok: bool
     video_count: int
     doc_photo_count: int
     classified_doc_photo_count: int
     parcel_photo_count: int
     missing_documentation: bool
-    exception_approved: bool
     video_per_box_required: bool
     # AMD-03 / AMD-08: carton-wise progress (Carton n of N); box_* names kept for compatibility.
     carton_count: int
@@ -73,6 +71,8 @@ class DocumentOut(BaseModel):
 
 
 class ExceptionOut(BaseModel):
+    """DEC-03 Missing Document Exception, read-only history (retired by DEC-63)."""
+
     id: UUID
     gs_id: UUID
     gs_no: str
@@ -97,7 +97,6 @@ class UploadLimits(BaseModel):
 
 class UnboxingPermissions(BaseModel):
     can_perform: bool
-    can_approve_exception: bool
 
 
 class UnboxingStateOut(BaseModel):
@@ -116,7 +115,9 @@ class UnboxingStateOut(BaseModel):
 
 
 class CartonDocumentIn(BaseModel):
-    """AMD-04: a document row found while opening the cartons (stage S1_UNBOX)."""
+    """P3 / DEC-62: the document found while opening the cartons (stage S1_UNBOX, source CARTON):
+    a type only, its photos are uploaded to the row. doc_no / doc_date / remarks are accepted by
+    the schema only to answer with a clear 422 (not recorded); legacy rows still use them."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -138,20 +139,6 @@ class DocumentPatchIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     values: dict[str, Any]
-
-
-class ExceptionIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    parcel_attachment_id: UUID
-    remark: str = Field(min_length=1, max_length=2000)
-
-
-class ExceptionDecisionIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    decision: Literal["APPROVE", "REJECT"]
-    remarks: str | None = Field(default=None, max_length=2000)
 
 
 class CompleteOut(BaseModel):

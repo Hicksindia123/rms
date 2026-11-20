@@ -1062,6 +1062,9 @@ function Shell() {
                     onOpenGs={(id) => {
                       navigate(`/gs/${id}`);
                     }}
+                    onNext={(id) => {
+                      navigate(`/gs/${id}/itemization`);
+                    }}
                   />
                 ) : second && third === 'tag' ? (
                   <GsTagPrintPage
@@ -1196,9 +1199,6 @@ function Shell() {
                 }}
               >
                 <ApprovalsPage
-                  onOpenGs={(id) => {
-                    navigate(`/gs/${id}/unboxing`);
-                  }}
                   onOpenItemization={(id) => {
                     navigate(`/gs/${id}/itemization`);
                   }}

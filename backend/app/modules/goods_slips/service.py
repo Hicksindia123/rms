@@ -346,6 +346,7 @@ RETURN_OFFLINE = "OFFLINE_RETURN"  # AMD-01 / AMD-02: the return type that carri
 V4_MARKER_FIELD = "transport_document"
 SOURCE_PARTY = "PARTY"
 SOURCE_TRANSPORT = "TRANSPORT"
+SOURCE_CARTON = "CARTON"  # P3: the one optional document found in a carton
 PARTY_DOC_SET = "GATE_DOCUMENT"
 TRANSPORT_DOC_SET = "GATE_TRANSPORT_DOCUMENT"
 # option_items.required_fields of GATE_DOCUMENT (DD r5-r8) → gs_gate_documents columns.
@@ -1988,13 +1989,20 @@ def alert_accounts_for_documents(
         doc_no = d["doc_no"] or "-"
         date_str = f" dated {d['doc_date'].isoformat()}" if d["doc_date"] else ""
         where = "at carton opening" if d["source_step"] == CARTON_DOC_STEP else "at gate"
+        # DEC-62 / P3: image-only rows carry no number; the photo is the document.
+        title_no = f" ({d['doc_no']})" if d["doc_no"] else ""
+        what = (
+            f"{d['doc_type_label']} No. {doc_no}{date_str}"
+            if d["doc_no"]
+            else f"a {d['doc_type_label']} (see the photo)"
+        )
         notified += notifications.publish(
             session,
             "GS_DOCUMENT_FOUND",
             notification_type="GS_DOCUMENT_FOUND",
-            title=f"{gs_no}: {d['doc_type_label']} received {where} ({doc_no})",
+            title=f"{gs_no}: {d['doc_type_label']} received {where}{title_no}",
             body=(
-                f"Consignment from {party} has {d['doc_type_label']} No. {doc_no}{date_str}. "
+                f"Consignment from {party} has {what}. "
                 "Check the GST input now; no need to wait for the next step."
             ),
             entity_type=ENTITY_TYPE,
@@ -2029,8 +2037,55 @@ def validate_document_row(session: Session, doc: GateDocumentIn) -> dict[str, An
     return rows[0]
 
 
+def validate_carton_document_row(
+    session: Session, doc: GateDocumentIn, *, existing: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """P3 / DEC-62: the one optional "document found in carton" (doc_source CARTON): an active
+    GATE_DOCUMENT type (not NO_DOCUMENT, the GS-level BR-03 flag) + photo(s) only. A document
+    number, date or remarks is rejected (the DB CHECK gs_gate_documents_v4_image_only says the
+    same). An unchanged type of a saved row stays valid even if deactivated since (G-18).
+    Raises FORM_VALIDATION_FAILED with `documents.0.*` keys."""
+    errors: dict[str, list[str]] = {}
+    not_recorded = {"doc_no": "Document No.", "doc_date": "Document Date", "remarks": "Remarks"}
+    for col, col_label in not_recorded.items():
+        raw = getattr(doc, col)
+        if raw is not None and str(raw).strip():
+            errors.setdefault(f"documents.0.{col}", []).append(
+                f"{col_label} is not recorded for a carton document; attach a photo instead "
+                "(DEC-62)"
+            )
+    types = {t["code"]: t for t in repo.gate_document_types(session) if t["code"] != DOC_NONE}
+    dtype = types.get(doc.doc_type_code)
+    label: str | None = None
+    if existing is not None and existing["doc_type_code"] == doc.doc_type_code:
+        label = str(existing["doc_type_label"])
+    elif dtype is not None:
+        label = str(dtype["label"])
+    else:
+        errors.setdefault("documents.0.doc_type_code", []).append(
+            "Unknown or inactive document type for a carton document"
+        )
+    if errors or label is None:
+        raise ValidationFailed(
+            "The carton document has errors", code="FORM_VALIDATION_FAILED", details=errors
+        )
+    return {
+        "doc_type_code": doc.doc_type_code,
+        "doc_type_label": label,  # G-18 label snapshot
+        "doc_no": None,
+        "doc_date": None,
+        "remarks": None,
+        "doc_source": SOURCE_CARTON,
+    }
+
+
 def add_document_row(
-    session: Session, gs_id: UUID, row: dict[str, Any], *, source_step: str
+    session: Session,
+    gs_id: UUID,
+    row: dict[str, Any],
+    *,
+    source_step: str,
+    doc_source: str | None = None,
 ) -> UUID:
     fields = {
         k: row[k] for k in ("doc_type_code", "doc_type_label", "doc_no", "doc_date", "remarks")
@@ -2041,6 +2096,7 @@ def add_document_row(
         fields=fields,
         sort_order=repo.next_gate_document_sort(session, gs_id),
         source_step=source_step,
+        doc_source=doc_source,
     )
 
 

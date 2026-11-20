@@ -87,28 +87,17 @@ BASE = {
     [
         ({}, []),
         ({"video_count": 0}, ["UNBOXING_VIDEO"]),
-        ({"doc_photo_count": 0, "classified_doc_photo_count": 0}, ["CLASSIFIED_DOC_PHOTO"]),
-        ({"doc_photo_count": 2}, ["UNCLASSIFIED_DOC_PHOTO"]),
         ({"boxes_missing_video": [2]}, ["VIDEO_PER_CARTON"]),
+        ({"video_count": 0, "boxes_missing_video": [1, 2]}, ["UNBOXING_VIDEO", "VIDEO_PER_CARTON"]),
+        # DEC-63 (Q25): no document photo, and unclassified photos do not block.
+        ({"doc_photo_count": 0, "classified_doc_photo_count": 0}, []),
+        ({"doc_photo_count": 2}, []),
+        # DEC-63 (Q8): a GS flagged missing documentation needs no exception, for all GSs.
         (
             {"missing_documentation": True, "doc_photo_count": 0, "classified_doc_photo_count": 0},
-            ["MISSING_DOC_EXCEPTION"],
-        ),
-        (
-            {
-                "missing_documentation": True,
-                "approved_exception": True,
-                "doc_photo_count": 0,
-                "classified_doc_photo_count": 0,
-            },
             [],
         ),
-        # DEC-03 (P2-03 prompt): a flagged GS needs the exception even if papers turn up.
-        ({"missing_documentation": True}, ["MISSING_DOC_EXCEPTION"]),
-        (
-            {"video_count": 0, "missing_documentation": True, "approved_exception": True},
-            ["UNBOXING_VIDEO"],
-        ),
+        ({"missing_documentation": True, "video_count": 0}, ["UNBOXING_VIDEO"]),
     ],
 )
 def test_g02_missing_evidence(override: dict[str, Any], missing: list[str]) -> None:

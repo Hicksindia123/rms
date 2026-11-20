@@ -22,12 +22,14 @@ def guard_g01(entity: Any, user: Any) -> bool:
 
 
 def g02_missing_evidence(ctx: dict[str, Any]) -> list[str]:
-    """G-02 / BR-04 / DEC-03: what is still missing before a GS may leave UNBOXING.
+    """G-02 / BR-04 (DEC-63, 2026-11-20): what is still missing before a GS may leave UNBOXING.
 
-    Context keys (counts of CONFIRMED attachments, computed by the unboxing service):
-    `video_count`, `doc_photo_count`, `classified_doc_photo_count`, `missing_documentation`,
-    `approved_exception` (approved Missing Document Exception with a confirmed parcel photo),
-    optionally `boxes_missing_video` (cartons without a video, AMD-03). The DB trigger
+    Only the carton videos count: one confirmed video for every carton 1..N. Document photos,
+    their classification and the retired Missing Document Exception (DEC-03) are no longer part
+    of the guard (user Q8 + Q25), also for a GS flagged missing documentation.
+
+    Context keys (computed by the unboxing service): `video_count` (confirmed videos) and
+    `boxes_missing_video` (cartons without a confirmed video, AMD-03). The DB trigger
     `rms_private.goods_slips_g02_guard` enforces the same rule.
     """
     missing: list[str] = []
@@ -35,22 +37,13 @@ def g02_missing_evidence(ctx: dict[str, Any]) -> list[str]:
         missing.append("UNBOXING_VIDEO")
     if ctx.get("boxes_missing_video"):
         missing.append("VIDEO_PER_CARTON")
-    doc_photos = int(ctx.get("doc_photo_count") or 0)
-    classified = int(ctx.get("classified_doc_photo_count") or 0)
-    if classified < doc_photos:
-        missing.append("UNCLASSIFIED_DOC_PHOTO")
-    if ctx.get("missing_documentation"):
-        if not ctx.get("approved_exception"):
-            missing.append("MISSING_DOC_EXCEPTION")
-    elif classified < 1:
-        missing.append("CLASSIFIED_DOC_PHOTO")
     return missing
 
 
 @register_guard("G-02")
 def guard_g02(entity: Any, user: Any) -> bool:
-    """Guard G-02: a GS cannot leave UNBOXING without confirmed video and classified document
-    photos (or an approved Missing Document Exception, DEC-03). Super Admin cannot bypass it."""
+    """Guard G-02 (DEC-63): a GS cannot leave UNBOXING until every carton has a confirmed video.
+    Not configurable; Super Admin cannot bypass it."""
     ctx = getattr(entity, "context", {}) or {}
     return not g02_missing_evidence(ctx)
 

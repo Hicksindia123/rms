@@ -111,7 +111,7 @@ insert into _seed_role_matrix values
   ('REPLACEMENT_MANAGER',        'dashboards',      array['view']),
   ('REPLACEMENT_MANAGER',        'notifications',   array['view']),
   ('REPLACEMENT_MANAGER',        'goods_slips',     array['view','edit','approve']),
-  ('REPLACEMENT_MANAGER',        'unboxing',        array['view','approve']),
+  ('REPLACEMENT_MANAGER',        'unboxing',        array['view']),  -- DEC-63: no missing-doc approval
   ('REPLACEMENT_MANAGER',        'attachments',     array['view']),
   ('REPLACEMENT_MANAGER',        'itemization',     array['view','approve']),
   ('REPLACEMENT_MANAGER',        'inspection',      array['view','approve']),
@@ -3648,8 +3648,8 @@ begin
       ('GS_CLOSED',                       'Closure roles (gs_closure_roles)',                   true,  false, '{}', array['IN_APP'], true),
       ('DAILY_AUDIT_MISSED',              'Inward Verifier & RM: audit missed (DEC-08)',        true,  false, '{}', array['IN_APP'], true),
       ('PROVISIONAL_PARTY_CREATED',       'Master-data editors (DEC-02)',                       true,  false, '{}', array['IN_APP'], true),
-      ('MISSING_DOC_EXCEPTION_REQUESTED', 'Exception approvers (DEC-03)',                       true,  false, '{}', array['IN_APP'], true),
-      ('MISSING_DOC_EXCEPTION_DECIDED',   'Requester: exception decision',                      true,  false, '{}', array['IN_APP'], true),
+      ('MISSING_DOC_EXCEPTION_REQUESTED', 'Exception approvers (DEC-03)',                       true,  false, '{}', array['IN_APP'], false),  -- DEC-63: retired
+      ('MISSING_DOC_EXCEPTION_DECIDED',   'Requester: exception decision',                      true,  false, '{}', array['IN_APP'], false),  -- DEC-63: retired
       ('TRANSFER_PROPOSED',               'Packaging custodian (BR-09)',                        true,  false, '{}', array['IN_APP'], true),
       ('ITEM_CORRECTION_REQUESTED',       'Correction approvers',                               true,  false, '{}', array['IN_APP'], true),
       ('ITEM_CORRECTION_DECIDED',         'Requester: correction decision',                     true,  false, '{}', array['IN_APP'], true),

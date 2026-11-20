@@ -55,19 +55,14 @@ export async function ensureFieldProfiles(): Promise<FieldProfileSetup> {
 
     const deptGroup = deptScope.groups.find((g) => g.field_group === 'DEPARTMENT');
     if (!deptGroup || deptGroup.effective.length === 0) {
-      await api(
-        USERS.admin,
-        'PUT',
-        '/config/item-field-profiles/scope/DEPARTMENT',
-        {
-          category_id: dmt.id,
-          fields: [
-            { field_id: repair.id, is_included: true, sort_order: 10 },
-            { field_id: hg.id, is_included: true, sort_order: 20 },
-          ],
-          reason: 'Phase 11 setup: assign departments to DMT',
-        },
-      );
+      await api(USERS.admin, 'PUT', '/config/item-field-profiles/scope/DEPARTMENT', {
+        category_id: dmt.id,
+        fields: [
+          { field_id: repair.id, is_included: true, sort_order: 10 },
+          { field_id: hg.id, is_included: true, sort_order: 20 },
+        ],
+        reason: 'Phase 11 setup: assign departments to DMT',
+      });
     }
   } catch {
     // Already set or concurrent worker set it
@@ -80,20 +75,15 @@ export async function ensureFieldProfiles(): Promise<FieldProfileSetup> {
 
     const countGroup = countScope.groups.find((g) => g.field_group === 'ITEM_COUNT');
     if (!countGroup || countGroup.effective.length === 0) {
-      await api(
-        USERS.admin,
-        'PUT',
-        '/config/item-field-profiles/scope/ITEM_COUNT',
-        {
-          category_id: dmt.id,
-          fields: [
-            { field_id: pkg.id, is_included: true, sort_order: 10 },
-            { field_id: cont.id, is_included: true, sort_order: 20 },
-            { field_id: manual.id, is_included: true, sort_order: 30 },
-          ],
-          reason: 'Phase 11 setup: assign item counts to DMT',
-        },
-      );
+      await api(USERS.admin, 'PUT', '/config/item-field-profiles/scope/ITEM_COUNT', {
+        category_id: dmt.id,
+        fields: [
+          { field_id: pkg.id, is_included: true, sort_order: 10 },
+          { field_id: cont.id, is_included: true, sort_order: 20 },
+          { field_id: manual.id, is_included: true, sort_order: 30 },
+        ],
+        reason: 'Phase 11 setup: assign item counts to DMT',
+      });
     }
   } catch {
     // Already set or concurrent worker set it
@@ -142,7 +132,7 @@ export async function createOfflineGs(params: {
   const party = await getParty();
   const backdate = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
   const gateEntryDate = params.gateEntryDate ?? backdate;
-  const gateEntryNo = params.gateEntryNo ?? (800000 + Math.floor(Math.random() * 100000));
+  const gateEntryNo = params.gateEntryNo ?? 800000 + Math.floor(Math.random() * 100000);
   const cartonCount = params.cartonCount ?? 2;
   const tag = params.tag;
 
@@ -209,7 +199,8 @@ export async function uploadCartonVideos(
   }
 }
 
-/** Upload and classify document photo (required by G-02 unless missing_documentation is set). */
+/** Upload and classify a legacy document photo. Not required since DEC-63 (P3); kept to prove
+ * that existing DOC_PHOTO data and its classification still work. */
 export async function uploadClassifiedDocPhoto(gsId: string, docNo: string): Promise<void> {
   const photo = await uploadConfirmed(gsId, 'DOC_PHOTO');
   await api(USERS.aman, 'POST', `/gs/${gsId}/documents`, {
@@ -225,10 +216,10 @@ export async function uploadClassifiedDocPhoto(gsId: string, docNo: string): Pro
   });
 }
 
-/** Add a document row at carton opening stage. */
+/** P3 / DEC-62: the one optional document found in a carton (a type only; no number / date). */
 export async function addCartonDocument(
   gsId: string,
-  doc: { doc_type_code: string; doc_no: string; doc_date: string; remarks?: string },
+  doc: { doc_type_code: string },
 ): Promise<void> {
   await api(USERS.aman, 'POST', `/gs/${gsId}/carton-documents`, doc, true);
 }

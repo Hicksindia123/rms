@@ -273,22 +273,18 @@ export async function createGs(tag: string): Promise<Gs> {
   return created.goods_slip;
 }
 
-/** Step-2 through the API as Aman: video + classified invoice photo, then complete. */
+/** Step 2a through the API as Aman: one confirmed video per carton, then Next (complete).
+ * G-02 after DEC-63 (P3): no document photo, classification or exception is needed. */
 export async function unboxed(gs: Gs): Promise<void> {
-  await api(USERS.aman, 'POST', `/gs/${gs.id}/unboxing/start`, {});
-  await uploadConfirmed(gs.id, 'UNBOXING_VIDEO');
-  const photo = await uploadConfirmed(gs.id, 'DOC_PHOTO');
-  await api(USERS.aman, 'POST', `/gs/${gs.id}/documents`, {
-    attachment_id: photo,
-    values: {
-      doc_classification: 'INVOICE',
-      invoice_no: `INV-${gs.gs_no}`,
-      invoice_date: '2026-11-01',
-      buyer_gstin: '09AAACH7409R1ZZ',
-      seller_gstin: '07AAACB1234C1Z5',
-      items_verified: true,
-    },
-  });
+  const state = await api<{ goods_slip: { carton_count: number } }>(
+    USERS.aman,
+    'POST',
+    `/gs/${gs.id}/unboxing/start`,
+    {},
+  );
+  for (let box = 1; box <= Math.max(1, state.goods_slip.carton_count); box++) {
+    await uploadConfirmed(gs.id, 'UNBOXING_VIDEO', box);
+  }
   await api(USERS.aman, 'POST', `/gs/${gs.id}/unboxing/complete`, {});
 }
 

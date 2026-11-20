@@ -20,9 +20,6 @@ from app.modules.unboxing.schemas import (
     DocumentIn,
     DocumentOut,
     DocumentPatchIn,
-    ExceptionDecisionIn,
-    ExceptionIn,
-    ExceptionOut,
     OptionOut,
     QueueItem,
     UnboxingStateOut,
@@ -40,7 +37,6 @@ def get_service(uow: UowDep) -> UnboxingService:
 ServiceDep = Annotated[UnboxingService, Depends(get_service)]
 ViewUser = Annotated[CurrentUser, Depends(require("goods_slips", "view"))]
 PerformUser = Annotated[CurrentUser, Depends(require("unboxing", "create"))]
-ApproveUser = Annotated[CurrentUser, Depends(require("unboxing", "approve"))]
 # Accounts document queue: the Accounts team's default grants (docs/DECISIONS.md, P2-03).
 QueueUser = Annotated[CurrentUser, Depends(require("credit_notes", "view"))]
 AckUser = Annotated[CurrentUser, Depends(require("credit_notes", "edit"))]
@@ -101,8 +97,10 @@ def add_carton_document(
     idem: IdempotencyKeyDep,
     service: ServiceDep,
 ) -> JSONResponse:
-    """AMD-04: a document row found at carton opening (GS UNBOXING, S1_UNBOX performer).
-    Invoice / Debit Note alert Accounts at once (AMD-05). Files: POST
+    """P3 / DEC-62: the one optional document found in a carton (GS UNBOXING, S1_UNBOX
+    performer): a type (active GATE_DOCUMENT, not NO_DOCUMENT), no number / date / remarks; a
+    second one → 409 CARTON_DOCUMENT_EXISTS. Allowed on a GS flagged "No Documents From Party".
+    Invoice / GST Debit Note alert Accounts at once (AMD-05). Photos: POST
     /gs/{gs_id}/gate-documents/{document_id}/files/upload-url."""
     return service.add_carton_document(user, perms, gs_id, payload, idem).to_response()
 
@@ -131,54 +129,17 @@ def delete_carton_document(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post(
-    "/gs/{gs_id}/missing-doc-exception",
-    response_model=ExceptionOut,
-    status_code=status.HTTP_201_CREATED,
-)
-def request_missing_doc_exception(
-    gs_id: UUID,
-    payload: ExceptionIn,
-    user: PerformUser,
-    perms: EffectivePermissionsDep,
-    service: ServiceDep,
-) -> ExceptionOut:
-    """DEC-03: parcel photo + mandatory remark; the Replacement Manager is alerted."""
-    return service.request_exception(user, perms, gs_id, payload)
-
-
-@router.post(
-    "/gs/{gs_id}/missing-doc-exception/{exception_id}/decision", response_model=ExceptionOut
-)
-def decide_missing_doc_exception(
-    gs_id: UUID,
-    exception_id: UUID,
-    payload: ExceptionDecisionIn,
-    user: ApproveUser,
-    perms: EffectivePermissionsDep,
-    service: ServiceDep,
-) -> ExceptionOut:
-    """Approve / reject (unboxing.approve; a rejection needs a reason)."""
-    return service.decide_exception(user, perms, gs_id, exception_id, payload)
-
-
-@router.get("/missing-doc-exceptions/pending", response_model=list[ExceptionOut])
-def pending_missing_doc_exceptions(
-    user: ApproveUser,
-    perms: EffectivePermissionsDep,
-    service: ServiceDep,
-    limit: Annotated[int, Query(ge=1, le=100)] = 50,
-) -> list[ExceptionOut]:
-    """Approval cards for the Replacement Manager."""
-    return service.pending_exceptions(user, perms, limit)
+# DEC-63 (user Q8, 2026-11-20): the RM Missing Document Exception (DEC-03) is retired. Its request,
+# decision and pending-queue endpoints are removed; existing rows stay readable in GET
+# /gs/{gs_id}/unboxing (`exceptions`, history only).
 
 
 @router.post("/gs/{gs_id}/unboxing/complete", response_model=CompleteOut)
 def complete_unboxing(
     gs_id: UUID, user: PerformUser, perms: EffectivePermissionsDep, service: ServiceDep
 ) -> CompleteOut:
-    """G-02 → ITEMIZATION, S1_ITEMIZE task, Accounts alert (DEC-05). 422 `G-02` lists what is
-    missing."""
+    """ "Next": G-02 (one confirmed video per carton, DEC-63) → ITEMIZATION, S1_ITEMIZE task,
+    Accounts alert (DEC-05). 422 `G-02` lists what is missing."""
     return service.complete(user, perms, gs_id)
 
 

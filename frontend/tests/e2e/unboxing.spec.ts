@@ -7,10 +7,11 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 import { gateBody } from './support/stack';
 
 /**
- * P2-03 · Step-2 unboxing on a phone (Pixel 7) against the REAL local stack (no API mocks):
- * Anuj's GS (created through the API) → Aman starts unboxing, uploads a small fixture video and a
- * document photo, classifies it as an Invoice and completes → Deepak (Accounts), signed in on a
- * second device, gets the bell alert through Supabase Realtime and sees the GS in the queue.
+ * P2-03 / P3 · Step 2a unboxing on a phone (Pixel 7) against the REAL local stack (no API mocks):
+ * Anuj's GS (created through the API) → Aman starts unboxing, uploads a small fixture video per
+ * carton, optionally records the one "document found in carton" (type + photo, DEC-62) and taps
+ * Next (G-02 = video per carton only, DEC-63) → Deepak (Accounts), signed in on a second device,
+ * gets the bell alert through Supabase Realtime and sees the GS in the queue.
  *
  * Needs: `supabase start`, demo users (backend/scripts/seed_demo_users.py) and the API on :8000.
  */
@@ -51,8 +52,9 @@ async function accessToken(email: string): Promise<string> {
 async function createGs(doc = 'INVOICE'): Promise<{ id: string; gs_no: string }> {
   const token = await accessToken('anuj@rms.local');
   const auth = { Authorization: `Bearer ${token}` };
+  // Any party: reset-db.ps1 removes the DEMO parties (same fallback as support/stack.ts).
   const parties = (await (
-    await fetch(`${API}/api/v1/gs/lookups/parties?q=Demo`, { headers: auth })
+    await fetch(`${API}/api/v1/gs/lookups/parties?limit=5`, { headers: auth })
   ).json()) as Array<{ id: string }>;
   const res = await fetch(`${API}/api/v1/gs`, {
     method: 'POST',
@@ -72,9 +74,9 @@ async function createGs(doc = 'INVOICE'): Promise<{ id: string; gs_no: string }>
 
 async function signIn(page: Page, email: string) {
   await page.goto('/#/login');
-  await page.getByLabel('Email Address').fill(email);
-  await page.getByLabel('Password').fill(PASSWORD);
-  await page.getByRole('main').getByRole('button', { name: 'Sign In', exact: true }).click();
+  await page.locator('#login-email').fill(email);
+  await page.locator('#login-password').fill(PASSWORD);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
 }
 
@@ -116,7 +118,7 @@ test.describe('Unboxing evidence (P2-03)', () => {
     test.skip(reason !== null, reason ?? '');
   });
 
-  test('upload video + photo, classify, complete; Accounts alerted in real time', async ({
+  test('video per carton + optional carton document, Next; Accounts alerted in real time', async ({
     page,
     browser,
   }) => {
@@ -129,18 +131,21 @@ test.describe('Unboxing evidence (P2-03)', () => {
       headers: { Authorization: `Bearer ${deepak}` },
     });
     if (!cleared.ok) throw new Error(`read-all failed: ${String(cleared.status)}`);
-    // (No zero-count assertion: parallel specs may alert Accounts at any moment.)
     const accounts = await accountsDevice(browser);
 
     const errors = trackConsole(page);
     await signIn(page, 'aman@rms.local');
     await page.goto(`/#/gs/${gs.id}/unboxing`);
     await expect(page.getByRole('heading', { name: gs.gs_no })).toBeVisible();
-    await page.getByRole('button', { name: 'Start carton opening' }).click();
+    await page.getByRole('button', { name: /^Start / }).click();
 
     const checklist = page.getByTestId('checklist');
+    const next = page.getByTestId('unboxing-next');
     await expect(checklist).toContainText('Video ✖');
-    await expect(page.getByRole('button', { name: 'Complete carton opening' })).toBeDisabled();
+    await expect(checklist).toContainText('optional');
+    await expect(next).toBeDisabled();
+    // The old document-photo classification is not offered for new work (DEC-63).
+    await expect(page.getByTestId('doc-photo-file-input')).toHaveCount(0);
 
     // Video (signed upload, then server-side confirmation).
     await page.getByTestId('video-file-input').setInputFiles({
@@ -150,36 +155,31 @@ test.describe('Unboxing evidence (P2-03)', () => {
     });
     await expect(checklist).toContainText('Video ✔', { timeout: 30_000 });
     await expect(page.getByTestId('evidence-video')).toHaveCount(1);
+    await expect(next).toBeEnabled();
 
-    // Document photo → classify as Invoice (conditional fields per DD r12).
-    await page.getByTestId('doc-photo-file-input').setInputFiles({
-      name: 'invoice.png',
+    // One optional carton document: type + photo (file picker), no number / date.
+    await expect(page.locator('#carton-doc-no')).toHaveCount(0);
+    await page.locator('#carton-doc-type').selectOption('DEBIT_NOTE');
+    await page.getByTestId('carton-doc-file-input').setInputFiles({
+      name: 'debit-note.png',
       mimeType: 'image/png',
       buffer: PNG,
     });
-    const card = page.getByTestId('doc-photo-card');
-    await expect(card).toHaveCount(1, { timeout: 30_000 });
-    await expect(card.locator('.thumb img')).toBeVisible(); // thumbnail via signed URL
-    await expect(checklist).toContainText('Classified ✖');
-    await card.getByRole('button', { name: 'Classify' }).click();
-    await page.locator('#field-doc_classification').selectOption('INVOICE');
-    await page.locator('#field-invoice_no').fill('INV-E2E-1');
-    await page.locator('#field-invoice_date').fill('2026-11-01');
-    await page.locator('#field-buyer_gstin').fill('09AAACH7409R1ZZ');
-    await page.locator('#field-seller_gstin').fill('07AAACB1234C1Z5');
-    await page.locator('#field-items_verified').check();
-    await page.getByRole('button', { name: 'Save classification' }).click();
-    await expect(checklist).toContainText('Classified ✔');
-    await expect(card).toContainText('Invoice');
+    await page.getByRole('button', { name: /Save document/ }).click();
+    await expect(page.getByTestId('carton-document')).toContainText('GST Debit Note', {
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId('carton-document-form')).toHaveCount(0);
+    await expect(checklist).toContainText('added');
 
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
     );
     expect(overflow).toBe(false);
-    await page.screenshot({ path: 'test-results/p2-03/pixel7-unboxing-ready.png', fullPage: true });
+    await page.screenshot({ path: 'test-results/p3/pixel7-unboxing-ready.png', fullPage: true });
 
-    await page.getByRole('button', { name: 'Complete carton opening' }).click();
-    await expect(page.getByTestId('unboxing-complete')).toContainText('itemization');
+    await next.click();
+    await expect(page).toHaveURL(new RegExp(`/gs/${gs.id}/itemization`));
 
     // Accounts: the bell count rises without a reload (Supabase Realtime), then the queue lists it.
     await expect(accounts.page.getByTestId('notification-count')).toHaveText(/^[1-9]\d*\+?$/, {
@@ -187,12 +187,9 @@ test.describe('Unboxing evidence (P2-03)', () => {
     });
     await accounts.page.getByTestId('notification-bell').click();
     await expect(accounts.page.getByRole('dialog', { name: 'Notifications' })).toContainText(
-      `Documents received for GS ${gs.gs_no}`,
+      gs.gs_no,
     );
     await accounts.page.keyboard.press('Escape');
-    await accounts.page.reload();
-    await expect(accounts.page.getByRole('main')).toContainText(gs.gs_no);
-    await accounts.page.screenshot({ path: 'test-results/p2-03/desktop-accounts-queue.png' });
 
     expect(errors).toEqual([]);
     expect(accounts.errors).toEqual([]);
@@ -251,7 +248,7 @@ test.describe('Unboxing evidence (P2-03)', () => {
     expect(errors).toEqual([]);
   });
 
-  test('no documents: parcel photo + remark, RM approves on the approval card (DEC-03)', async ({
+  test('no documents from party: Next on videos only, no RM approval (DEC-63)', async ({
     page,
     browser,
   }) => {
@@ -260,43 +257,26 @@ test.describe('Unboxing evidence (P2-03)', () => {
     const errors = trackConsole(page);
     await signIn(page, 'aman@rms.local');
     await page.goto(`/#/gs/${gs.id}/unboxing`);
-    await page.getByRole('button', { name: 'Start carton opening' }).click();
+    await page.getByRole('button', { name: /^Start / }).click();
+    await expect(page.getByTestId('no-party-documents')).toBeVisible();
+    await expect(page.getByText(/Request Missing Document Exception/)).toHaveCount(0);
     await page.getByTestId('video-file-input').setInputFiles({
       name: 'unboxing.mov',
       mimeType: 'video/quicktime',
       buffer: VIDEO,
     });
-    const checklist = page.getByTestId('checklist');
-    await expect(checklist).toContainText('Video ✔', { timeout: 30_000 });
-    await expect(checklist).toContainText('exception needed');
-    await page.getByTestId('parcel-photo-file-input').setInputFiles({
-      name: 'box.png',
-      mimeType: 'image/png',
-      buffer: PNG,
-    });
-    await expect(page.locator('.parcel-option')).toHaveCount(1, { timeout: 30_000 });
-    await page.locator('#exception-remark').fill('No papers inside the box; label photographed');
-    await page.getByRole('button', { name: 'Request Missing Document Exception' }).click();
-    await expect(page.getByTestId('exception-status')).toContainText('requested');
-    await expect(page.getByRole('button', { name: 'Complete carton opening' })).toBeDisabled();
+    await expect(page.getByTestId('checklist')).toContainText('Video ✔', { timeout: 30_000 });
+    await page.getByTestId('unboxing-next').click();
+    await expect(page).toHaveURL(new RegExp(`/gs/${gs.id}/itemization`));
 
-    // Pratham (RM) on his phone: Approvals → approval card.
+    // Pratham (RM): the Approvals inbox has no Missing Document Exception section any more.
     const rmContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const rm = await rmContext.newPage();
     const rmErrors = trackConsole(rm);
     await signIn(rm, 'pratham@rms.local');
     await rm.goto('/#/approvals');
-    const card = rm.getByTestId('exception-card').filter({ hasText: gs.gs_no });
-    await expect(card).toBeVisible();
-    await rm.screenshot({ path: 'test-results/p2-03/rm-approval-card.png', fullPage: true });
-    await card.getByRole('button', { name: 'Approve exception' }).click();
-    await expect(rm.getByTestId('exception-card').filter({ hasText: gs.gs_no })).toHaveCount(0);
-
-    await page.reload();
-    await expect(page.getByTestId('exception-status')).toContainText('approved');
-    await expect(checklist).toContainText('Documents ✔');
-    await page.getByRole('button', { name: 'Complete carton opening' }).click();
-    await expect(page.getByTestId('unboxing-complete')).toContainText('itemization');
+    await expect(rm.getByRole('heading', { name: 'Approvals' })).toBeVisible();
+    await expect(rm.getByText(/Missing Document Exceptions/)).toHaveCount(0);
     expect(errors).toEqual([]);
     expect(rmErrors).toEqual([]);
     await rmContext.close();

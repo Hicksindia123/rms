@@ -43,6 +43,7 @@ from tests.integration.test_unboxing import (
     FakeStorage,
     complete,
     started_gs,
+    upload,
     upload_videos,
 )
 
@@ -102,8 +103,11 @@ async def test_g02_unboxing_cannot_complete_without_evidence(
     gs_id = await started_gs(client, actors, masters)
     for token in (admin.token, actors.aman):
         assert guard_of(await complete(client, token, gs_id)) == "G-02"
-    await upload_videos(client, storage, actors.aman, gs_id)
-    assert guard_of(await complete(client, admin.token, gs_id)) == "G-02"  # no document photo yet
+    # DEC-63: G-02 = a confirmed video for every carton. Cartons 1 and 2 of 3 are not enough,
+    # also not for a Super Admin, in the service and in the DB.
+    for box in (1, 2):
+        await upload(client, storage, actors.aman, gs_id, "UNBOXING_VIDEO", "video/mp4", box_no=box)
+    assert guard_of(await complete(client, admin.token, gs_id)) == "G-02"
     with pytest.raises(DBAPIError, match="G-02"):
         db_attempt(
             session_factory,
@@ -112,6 +116,9 @@ async def test_g02_unboxing_cannot_complete_without_evidence(
             g=gs_id,
         )
     assert gs_status(db_conn, gs_id) == "UNBOXING"
+    await upload_videos(client, storage, actors.aman, gs_id)
+    res = await complete(client, actors.aman, gs_id)
+    assert res.status_code == 200, res.text  # no document photo, no exception (DEC-63)
 
 
 # --- G-03 ----------------------------------------------------------------------------------------

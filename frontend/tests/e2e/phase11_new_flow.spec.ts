@@ -127,7 +127,9 @@ test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
     }>(USERS.accounts, 'GET', '/notifications/mine?limit=10');
     expect(
       notifications.items.some(
-        (n) => n.gs_id === gs.id || (n.body && (n.body.includes(gs.gs_no) || n.body.includes(`INV-${tag}`))),
+        (n) =>
+          n.gs_id === gs.id ||
+          (n.body && (n.body.includes(gs.gs_no) || n.body.includes(`INV-${tag}`))),
       ),
     ).toBe(true);
 
@@ -139,15 +141,8 @@ test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
     await api(USERS.aman, 'POST', `/gs/${gs.id}/unboxing/start`, {});
     // Upload video for each of the 2 cartons
     await uploadCartonVideos(gs.id, 2);
-    // Upload classified doc photo
-    await uploadClassifiedDocPhoto(gs.id, `INV-${tag}`);
-    // Add carton document (AMD-04, DEBIT_NOTE)
-    await addCartonDocument(gs.id, {
-      doc_type_code: 'DEBIT_NOTE',
-      doc_no: `DN-${tag}`,
-      doc_date: backdate,
-      remarks: 'Found inside carton 1',
-    });
+    // P3 / DEC-62: one optional carton document (type + photo, no number / date)
+    await addCartonDocument(gs.id, { doc_type_code: 'DEBIT_NOTE' });
     // Complete carton opening
     await completeCartonOpening(gs.id);
 
@@ -193,7 +188,9 @@ test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
 
     // 7. DEPARTMENT ROUND-TRIP (Pratham, RM & Aman, INWARD_VERIFIER): Partial receipts & G-20 conservation
     const deptRoutingPage = await openPage(browser, USERS.rm, '/department-routing');
-    await expect(deptRoutingPage.getByRole('heading', { name: /Department Routing Queue/i })).toBeVisible();
+    await expect(
+      deptRoutingPage.getByRole('heading', { name: /Department Routing Queue/i }),
+    ).toBeVisible();
     await expectNoHorizontalOverflow(deptRoutingPage);
 
     // RM dispatches 4 pieces to REPAIR department
@@ -203,7 +200,9 @@ test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
 
     // Receiver (Aman) opens receiving queue
     const receivingPage = await openPage(browser, USERS.aman, '/department-receiving');
-    await expect(receivingPage.getByRole('heading', { name: /Department Receiving Queue/i })).toBeVisible();
+    await expect(
+      receivingPage.getByRole('heading', { name: /Department Receiving Queue/i }),
+    ).toBeVisible();
     await expectNoHorizontalOverflow(receivingPage);
 
     // Receiver books partial returns: 3 Repaired (returned to store) + 1 Wastage (scrap)
@@ -250,7 +249,12 @@ test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
     await expectNoHorizontalOverflow(acEntryPage);
 
     const acState = await api<{
-      lines: Array<{ id: string; action_code: string; requires_cn: boolean; requires_challan: boolean }>;
+      lines: Array<{
+        id: string;
+        action_code: string;
+        requires_cn: boolean;
+        requires_challan: boolean;
+      }>;
     }>(USERS.accounts, 'GET', `/ac-entry/gs/${gs.id}`);
 
     const acLinesPayload = acState.lines.map((ln) => {
@@ -353,11 +357,7 @@ test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
     ]);
 
     // Verify GS status
-    const gsStatus = await api<{ goods_slip: { status: string } }>(
-      USERS.rm,
-      'GET',
-      `/gs/${gs.id}`,
-    );
+    const gsStatus = await api<{ goods_slip: { status: string } }>(USERS.rm, 'GET', `/gs/${gs.id}`);
     expect(['IN_PROCESS', 'AWAITING_NOTIFICATION', 'CLOSED']).toContain(gsStatus.goods_slip.status);
   });
 
@@ -382,7 +382,10 @@ test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
     } catch (err) {
       g02Rejected = err instanceof ApiError && (err.status === 422 || err.status === 409);
     }
-    expect(g02Rejected, 'G-02 must reject carton opening when carton video count < carton count').toBe(true);
+    expect(
+      g02Rejected,
+      'G-02 must reject carton opening when carton video count < carton count',
+    ).toBe(true);
 
     // Provide the 2nd carton video and complete legitimately
     await uploadCartonVideos(gsGuard.id, 1, 2);
@@ -418,14 +421,12 @@ test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
     } catch (err) {
       g19Rejected = err instanceof ApiError && (err.status === 422 || err.status === 409);
     }
-    expect(g19Rejected, 'G-19 must reject categorisation when sum of buckets != counted qty').toBe(true);
+    expect(g19Rejected, 'G-19 must reject categorisation when sum of buckets != counted qty').toBe(
+      true,
+    );
 
     // Categorise legitimately with exact conservation (6 + 4 = 10)
-    await submitItemCategorisation(
-      gsGuard.id,
-      itemId,
-      { DMT_OK_PACKED: 6, DMT_BROKEN_BODY: 4 },
-    );
+    await submitItemCategorisation(gsGuard.id, itemId, { DMT_OK_PACKED: 6, DMT_BROKEN_BODY: 4 });
     const transferId = await approveRmReview(gsGuard.id);
     await acceptStoreTransfer(transferId);
 
@@ -447,7 +448,9 @@ test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
     } catch (err) {
       g20Rejected = err instanceof ApiError && (err.status === 409 || err.status === 422);
     }
-    expect(g20Rejected, 'G-20 must reject department routing dispatch exceeding in-store qty').toBe(true);
+    expect(g20Rejected, 'G-20 must reject department routing dispatch exceeding in-store qty').toBe(
+      true,
+    );
 
     // Dispatch 2 units legitimately and receive 2 units back
     const routing = await dispatchRouting(gsGuard.id, itemId, repairDeptId, 2);
@@ -478,7 +481,10 @@ test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
     } catch (err) {
       g21SplitRejected = err instanceof ApiError && (err.status === 409 || err.status === 422);
     }
-    expect(g21SplitRejected, 'G-21 must reject final action split when action sum != available qty').toBe(true);
+    expect(
+      g21SplitRejected,
+      'G-21 must reject final action split when action sum != available qty',
+    ).toBe(true);
 
     // Finalise valid actions (10 units)
     const acSlipId = await finaliseFinalActions(gsGuard.id, itemId, {
@@ -509,11 +515,18 @@ test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
     } catch (err) {
       g21FrozenRejected = err instanceof ApiError && (err.status === 409 || err.status === 422);
     }
-    expect(g21FrozenRejected, 'G-21 must reject editing finalised actions without revision').toBe(true);
+    expect(g21FrozenRejected, 'G-21 must reject editing finalised actions without revision').toBe(
+      true,
+    );
 
     // --- GUARD G-22: Accounts entry rules, completeness, and dispatch immutability ---
     const acState = await api<{
-      lines: Array<{ id: string; action_code: string; requires_cn: boolean; requires_challan: boolean }>;
+      lines: Array<{
+        id: string;
+        action_code: string;
+        requires_cn: boolean;
+        requires_challan: boolean;
+      }>;
     }>(USERS.accounts, 'GET', `/ac-entry/gs/${gsGuard.id}`);
 
     const cnLine = acState.lines.find((l) => l.requires_cn);
@@ -542,9 +555,13 @@ test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
         true,
       );
     } catch (err) {
-      g22ChallanOnCnRejected = err instanceof ApiError && (err.status === 409 || err.status === 422);
+      g22ChallanOnCnRejected =
+        err instanceof ApiError && (err.status === 409 || err.status === 422);
     }
-    expect(g22ChallanOnCnRejected, 'G-22 must reject challan fields on an action that requires CN').toBe(true);
+    expect(
+      g22ChallanOnCnRejected,
+      'G-22 must reject challan fields on an action that requires CN',
+    ).toBe(true);
 
     // Reject 2: Future date
     let g22FutureDateRejected = false;
@@ -569,7 +586,9 @@ test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
     } catch (err) {
       g22FutureDateRejected = err instanceof ApiError && (err.status === 409 || err.status === 422);
     }
-    expect(g22FutureDateRejected, 'G-22 must reject future dates on Accounts entry lines').toBe(true);
+    expect(g22FutureDateRejected, 'G-22 must reject future dates on Accounts entry lines').toBe(
+      true,
+    );
 
     // Reject 3: Early completion when lines are incomplete
     let g22EarlyCompleteRejected = false;
@@ -600,9 +619,13 @@ test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
         true,
       );
     } catch (err) {
-      g22EarlyCompleteRejected = err instanceof ApiError && (err.status === 409 || err.status === 422);
+      g22EarlyCompleteRejected =
+        err instanceof ApiError && (err.status === 409 || err.status === 422);
     }
-    expect(g22EarlyCompleteRejected, 'G-22 must reject completion with incomplete required lines').toBe(true);
+    expect(
+      g22EarlyCompleteRejected,
+      'G-22 must reject completion with incomplete required lines',
+    ).toBe(true);
 
     // Save complete Accounts entry legitimately
     const dispatchSlipId = await saveAndCompleteAccountsEntry(gsGuard.id, acSlipId, [
@@ -640,9 +663,12 @@ test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
         true,
       );
     } catch (err) {
-      g22EditAfterCompleteRejected = err instanceof ApiError && (err.status === 409 || err.status === 422);
+      g22EditAfterCompleteRejected =
+        err instanceof ApiError && (err.status === 409 || err.status === 422);
     }
-    expect(g22EditAfterCompleteRejected, 'G-22 must freeze Accounts entries upon completion').toBe(true);
+    expect(g22EditAfterCompleteRejected, 'G-22 must freeze Accounts entries upon completion').toBe(
+      true,
+    );
 
     // Dispatch the Dispatch Slip legitimately
     await dispatchSlip(dispatchSlipId);
@@ -652,8 +678,12 @@ test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
     try {
       await dispatchSlip(dispatchSlipId);
     } catch (err) {
-      g22DoubleDispatchRejected = err instanceof ApiError && (err.status === 409 || err.status === 422);
+      g22DoubleDispatchRejected =
+        err instanceof ApiError && (err.status === 409 || err.status === 422);
     }
-    expect(g22DoubleDispatchRejected, 'G-22 must reject dispatching an already dispatched Dispatch Slip').toBe(true);
+    expect(
+      g22DoubleDispatchRejected,
+      'G-22 must reject dispatching an already dispatched Dispatch Slip',
+    ).toBe(true);
   });
 });

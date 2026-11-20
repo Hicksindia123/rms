@@ -28,10 +28,13 @@ STATIC_SYSTEM_GUARDS: list[dict[str, Any]] = [
         "code": "G-02",
         "name": "Unboxing Evidence Completeness",
         "statement": (
-            "A GS cannot leave UNBOXING until >= 1 confirmed video attachment and "
-            ">= 1 confirmed document photo exist (or an authorised exception per DEC-03)."
+            "A GS cannot leave UNBOXING until every carton 1..N has a confirmed unboxing "
+            "video. No document photo and no Missing Document Exception are required "
+            "(DEC-63, 2026-11-20; supersedes DEC-03)."
         ),
-        "enforcement_layer": "Workflow Engine + FastAPI Step-2 guard",
+        "enforcement_layer": (
+            "PostgreSQL trigger goods_slips_g02_guard + Workflow Engine + FastAPI Step-2 guard"
+        ),
     },
     {
         "code": "G-03",

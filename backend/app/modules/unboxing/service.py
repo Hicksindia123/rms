@@ -4,15 +4,18 @@
 * documents: each confirmed DOC_PHOTO gets exactly one classification, validated against the
   published S1_UNBOXING form (re-validated on edit against the version it was created under,
   G-18) plus BR-05 (Invoice items verified). DB CHECKs mirror DD r12-r15.
-* missing-document exception (DEC-03): only for a GS flagged missing documentation; a confirmed
-  PARCEL_PHOTO + mandatory remark, decided by a holder of unboxing.approve (Replacement Manager).
-* complete: G-02 (service check → 422 `G-02` with what is missing; the workflow engine guard and
-  the DB trigger `goods_slips_g02_guard` re-check) → ITEMIZATION, S1_ITEMIZE task, Accounts alert.
+* The RM Missing Document Exception (DEC-03) is RETIRED by DEC-63 (user Q8, 2026-11-20): no request
+  or decision endpoints; existing rows are listed read-only as history.
+* complete ("Next"): G-02 = one confirmed video per carton only (DEC-63, Q8 + Q25; service check →
+  422 `G-02` with what is missing; the workflow engine guard and the DB trigger
+  `goods_slips_g02_guard` re-check) → ITEMIZATION, S1_ITEMIZE task, Accounts alert.
 * Accounts queue (WF r3 "Dashboard and Alert system for Accounts team", BR-06, DEC-05).
 * Change plan 2026-11-12 Phase 3 (AMD-08 "Carton Opening"): one confirmed video per carton
-  (G-02, AMD-03) with carton-wise progress; more document rows can be added while the GS is
-  UNBOXING (gs_gate_documents, stage S1_UNBOX, AMD-04), and an Invoice / Debit Note row alerts
-  Accounts at once (AMD-05; never twice for the same document).
+  (G-02, AMD-03) with carton-wise progress.
+* P3 (2026-11-20, DEC-62): ONE optional "document found in carton" per GS (gs_gate_documents,
+  stage S1_UNBOX, doc_source CARTON): a type + photo(s), no number / date / remarks, also on a GS
+  flagged "No Documents From Party". An Invoice / GST Debit Note alerts Accounts at once (AMD-05).
+  Legacy S1_UNBOX rows (doc_source NULL) keep their old rules.
 """
 
 from __future__ import annotations
@@ -29,7 +32,6 @@ from app.core.db import UnitOfWork
 from app.core.errors import (
     Conflict,
     NotFound,
-    PermissionDenied,
     SystemGuardUnmet,
     ValidationFailed,
 )
@@ -51,8 +53,6 @@ from app.modules.unboxing.schemas import (
     DocumentIn,
     DocumentOut,
     DocumentPatchIn,
-    ExceptionDecisionIn,
-    ExceptionIn,
     ExceptionOut,
     OptionOut,
     QueueDocument,
@@ -72,9 +72,8 @@ CLASSIFICATION_SET = "RECEIVED_DOC_CLASSIFICATION"  # DD r12-r15
 UNBOX_STEP = "S1_UNBOX"
 ITEMIZE_STEP = "S1_ITEMIZE"
 ENTITY_TYPE = "goods_slip"
-# DEC-05: Step-2 document alerts go to the Accounts team; DEC-03 requests to the RM.
+# DEC-05: Step-2 document alerts go to the Accounts team.
 ACCOUNTS_ALERT_ROLES = ["ACCOUNTS"]
-EXCEPTION_APPROVER_ROLES = ["REPLACEMENT_MANAGER"]
 
 # S1_UNBOXING form field → gs_documents column, per classification code (DD r12-r15).
 _COMMON_FIELDS = {"doc_classification": "classification_code"}
@@ -212,20 +211,6 @@ class UnboxingService:
             gs = gs_service.get_visible_goods_slip(session, user, perms, gs_id)
             return self._state(session, user, perms, gs)
 
-    def pending_exceptions(
-        self, user: CurrentUser, perms: EffectivePermissions, limit: int
-    ) -> list[ExceptionOut]:
-        with self._uow.transaction(user.id) as session:
-            rows = repo.list_exceptions_by_status(session, "REQUESTED", limit)
-            visible: list[ExceptionOut] = []
-            for row in rows:
-                try:
-                    gs_service.get_visible_goods_slip(session, user, perms, row["gs_id"])
-                except (NotFound, PermissionDenied):
-                    continue
-                visible.append(_exc_out(row))
-            return visible
-
     # ---------------------------------------------------------------- commands ---------------
     def start(
         self, user: CurrentUser, perms: EffectivePermissions, gs_id: UUID
@@ -317,117 +302,6 @@ class UnboxingService:
             if not row:
                 raise NotFound("Document could not be loaded after the update")
             return _doc_out(row)
-
-    def request_exception(
-        self, user: CurrentUser, perms: EffectivePermissions, gs_id: UUID, payload: ExceptionIn
-    ) -> ExceptionOut:
-        remark = payload.remark.strip()
-        if not remark:
-            raise ValidationFailed(
-                "A remark is required",
-                code="FORM_VALIDATION_FAILED",
-                details={"remark": ["Required"]},
-            )
-        with self._uow.transaction(user.id) as session:
-            gs = self._lock_unboxing(session, user, perms, gs_id)
-            if not gs["missing_documentation"]:
-                raise Conflict(
-                    "A Missing Document Exception applies only to a GS flagged "
-                    "'No Document Attached' at the gate (DEC-03)",
-                    code="NOT_MISSING_DOCUMENTATION",
-                )
-            att = attachments.get_attachment(session, payload.parcel_attachment_id)
-            if (
-                not att
-                or att["gs_id"] != gs_id
-                or att["kind"] != "PARCEL_PHOTO"
-                or att["status"] != "CONFIRMED"
-            ):
-                raise ValidationFailed(
-                    "Attach a confirmed photo of the parcel label / outer box first (DEC-03)",
-                    code="PARCEL_PHOTO_REQUIRED",
-                    details={"parcel_attachment_id": ["Not a confirmed parcel photo of this GS"]},
-                )
-            if repo.live_exception_id(session, gs_id):
-                raise Conflict(
-                    "A Missing Document Exception is already pending or approved for this GS",
-                    code="EXCEPTION_EXISTS",
-                )
-            exc_id = repo.insert_exception(
-                session,
-                gs_id=gs_id,
-                parcel_attachment_id=payload.parcel_attachment_id,
-                remark=remark,
-                by=user.id,
-            )
-            notifications.publish(
-                session,
-                "MISSING_DOC_EXCEPTION_REQUESTED",
-                role_codes=EXCEPTION_APPROVER_ROLES,
-                notification_type="MISSING_DOC_EXCEPTION_REQUESTED",
-                title=f"{gs['gs_no']}: Missing Document Exception requested",
-                body=f"{user.full_name}: {remark}",
-                entity_type=ENTITY_TYPE,
-                entity_id=gs_id,
-                gs_id=gs_id,
-                priority="HIGH",
-            )
-            row = repo.get_exception(session, exc_id)
-            if not row:
-                raise NotFound("Exception could not be loaded after creation")
-            return _exc_out(row)
-
-    def decide_exception(
-        self,
-        user: CurrentUser,
-        perms: EffectivePermissions,
-        gs_id: UUID,
-        exc_id: UUID,
-        payload: ExceptionDecisionIn,
-    ) -> ExceptionOut:
-        remarks = (payload.remarks or "").strip() or None
-        if payload.decision == "REJECT" and not remarks:
-            raise ValidationFailed(
-                "A reason is required to reject the exception",
-                code="FORM_VALIDATION_FAILED",
-                details={"remarks": ["Required when rejecting"]},
-            )
-        with self._uow.transaction(user.id) as session:
-            gs = gs_service.lock_goods_slip(session, gs_id)
-            gs_service.get_visible_goods_slip(session, user, perms, gs_id)
-            if gs["status"] != "UNBOXING":
-                raise Conflict(
-                    "The exception can only be decided while the GS is UNBOXING",
-                    code="GS_NOT_UNBOXING",
-                    details={"status": gs["status"]},
-                )
-            exc = repo.get_exception(session, exc_id, for_update=True)
-            if not exc or exc["gs_id"] != gs_id:
-                raise NotFound("Missing Document Exception not found on this GS")
-            if exc["status"] != "REQUESTED":
-                raise Conflict(
-                    f"The exception was already {exc['status'].lower()}",
-                    code="EXCEPTION_ALREADY_DECIDED",
-                )
-            status = "APPROVED" if payload.decision == "APPROVE" else "REJECTED"
-            repo.decide_exception(session, exc_id, status=status, by=user.id, remarks=remarks)
-            row = repo.get_exception(session, exc_id)
-            if not row:
-                raise NotFound("Exception could not be loaded after the decision")
-            if exc["requested_by"]:
-                notifications.publish(
-                    session,
-                    "MISSING_DOC_EXCEPTION_DECIDED",
-                    user_ids=[exc["requested_by"]],
-                    notification_type=f"MISSING_DOC_EXCEPTION_{status}",
-                    title=f"{gs['gs_no']}: Missing Document Exception {status.lower()}",
-                    body=remarks,
-                    entity_type=ENTITY_TYPE,
-                    entity_id=gs_id,
-                    gs_id=gs_id,
-                    priority="NORMAL" if status == "APPROVED" else "HIGH",
-                )
-            return _exc_out(row)
 
     def complete(self, user: CurrentUser, perms: EffectivePermissions, gs_id: UUID) -> CompleteOut:
         with self._uow.transaction(user.id) as session:
@@ -528,10 +402,26 @@ class UnboxingService:
         gs_id: UUID,
         payload: CartonDocumentIn,
     ) -> GateDocumentOut:
-        gs = self._lock_carton_documents(session, user, perms, gs_id)
-        row = gs_service.validate_document_row(session, GateDocumentIn(**payload.model_dump()))
+        gs = self._lock_unboxing(session, user, perms, gs_id)
+        row = gs_service.validate_carton_document_row(
+            session, GateDocumentIn(**payload.model_dump())
+        )
+        if any(
+            d.doc_source == gs_service.SOURCE_CARTON
+            for d in gs_service.documents_out(session, gs_id)
+        ):
+            # P3: one carton document per GS (unique index gs_gate_documents_one_carton_doc).
+            raise Conflict(
+                "A document found in a carton is already recorded; add more photos to it or "
+                "remove it first",
+                code="CARTON_DOCUMENT_EXISTS",
+            )
         doc_id = gs_service.add_document_row(
-            session, gs_id, row, source_step=gs_service.CARTON_DOC_STEP
+            session,
+            gs_id,
+            row,
+            source_step=gs_service.CARTON_DOC_STEP,
+            doc_source=gs_service.SOURCE_CARTON,
         )
         gs_service.alert_accounts_for_documents(
             session,
@@ -552,9 +442,13 @@ class UnboxingService:
         payload: CartonDocumentIn,
     ) -> GateDocumentOut:
         with self._uow.transaction(user.id) as session:
-            gs = self._lock_carton_documents(session, user, perms, gs_id)
+            gs = self._lock_unboxing(session, user, perms, gs_id)
             doc = self._carton_row(session, gs_id, doc_id)
-            row = gs_service.validate_document_row(session, GateDocumentIn(**payload.model_dump()))
+            doc_in = GateDocumentIn(**payload.model_dump())
+            if doc["doc_source"] == gs_service.SOURCE_CARTON:
+                row = gs_service.validate_carton_document_row(session, doc_in, existing=doc)
+            else:  # a legacy carton-opening row (before P3) keeps the DD r5-r8 rules
+                row = gs_service.validate_document_row(session, doc_in)
             if gs_service.update_document_row(session, doc, row):
                 gs_service.alert_accounts_for_documents(
                     session,
@@ -569,23 +463,11 @@ class UnboxingService:
         self, user: CurrentUser, perms: EffectivePermissions, gs_id: UUID, doc_id: UUID
     ) -> None:
         with self._uow.transaction(user.id) as session:
-            self._lock_carton_documents(session, user, perms, gs_id)
+            self._lock_unboxing(session, user, perms, gs_id)
             self._carton_row(session, gs_id, doc_id)
             gs_service.set_audit_reason(session, "Carton-opening document row removed")
             gs_service.delete_document_row(session, doc_id)
             gs_service.set_audit_reason(session, None)
-
-    def _lock_carton_documents(
-        self, session: Session, user: CurrentUser, perms: EffectivePermissions, gs_id: UUID
-    ) -> dict[str, Any]:
-        gs = self._lock_unboxing(session, user, perms, gs_id)
-        if gs["missing_documentation"]:
-            # DEC-03: "no document" is resolved through the Missing Document Exception path.
-            raise Conflict(
-                "This goods slip is flagged 'no document'; use the missing-document exception",
-                code="GS_NO_DOCUMENT",
-            )
-        return gs
 
     def _carton_row(self, session: Session, gs_id: UUID, doc_id: UUID) -> dict[str, Any]:
         doc = gs_service.get_document_row(session, gs_id, doc_id)
@@ -631,39 +513,31 @@ class UnboxingService:
 
     def _checklist(self, session: Session, gs: dict[str, Any]) -> tuple[Checklist, dict[str, Any]]:
         counts = attachments.evidence_counts(session, gs["id"])
-        # G-02 / AMD-03 (was Requirement B per box): one confirmed video per carton
-        # (1..carton_count); a single-carton GS accepts a video without a carton number. The DB
-        # trigger rms_private.goods_slips_g02_guard enforces the same rule.
-        per_box = True
+        # G-02 (DEC-63) / AMD-03: one confirmed video per carton (1..carton_count); a single-carton
+        # GS accepts a video without a carton number. Nothing else is required. The DB trigger
+        # rms_private.goods_slips_g02_guard enforces the same rule.
         cartons = int(gs["carton_count"])
         have = {int(b) for b in counts["video_boxes"] or []}
         if cartons == 1 and int(counts["video_count"]) > 0 and 1 not in have:
             have.add(1)
         boxes_missing = [b for b in range(1, cartons + 1) if b not in have]
-        approved = repo.has_approved_exception(session, gs["id"])
         ctx: dict[str, Any] = {
             "video_count": int(counts["video_count"]),
+            "boxes_missing_video": boxes_missing,
+            # Informational only (not part of G-02 since DEC-63).
             "doc_photo_count": int(counts["doc_photo_count"]),
             "classified_doc_photo_count": int(counts["classified_doc_photo_count"]),
             "missing_documentation": bool(gs["missing_documentation"]),
-            "approved_exception": approved,
-            "boxes_missing_video": boxes_missing,
         }
         missing = g02_missing_evidence(ctx)
-        doc_photos = ctx["doc_photo_count"]
-        classified = ctx["classified_doc_photo_count"]
-        missing_doc = ctx["missing_documentation"]
         checklist = Checklist(
             video_ok=ctx["video_count"] > 0 and not boxes_missing,
-            documents_ok=(approved if missing_doc else doc_photos > 0),
-            classified_ok=classified == doc_photos and (missing_doc or classified > 0),
             video_count=ctx["video_count"],
-            doc_photo_count=doc_photos,
-            classified_doc_photo_count=classified,
+            doc_photo_count=ctx["doc_photo_count"],
+            classified_doc_photo_count=ctx["classified_doc_photo_count"],
             parcel_photo_count=int(counts["parcel_photo_count"]),
-            missing_documentation=missing_doc,
-            exception_approved=approved,
-            video_per_box_required=per_box,
+            missing_documentation=ctx["missing_documentation"],
+            video_per_box_required=True,
             carton_count=cartons,
             cartons_with_video=cartons - len(boxes_missing),
             boxes_missing_video=boxes_missing,
@@ -706,7 +580,6 @@ class UnboxingService:
             limits=limits,
             permissions=UnboxingPermissions(
                 can_perform=perform and perms.allows("unboxing", "create"),
-                can_approve_exception=perms.allows("unboxing", "approve"),
             ),
             gate_documents=gs_service.documents_out(session, gs["id"]),
             document_types=gs_service.document_types_out(session),
@@ -726,7 +599,7 @@ class UnboxingService:
             counts[label] = counts.get(label, 0) + 1
         types = ", ".join(f"{label} x{n}" if n > 1 else label for label, n in counts.items())
         if gs["missing_documentation"]:
-            body = "No documents received; Missing Document Exception approved (DEC-03)."
+            body = "No documents from party (recorded at the gate, BR-03)."
             if types:
                 body = f"{types}. {body}"
         else:

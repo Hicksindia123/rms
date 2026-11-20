@@ -1,5 +1,5 @@
 import { apiRequest } from '@/lib/api/client';
-import type { GateDocument, GateDocumentInput, GateDocumentType } from '@/features/goods-slips/api';
+import type { GateDocument, GateDocumentType } from '@/features/goods-slips/api';
 import type { BackendFormSnapshot } from '@/features/goods-slips/api';
 
 // Shapes mirror backend/app/modules/{attachments,unboxing}/schemas.py (P2-03).
@@ -46,16 +46,15 @@ export interface UploadUrlResult {
   upload: UploadTicket;
 }
 
+/** G-02 (DEC-63): one confirmed video per carton is the only requirement. The document photo
+ * counts are informational (legacy DOC_PHOTO evidence). */
 export interface Checklist {
   video_ok: boolean;
-  documents_ok: boolean;
-  classified_ok: boolean;
   video_count: number;
   doc_photo_count: number;
   classified_doc_photo_count: number;
   parcel_photo_count: number;
   missing_documentation: boolean;
-  exception_approved: boolean;
   video_per_box_required: boolean;
   /** AMD-03 / AMD-08: carton-wise progress (Carton n of N). */
   carton_count: number;
@@ -89,6 +88,7 @@ export interface GsDocument {
   accounts_acknowledged_at: string | null;
 }
 
+/** DEC-03 Missing Document Exception: read-only history (retired by DEC-63). */
 export interface MissingDocException {
   id: string;
   gs_id: string;
@@ -131,7 +131,7 @@ export interface UnboxingState {
     max_document_bytes: number;
     resumable_threshold_bytes: number;
   };
-  permissions: { can_perform: boolean; can_approve_exception: boolean };
+  permissions: { can_perform: boolean };
   /** AMD-04: document rows of the GS (gate + carton opening) and the configured row types. */
   gate_documents: GateDocument[];
   document_types: GateDocumentType[];
@@ -189,24 +189,9 @@ export const unboxingApi = {
       method: 'PATCH',
       body: { values },
     }),
-  requestException: (gsId: string, parcelAttachmentId: string, remark: string) =>
-    apiRequest<MissingDocException>(`${gs(gsId)}/missing-doc-exception`, {
-      method: 'POST',
-      body: { parcel_attachment_id: parcelAttachmentId, remark },
-    }),
-  decideException: (
-    gsId: string,
-    exceptionId: string,
-    decision: 'APPROVE' | 'REJECT',
-    remarks: string,
-  ) =>
-    apiRequest<MissingDocException>(
-      `${gs(gsId)}/missing-doc-exception/${encodeURIComponent(exceptionId)}/decision`,
-      { method: 'POST', body: { decision, remarks: remarks || null } },
-    ),
-  pendingExceptions: () => apiRequest<MissingDocException[]>('/missing-doc-exceptions/pending'),
-  /** AMD-04 / AMD-05: a document row found at carton opening (Idempotency-Key). */
-  addCartonDocument: (gsId: string, body: GateDocumentInput, idempotencyKey: string) =>
+  /** P3 / DEC-62: the one optional document found in a carton: a type only, photos are uploaded
+   * to the row afterwards (Idempotency-Key). */
+  addCartonDocument: (gsId: string, body: { doc_type_code: string }, idempotencyKey: string) =>
     apiRequest<GateDocument>(`${gs(gsId)}/carton-documents`, {
       method: 'POST',
       body,

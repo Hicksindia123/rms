@@ -172,102 +172,13 @@ def update_document(
     )
 
 
-# --- missing document exceptions (DEC-03) ------------------------------------------------------
+# --- missing document exceptions (DEC-03; retired by DEC-63: read-only history) -------------
 def list_exceptions(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
     rows = session.execute(
         text(f"select {_EXC_COLUMNS} {_EXC_FROM} where e.gs_id = :gs_id order by e.requested_at"),
         {"gs_id": gs_id},
     ).mappings()
     return [dict(r) for r in rows]
-
-
-def list_exceptions_by_status(session: Session, status: str, limit: int) -> list[dict[str, Any]]:
-    rows = session.execute(
-        text(
-            f"select {_EXC_COLUMNS} {_EXC_FROM} "
-            "where e.status = :status order by e.requested_at desc limit :limit"
-        ),
-        {"status": status, "limit": limit},
-    ).mappings()
-    return [dict(r) for r in rows]
-
-
-def get_exception(
-    session: Session, exc_id: UUID, *, for_update: bool = False
-) -> dict[str, Any] | None:
-    lock = " for update of e" if for_update else ""
-    row = (
-        session.execute(
-            text(f"select {_EXC_COLUMNS} {_EXC_FROM} where e.id = :id{lock}"),
-            {"id": exc_id},
-        )
-        .mappings()
-        .first()
-    )
-    return dict(row) if row else None
-
-
-def live_exception_id(session: Session, gs_id: UUID) -> UUID | None:
-    found = session.execute(
-        text(
-            "select id from public.missing_doc_exceptions "
-            "where gs_id = :g and status in ('REQUESTED', 'APPROVED')"
-        ),
-        {"g": gs_id},
-    ).scalar()
-    return UUID(str(found)) if found else None
-
-
-def has_approved_exception(session: Session, gs_id: UUID) -> bool:
-    """Same predicate as the DB G-02 guard: approved, with a confirmed parcel photo."""
-    return bool(
-        session.execute(
-            text(
-                """
-                select exists (
-                  select 1 from public.missing_doc_exceptions e
-                    join public.attachments a on a.id = e.parcel_attachment_id
-                   where e.gs_id = :g and e.status = 'APPROVED' and a.status = 'CONFIRMED')
-                """
-            ),
-            {"g": gs_id},
-        ).scalar_one()
-    )
-
-
-def insert_exception(
-    session: Session, *, gs_id: UUID, parcel_attachment_id: UUID, remark: str, by: UUID
-) -> UUID:
-    return UUID(
-        str(
-            session.execute(
-                text(
-                    """
-                    insert into public.missing_doc_exceptions
-                           (gs_id, parcel_attachment_id, remark, requested_by)
-                    values (:g, :a, :remark, :by) returning id
-                    """
-                ),
-                {"g": gs_id, "a": parcel_attachment_id, "remark": remark, "by": by},
-            ).scalar_one()
-        )
-    )
-
-
-def decide_exception(
-    session: Session, exc_id: UUID, *, status: str, by: UUID, remarks: str | None
-) -> None:
-    session.execute(
-        text(
-            """
-            update public.missing_doc_exceptions
-               set status = :status, decided_by = :by, decided_at = now(),
-                   decision_remarks = :remarks
-             where id = :id
-            """
-        ),
-        {"id": exc_id, "status": status, "by": by, "remarks": remarks},
-    )
 
 
 def option_items(session: Session, option_set_code: str) -> list[dict[str, Any]]:

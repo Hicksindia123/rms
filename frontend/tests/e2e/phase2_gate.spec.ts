@@ -300,7 +300,7 @@ test.describe('Phase 2 gate scenarios (P2-08)', () => {
   });
 
   // --- E2E-04 -----------------------------------------------------------------------------------
-  test('E2E-04 NO_DOCUMENT gate → Step-2 blocked → missing-doc exception approved → continue', async ({
+  test('E2E-04 NO_DOCUMENT gate → unboxing on videos only (no RM approval, DEC-63) → continue', async ({
     browser,
   }) => {
     test.setTimeout(180_000);
@@ -331,50 +331,38 @@ test.describe('Phase 2 gate scenarios (P2-08)', () => {
     const gsId = listed.items.find((g) => g.gs_no === gsNo)?.id ?? '';
     expect(gsId).not.toBe('');
 
-    // Aman: video recorded, but without a document photo Step-2 cannot complete (G-02).
+    // Aman: Next stays disabled until the carton video exists (G-02); no RM step (DEC-63).
     const aman = await open(browser, USERS.aman, `/gs/${gsId}/unboxing`);
-    await aman.getByRole('button', { name: 'Start carton opening' }).click();
-    await aman.getByTestId('video-file-input').setInputFiles({
-      name: 'unboxing.mp4',
-      mimeType: 'video/mp4',
-      buffer: FIXTURES.VIDEO,
-    });
-    const checklist = aman.getByTestId('checklist');
-    await expect(checklist).toContainText('Video ✔', { timeout: 30_000 });
-    await expect(checklist).toContainText('exception needed');
-    await expect(aman.getByRole('button', { name: 'Complete carton opening' })).toBeDisabled();
+    await aman.getByRole('button', { name: /^Start / }).click();
+    await expect(aman.getByTestId('no-party-documents')).toBeVisible();
+    const next = aman.getByTestId('unboxing-next');
+    await expect(next).toBeDisabled();
     const blocked = await api(USERS.aman, 'POST', `/gs/${gsId}/unboxing/complete`, {}).catch(
       (e: unknown) => e,
     );
     expect(blocked).toBeInstanceOf(ApiError);
     expect((blocked as ApiError).body.error?.code).toBe('G-02');
 
-    // DEC-03: parcel photo + remark → exception request.
-    await aman.getByTestId('parcel-photo-file-input').setInputFiles({
-      name: 'box.png',
+    // Optional carton document (P3 / DEC-62): type + photo from the camera input.
+    await aman.locator('#carton-doc-type').selectOption('INVOICE');
+    await aman.getByTestId('carton-doc-camera-input').setInputFiles({
+      name: 'carton-invoice.png',
       mimeType: 'image/png',
       buffer: FIXTURES.PNG,
     });
-    await expect(aman.locator('.parcel-option')).toHaveCount(1, { timeout: 30_000 });
-    await aman.locator('#exception-remark').fill('No papers inside the box; label photographed');
-    await aman.getByRole('button', { name: 'Request Missing Document Exception' }).click();
-    await expect(aman.getByTestId('exception-status')).toContainText('requested');
-    await expect(aman.getByRole('button', { name: 'Complete carton opening' })).toBeDisabled();
+    await aman.getByRole('button', { name: /Save document/ }).click();
+    await expect(aman.getByTestId('carton-document')).toContainText('Invoice', { timeout: 30_000 });
 
-    // Pratham approves the exception.
-    const rm = await open(browser, USERS.rm, '/approvals');
-    const card = rm.getByTestId('exception-card').filter({ hasText: gsNo });
-    await expect(card).toBeVisible();
-    await card.getByRole('button', { name: 'Approve exception' }).click();
-    await expect(card).toBeHidden();
-
-    // Aman continues.
-    await aman.reload();
-    await expect(aman.getByTestId('exception-status')).toContainText('approved');
-    await expect(checklist).toContainText('Documents ✔');
-    await aman.getByRole('button', { name: 'Complete carton opening' }).click();
-    await expect(aman.getByTestId('unboxing-complete')).toContainText('itemization');
+    await aman.getByTestId('video-file-input').setInputFiles({
+      name: 'unboxing.mp4',
+      mimeType: 'video/mp4',
+      buffer: FIXTURES.VIDEO,
+    });
+    await expect(aman.getByTestId('checklist')).toContainText('Video ✔', { timeout: 30_000 });
+    await expect(next).toBeEnabled();
     await expectNoHorizontalOverflow(aman);
+    await next.click();
+    await expect(aman).toHaveURL(new RegExp(`/gs/${gsId}/itemization`));
     expect(await gsStatus(gsId)).toBe('ITEMIZATION');
   });
 

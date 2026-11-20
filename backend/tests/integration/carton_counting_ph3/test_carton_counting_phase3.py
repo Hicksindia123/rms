@@ -94,65 +94,47 @@ async def test_carton_progress(
     assert "COURIER_SLIP" in {t["code"] for t in state["document_types"]}
 
 
-async def test_carton_documents_and_accounts_alert_without_duplicates(
+async def test_carton_document_and_accounts_alert(
     client: AsyncClient,
     actors: Actors,
     masters: Masters,
     storage: FakeStorage,
     db_conn: Connection,
 ) -> None:
+    """P3 / DEC-62: one optional carton document (type + photos, no number / date) on a v3 GS;
+    an Invoice / Debit Note alerts Accounts once (AMD-05)."""
     gs_id = await started_gs(client, actors, masters)  # gate: INVOICE INV-77 (alerted at gate)
     assert len(_alerts(db_conn, actors.accounts_id, gs_id)) == 1
 
-    slip = await _carton_doc(
-        client, actors.aman, gs_id, {"doc_type_code": "COURIER_SLIP", "doc_no": "AWB-1"}
+    res = await _carton_doc(
+        client, actors.aman, gs_id, {"doc_type_code": "DEBIT_NOTE", "doc_no": "DN-9"}
     )
-    assert slip.status_code == 201, slip.text
-    assert slip.json()["source_step"] == "S1_UNBOX"
-    assert len(_alerts(db_conn, actors.accounts_id, gs_id)) == 1  # not an alert type
+    assert res.status_code == 422 and "documents.0.doc_no" in res.json()["error"]["details"]
 
-    # The gate invoice found again in a carton: no second alert for the same document.
-    again = await _carton_doc(
-        client,
-        actors.aman,
-        gs_id,
-        {"doc_type_code": "INVOICE", "doc_no": " inv-77 ", "doc_date": "2026-10-30"},
-    )
-    assert again.status_code == 201, again.text
-    assert again.json()["accounts_alerted_at"] is not None
-    assert len(_alerts(db_conn, actors.accounts_id, gs_id)) == 1
-
-    # A new debit note alerts at once; the same Idempotency-Key replays without a second row.
+    # A debit note alerts at once; the same Idempotency-Key replays without a second row.
     idem = key()
-    body = {"doc_type_code": "DEBIT_NOTE", "doc_no": "DN-9", "doc_date": "2026-10-29"}
+    body = {"doc_type_code": "DEBIT_NOTE"}
     first = await _carton_doc(client, actors.aman, gs_id, body, idem)
     second = await _carton_doc(client, actors.aman, gs_id, body, idem)
-    assert first.status_code == second.status_code == 201
+    assert first.status_code == second.status_code == 201, first.text
     assert first.json()["id"] == second.json()["id"]
+    assert (first.json()["source_step"], first.json()["doc_source"]) == ("S1_UNBOX", "CARTON")
     titles = _alerts(db_conn, actors.accounts_id, gs_id)
-    # Both alerts share one test transaction (same created_at): check content, not order.
     assert len(titles) == 2
     assert sum("at carton opening" in t for t in titles) == 1
 
-    # Changing the courier slip into an invoice alerts once.
-    res = await client.patch(
-        f"/api/v1/gs/{gs_id}/carton-documents/{slip.json()['id']}",
-        json={"doc_type_code": "INVOICE", "doc_no": "INV-NEW", "doc_date": "2026-10-31"},
-        headers=_auth(actors.aman),
-    )
-    assert res.status_code == 200, res.text
-    assert len(_alerts(db_conn, actors.accounts_id, gs_id)) == 3
-
-    # Validation, stage ownership, role.
+    # One carton document per GS.
     res = await _carton_doc(client, actors.aman, gs_id, {"doc_type_code": "INVOICE"})
-    assert res.status_code == 422 and "documents.0.doc_no" in res.json()["error"]["details"]
+    assert res.status_code == 409 and res.json()["error"]["code"] == "CARTON_DOCUMENT_EXISTS"
+
+    # Stage ownership and role.
     state = (await client.get(f"/api/v1/gs/{gs_id}/unboxing", headers=_auth(actors.aman))).json()
     gate_row = next(d for d in state["gate_documents"] if d["source_step"] == "S1_GATE")
     res = await client.delete(
         f"/api/v1/gs/{gs_id}/carton-documents/{gate_row['id']}", headers=_auth(actors.aman)
     )
     assert res.status_code == 409 and res.json()["error"]["code"] == "NOT_A_CARTON_DOCUMENT"
-    res = await _carton_doc(client, actors.gate, gs_id, {"doc_type_code": "COURIER_SLIP"})
+    res = await _carton_doc(client, actors.gate, gs_id, {"doc_type_code": "INVOICE"})
     assert res.status_code == 403
 
     # Files of a carton row: S1_UNBOX performer, not the gate user.
@@ -169,22 +151,56 @@ async def test_carton_documents_and_accounts_alert_without_duplicates(
     )
     assert res.status_code == 200, res.text
 
-    # Removing a carton row (with its file) while the GS is still being opened.
+    # Removing the carton row (with its file) while the GS is still being opened.
     res = await client.delete(
         f"/api/v1/gs/{gs_id}/carton-documents/{first.json()['id']}", headers=_auth(actors.aman)
     )
     assert res.status_code == 204, res.text
 
 
+async def test_legacy_carton_rows_keep_their_rules(
+    client: AsyncClient, actors: Actors, masters: Masters, db_conn: Connection
+) -> None:
+    """A carton-opening row saved before P3 (doc_source NULL) keeps the DD r5-r8 rules on edit."""
+    gs_id = await started_gs(client, actors, masters)
+    doc_id = (
+        as_admin(db_conn)
+        .execute(
+            text(
+                """insert into public.gs_gate_documents
+                          (gs_id, doc_type_code, doc_type_label, doc_no, doc_date, source_step)
+                   values (:g, 'INVOICE', 'Invoice', 'INV-OLD', current_date - 1, 'S1_UNBOX')
+                   returning id"""
+            ),
+            {"g": gs_id},
+        )
+        .scalar_one()
+    )
+    url = f"/api/v1/gs/{gs_id}/carton-documents/{doc_id}"
+    res = await client.patch(url, json={"doc_type_code": "INVOICE"}, headers=_auth(actors.aman))
+    assert res.status_code == 422 and "documents.0.doc_no" in res.json()["error"]["details"]
+    res = await client.patch(
+        url,
+        json={"doc_type_code": "INVOICE", "doc_no": "INV-OLD2", "doc_date": "2026-10-30"},
+        headers=_auth(actors.aman),
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["doc_source"] is None
+    # A legacy row does not count as the one carton document.
+    res = await _carton_doc(client, actors.aman, gs_id, {"doc_type_code": "INVOICE"})
+    assert res.status_code == 201, res.text
+
+
 async def test_carton_documents_need_carton_opening(
     client: AsyncClient, actors: Actors, masters: Masters
 ) -> None:
     gs = (await _create(client, actors.gate, masters, _values())).json()["goods_slip"]
-    res = await _carton_doc(client, actors.aman, gs["id"], {"doc_type_code": "COURIER_SLIP"})
+    res = await _carton_doc(client, actors.aman, gs["id"], {"doc_type_code": "INVOICE"})
     assert res.status_code == 409 and res.json()["error"]["code"] == "GS_NOT_UNBOXING"
+    # P3: allowed on a GS without party documents; the gate flag stays (BR-03).
     no_doc = await started_gs(client, actors, masters, doc="NO_DOCUMENT")
-    res = await _carton_doc(client, actors.aman, no_doc, {"doc_type_code": "COURIER_SLIP"})
-    assert res.status_code == 409 and res.json()["error"]["code"] == "GS_NO_DOCUMENT"
+    res = await _carton_doc(client, actors.aman, no_doc, {"doc_type_code": "INVOICE"})
+    assert res.status_code == 201, res.text
 
 
 # =================================================================================================
