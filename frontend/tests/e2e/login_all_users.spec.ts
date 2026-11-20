@@ -93,6 +93,35 @@ const ALL_TEST_USERS: TestUser[] = [
     isSuperAdmin: false,
     roleCode: 'MANAGEMENT_VIEWER',
   },
+  // Phase P1 20-11-2026: Intermediate Store users (DEC-61) and Management (DEC-60).
+  {
+    email: 'opstore@rms.local',
+    name: 'Intermediate Store OP User',
+    roleTitle: 'Intermediate Store OP',
+    isSuperAdmin: false,
+    roleCode: 'ISTORE_OP',
+  },
+  {
+    email: 'dtstore@rms.local',
+    name: 'Intermediate Store DT User',
+    roleTitle: 'Intermediate Store DT',
+    isSuperAdmin: false,
+    roleCode: 'ISTORE_DT',
+  },
+  {
+    email: 'ristore@rms.local',
+    name: 'Intermediate Store RI User',
+    roleTitle: 'Intermediate Store RI',
+    isSuperAdmin: false,
+    roleCode: 'ISTORE_RI',
+  },
+  {
+    email: 'mgmt@rms.local',
+    name: 'Management Approver',
+    roleTitle: 'Management',
+    isSuperAdmin: false,
+    roleCode: 'MANAGEMENT',
+  },
 ];
 
 for (const user of ALL_TEST_USERS) {

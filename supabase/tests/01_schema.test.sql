@@ -78,6 +78,8 @@ select tables_are('public', array[
   'journey_steps', 'role_journey_steps',
   -- gap plan G2 (DEC-55): RM routing plan
   'department_routing_plan_lines',
+  -- Phase P1 20-11-2026 (DEC-61): Intermediate Stores + category mapping
+  'intermediate_stores','intermediate_store_category_map',
   -- gap plan G3 (DEC-56): current condition per item
   'gs_item_conditions'
 ],'public schema holds foundation, inward and inventory ledger tables');

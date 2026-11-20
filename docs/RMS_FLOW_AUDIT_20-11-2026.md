@@ -253,7 +253,7 @@ Journey step changes (all by deactivation / seed + release snippet): add `TRANSF
 
 | After phase | A GS that is in … | behaves like this |
 |---|---|---|
-| P1 | any status | Unchanged. Stores, roles and the mapping only exist; nothing reads them yet. Stock in `INTERMEDIATE_STORE` stays there. |
+| P1 | any status | Unchanged. Stores, roles and the mapping only exist; nothing reads them yet. Stock in `INTERMEDIATE_STORE` stays there (built 2026-11-20, see §5). |
 | P2 | GATE_CREATED (v1–v3) | Keeps its form version; editable with the old rules. New GSs use v4. |
 | P3 | UNBOXING with a REQUESTED / REJECTED missing-doc exception | Released by the P3 migration (the exception row stays as history); completes on video-per-carton only. |
 | P3 | UNBOXING, documents unclassified | Can complete (doc photo optional, Q25 confirmed). |
@@ -283,3 +283,12 @@ A GS is "new path" when it has a categorisation lock (P4 column, e.g. `goods_sli
 | `pnpm lint` | **144 pre-existing problems** (139 errors, 5 warnings) in 36 files; mainly `no-confusing-void-expression` (70), `react-hooks/set-state-in-effect` (13), `no-unnecessary-condition` (13), `no-non-null-assertion` (10), and `vite.config.ts` `rollupOptions` deprecated |
 | `pnpm typecheck` | PASS |
 | `pnpm test` (vitest) | 232/233 in the full run; `tests/unit/credit_notes.test.tsx` timed out at 5 s while pytest ran in parallel; passes 4/4 when re-run alone (load flake, pre-existing) |
+
+---
+
+## 5. Phase P1 build notes (2026-11-20)
+
+- **Built:** migration `20261120000100_p1_intermediate_stores.sql` (tables `intermediate_stores`, `intermediate_store_category_map`, resolver `rms_private.store_for_product`, `rms_private.user_store_ids`, guard `rms_private.assert_store_for_products` = STORE_MAPPING_MISSING, permission module `intermediate_stores`); seed + `supabase/snippets/release_20261120_roles_intermediate_stores.sql` (labels "Replacement Executive" / "Gate User (Offline)", roles MANAGEMENT / ISTORE_OP / ISTORE_DT / ISTORE_RI, FUNCTIONAL locations ISTORE_OP / _DT / _RI, stores OP / DT / RI, mapping OP = ENCLOSED_OVAL + PRISMATIC, DT = DMT, RI = GENERAL + default); module `intermediate_stores`; Admin → Intermediate Stores.
+- **Legacy stock stays where it is.** Stock already in the old `INTERMEDIATE_STORE` location (custodian `INTERMEDIATE_STORE_MANAGER`) is **not moved** to the new store locations, and no ledger row is written for it. Legacy GSs keep using `INTERMEDIATE_STORE` and the Store Manager flow (STORE_ACCEPT, DEPT_ISSUE) until they finish; that flow is retired for new GSs in P6 / P7. The new `ISTORE_*` locations start empty and only receive stock from P6 (store acknowledgement of a P5 transfer slip).
+- **Nothing reads the stores yet.** Transfer-slip generation (P5) must call `intermediate_stores.service.require_stores_for_products` inside its transaction (service check + DB guard). P6–P9 scope the store user's work with `rms_private.user_store_ids`.
+- The `INTERMEDIATE_STORE_MANAGER` role, its menu and the old `INTERMEDIATE_STORE` location are unchanged in P1 (sahil@rms.local keeps them).

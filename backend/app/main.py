@@ -35,6 +35,8 @@ from app.modules.final_actions.router import router as final_actions_router
 from app.modules.goods_slips.router import router as goods_slips_router
 from app.modules.health.router import router as health_router
 from app.modules.inspection.router import router as inspection_router
+from app.modules.intermediate_stores.router import admin_router as intermediate_stores_admin_router
+from app.modules.intermediate_stores.router import router as intermediate_stores_router
 from app.modules.inventory.battery_router import router as battery_router
 from app.modules.inventory.router import router as inventory_router
 from app.modules.itemization.router import router as itemization_router
@@ -137,6 +139,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(users_router, prefix=API_PREFIX)  # P1-05 user administration
     app.include_router(users_me_router, prefix=API_PREFIX)
     app.include_router(roles_router, prefix=API_PREFIX)
+    # Phase P1 20-11-2026 (DEC-61): Intermediate Stores.
+    app.include_router(intermediate_stores_admin_router, prefix=API_PREFIX)
+    app.include_router(intermediate_stores_router, prefix=API_PREFIX)
 
     if settings.app_env in ("test", "local"):
         from app.modules.test_support.router import router as test_router

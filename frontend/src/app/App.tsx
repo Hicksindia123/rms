@@ -25,6 +25,7 @@ import {
   Loader2,
   RotateCcw,
   Route,
+  Warehouse,
 } from 'lucide-react';
 
 import { parseHashQuery, useHashRoute } from '@/app/router';
@@ -254,6 +255,12 @@ const DispatchSlipsPage = lazy(() =>
     default: m.DispatchSlipsPage,
   })),
 );
+// Phase P1 20-11-2026 (DEC-61): Admin -> Intermediate Stores.
+const IntermediateStoresPage = lazy(() =>
+  import('@/features/intermediate-stores/IntermediateStoresPage').then((m) => ({
+    default: m.IntermediateStoresPage,
+  })),
+);
 // Change plan Phase 10 (AMD-22): Admin -> Role Journeys.
 const RoleJourneysPage = lazy(() =>
   import('@/features/journey/RoleJourneysPage').then((m) => ({ default: m.RoleJourneysPage })),
@@ -318,6 +325,7 @@ type NavTab =
   | 'dispatch-slips'
   | 'guards'
   | 'role-journeys'
+  | 'intermediate-stores'
   | 'search'
   | 'audit';
 
@@ -362,6 +370,7 @@ const STATIC_TABS: ReadonlySet<string> = new Set([
   'dispatch-slips',
   'guards',
   'role-journeys',
+  'intermediate-stores',
   'search',
   'audit',
 ]);
@@ -369,6 +378,7 @@ const STATIC_TABS: ReadonlySet<string> = new Set([
 // Admin screens (the collapsed "Administration" group opens while one of them is shown).
 const ADMIN_TABS: ReadonlySet<string> = new Set([
   'role-journeys',
+  'intermediate-stores',
   'users',
   'permissions',
   'forms',
@@ -546,6 +556,9 @@ function Shell() {
   const adminItems: NavEntry[] = [
     ...(signedIn && (can('config', 'view') || isSuperAdmin)
       ? [{ id: 'role-journeys' as const, label: 'Role Journeys', icon: Route }]
+      : []),
+    ...(signedIn && (can('intermediate_stores', 'view') || isSuperAdmin)
+      ? [{ id: 'intermediate-stores' as const, label: 'Intermediate Stores', icon: Warehouse }]
       : []),
     ...(signedIn && (can('users', 'view') || isSuperAdmin)
       ? [{ id: 'users' as const, label: 'Users', icon: Users }]
@@ -1763,6 +1776,26 @@ function Shell() {
                   <EmptyState
                     title="Access Restricted"
                     hint="You do not have permission to view Role Journeys."
+                  />
+                )}
+              </RequireAuth>
+            )}
+            {activeTab === 'intermediate-stores' && (
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
+                {can('intermediate_stores', 'view') || isSuperAdmin ? (
+                  <IntermediateStoresPage
+                    canCreate={can('intermediate_stores', 'create') || isSuperAdmin}
+                    canEdit={can('intermediate_stores', 'edit') || isSuperAdmin}
+                    canConfigure={can('intermediate_stores', 'configure') || isSuperAdmin}
+                  />
+                ) : (
+                  <EmptyState
+                    title="Access Restricted"
+                    hint="You do not have permission to view Intermediate Stores."
                   />
                 )}
               </RequireAuth>

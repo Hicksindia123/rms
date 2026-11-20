@@ -29,8 +29,10 @@ on conflict (code) do nothing;
 -- -----------------------------------------------------------------------------
 insert into public.roles (code, name, description, is_system) values
   ('SUPER_ADMIN',                'Super Admin',                'Marker role. Full rights come from profiles.is_super_admin; system guards still apply (§9.3).', true),
-  ('GATE_INWARD',                'Gate Inward User',           'Workbook: Gate Inward User', true),
-  ('INWARD_VERIFIER',            'Unboxing & Inward Verifier', 'Workbook: Unboxing & Inward Verifier / Inward Verifier', true),
+  -- DEC-60 (2026-11-20): GATE_INWARD = "Gate User (Offline)", INWARD_VERIFIER = "Replacement
+  -- Executive" (codes unchanged, so users keep their access).
+  ('GATE_INWARD',                'Gate User (Offline)',        'Workbook: Gate Inward User', true),
+  ('INWARD_VERIFIER',            'Replacement Executive',      'Workbook: Unboxing & Inward Verifier / Inward Verifier', true),
   ('REPLACEMENT_MANAGER',        'Replacement Manager',        'Workbook: Replacement Manager', true),
   ('INTERMEDIATE_STORE_MANAGER', 'Intermediate Store Manager', 'Workbook: Intermediate Store Manager / Intermediate Store In-charge', true),
   ('TECHNICIAN_COORDINATOR',     'Technician Coordinator',     'Workbook: Technician Coordinator (Aman / Sahil)', true),
@@ -40,7 +42,14 @@ insert into public.roles (code, name, description, is_system) values
   ('ACCOUNTS',                   'Accounts Team',              'Workbook: Accounts Team', true),
   ('DISPATCH',                   'Dispatch Team',              'Implied by workbook "dispatch team" (DD r69); DEC-26', true),
   ('MAIN_STORE',                 'Main Store',                 'Implied by workbook Main Store (WF r11); DEC-21', true),
-  ('MANAGEMENT_VIEWER',          'Management Viewer',          'Implied: read-only MIS', true)
+  ('MANAGEMENT_VIEWER',          'Management Viewer',          'Implied: read-only MIS', true),
+  -- DEC-60: Management views everything; approve / edit rights are added in P4 (post-lock edit) and
+  -- P10 (approval, Issue CN). MANAGEMENT_VIEWER stays read-only.
+  ('MANAGEMENT',                 'Management',                 'DEC-60: views everything; approves and edits (P4, P10)', true),
+  -- DEC-61: one role per Intermediate Store (the store users). Rows in public.intermediate_stores.
+  ('ISTORE_OP',                  'Intermediate Store OP',      'DEC-61: users of Intermediate Store OP', true),
+  ('ISTORE_DT',                  'Intermediate Store DT',      'DEC-61: users of Intermediate Store DT', true),
+  ('ISTORE_RI',                  'Intermediate Store RI',      'DEC-61: users of Intermediate Store RI', true)
 on conflict (code) do nothing;
 
 -- -----------------------------------------------------------------------------
@@ -202,7 +211,46 @@ insert into _seed_role_matrix values
   ('ACCOUNTS',                   'ac_entry',        array['view','edit','export']),
   ('REPLACEMENT_MANAGER',        'ac_entry',        array['view','export']),
   ('DISPATCH',                   'ac_entry',        array['view','export']),
-  ('MANAGEMENT_VIEWER',          'ac_entry',        array['view']);
+  ('MANAGEMENT_VIEWER',          'ac_entry',        array['view']),
+
+  -- DEC-60 (P1, 2026-11-20): Management views every operational module. The approve / edit grants
+  -- for the post-lock edit (P4) and the Management approval (P10) are added with those phases.
+  ('MANAGEMENT',                 'dashboards',      array['view']),
+  ('MANAGEMENT',                 'notifications',   array['view']),
+  ('MANAGEMENT',                 'reports',         array['view','export']),
+  ('MANAGEMENT',                 'audit',           array['view']),
+  ('MANAGEMENT',                 'masters',         array['view']),
+  ('MANAGEMENT',                 'goods_slips',     array['view']),
+  ('MANAGEMENT',                 'unboxing',        array['view']),
+  ('MANAGEMENT',                 'attachments',     array['view']),
+  ('MANAGEMENT',                 'itemization',     array['view']),
+  ('MANAGEMENT',                 'inspection',      array['view']),
+  ('MANAGEMENT',                 'container_audit', array['view']),
+  ('MANAGEMENT',                 'custody',         array['view']),
+  ('MANAGEMENT',                 'servicing',       array['view']),
+  ('MANAGEMENT',                 'inventory',       array['view','export']),
+  ('MANAGEMENT',                 'dismantling',     array['view']),
+  ('MANAGEMENT',                 'dispatch',        array['view']),
+  ('MANAGEMENT',                 'credit_notes',    array['view']),
+  ('MANAGEMENT',                 'department_routing', array['view']),
+  ('MANAGEMENT',                 'final_actions',   array['view']),
+  ('MANAGEMENT',                 'ac_entry',        array['view']),
+  ('MANAGEMENT',                 'intermediate_stores', array['view']),
+
+  -- DEC-61 (P1): Intermediate Store users. Their working rights (acknowledge, route, receive,
+  -- analyse) are added in P6-P9. A store created in the Admin Panel copies the default store's role.
+  ('ISTORE_OP',                  'dashboards',      array['view']),
+  ('ISTORE_OP',                  'notifications',   array['view']),
+  ('ISTORE_OP',                  'goods_slips',     array['view']),
+  ('ISTORE_OP',                  'attachments',     array['view']),
+  ('ISTORE_DT',                  'dashboards',      array['view']),
+  ('ISTORE_DT',                  'notifications',   array['view']),
+  ('ISTORE_DT',                  'goods_slips',     array['view']),
+  ('ISTORE_DT',                  'attachments',     array['view']),
+  ('ISTORE_RI',                  'dashboards',      array['view']),
+  ('ISTORE_RI',                  'notifications',   array['view']),
+  ('ISTORE_RI',                  'goods_slips',     array['view']),
+  ('ISTORE_RI',                  'attachments',     array['view']);
 
 -- Fail loudly on a typo in the matrix instead of silently dropping a permission.
 do $$
@@ -311,7 +359,18 @@ select r.id, s.id, m.ord
     ('MANAGEMENT_VIEWER',          'GS_LIST',        110),
     ('MANAGEMENT_VIEWER',          'PENDENCIES',     120),
     ('MANAGEMENT_VIEWER',          'REPORTS',        130),
-    ('MANAGEMENT_VIEWER',          'AUDIT',          140)
+    ('MANAGEMENT_VIEWER',          'AUDIT',          140),
+
+    -- DEC-60 / DEC-61 (P1): Management and the Intermediate Store users. Their journey steps
+    -- (approval queue, acknowledgement, routing, receiving, analysis) come with P6-P10.
+    ('MANAGEMENT',                 'DASHBOARD',      100),
+    ('MANAGEMENT',                 'GS_LIST',        110),
+    ('MANAGEMENT',                 'PENDENCIES',     120),
+    ('MANAGEMENT',                 'REPORTS',        130),
+    ('MANAGEMENT',                 'AUDIT',          140),
+    ('ISTORE_OP',                  'GS_LIST',        100),
+    ('ISTORE_DT',                  'GS_LIST',        100),
+    ('ISTORE_RI',                  'GS_LIST',        100)
   ) as m(role_code, step_code, ord)
   join public.roles r on r.code = m.role_code
   join public.journey_steps s on s.code = m.step_code
@@ -348,7 +407,9 @@ select r.id, l.widgets::jsonb
     ('ACCOUNTS', '[{"code":"MY_TASKS","size":"M"},{"code":"ACCOUNTS_DOC_QUEUE","size":"S"},{"code":"CN_PIPELINE","size":"M"},{"code":"CN_ISSUED","size":"L"}]'),
     ('DISPATCH', '[{"code":"MY_TASKS","size":"M"},{"code":"FUNCTIONAL_STOCK","size":"M"}]'),
     ('MAIN_STORE', '[{"code":"MY_TASKS","size":"M"},{"code":"TRANSFERS_ATTENTION","size":"M"},{"code":"FUNCTIONAL_STOCK","size":"M"}]'),
-    ('MANAGEMENT_VIEWER', '[{"code":"GS_PIPELINE","size":"L"},{"code":"OPEN_PENDENCIES","size":"S"},{"code":"HAZARD_QUARANTINE","size":"S"},{"code":"CONTAINER_AUDIT","size":"M"},{"code":"TECHNICIAN_WIP","size":"M"},{"code":"CN_PIPELINE","size":"M"},{"code":"FUNCTIONAL_STOCK","size":"M"},{"code":"NON_FUNCTIONAL_STOCK","size":"M"},{"code":"DISMANTLING","size":"M"},{"code":"BATTERY_STOCK","size":"M"},{"code":"CN_ISSUED","size":"L"},{"code":"GS_TREND","size":"L"}]')
+    ('MANAGEMENT_VIEWER', '[{"code":"GS_PIPELINE","size":"L"},{"code":"OPEN_PENDENCIES","size":"S"},{"code":"HAZARD_QUARANTINE","size":"S"},{"code":"CONTAINER_AUDIT","size":"M"},{"code":"TECHNICIAN_WIP","size":"M"},{"code":"CN_PIPELINE","size":"M"},{"code":"FUNCTIONAL_STOCK","size":"M"},{"code":"NON_FUNCTIONAL_STOCK","size":"M"},{"code":"DISMANTLING","size":"M"},{"code":"BATTERY_STOCK","size":"M"},{"code":"CN_ISSUED","size":"L"},{"code":"GS_TREND","size":"L"}]'),
+    -- DEC-60 (P1): Management starts with the MIS layout of Management Viewer.
+    ('MANAGEMENT', '[{"code":"GS_PIPELINE","size":"L"},{"code":"OPEN_PENDENCIES","size":"S"},{"code":"HAZARD_QUARANTINE","size":"S"},{"code":"CONTAINER_AUDIT","size":"M"},{"code":"TECHNICIAN_WIP","size":"M"},{"code":"CN_PIPELINE","size":"M"},{"code":"FUNCTIONAL_STOCK","size":"M"},{"code":"NON_FUNCTIONAL_STOCK","size":"M"},{"code":"DISMANTLING","size":"M"},{"code":"BATTERY_STOCK","size":"M"},{"code":"CN_ISSUED","size":"L"},{"code":"GS_TREND","size":"L"}]')
   ) as l(role_code, widgets)
   join public.roles r on r.code = l.role_code
 on conflict (role_id) do nothing;
@@ -594,6 +655,10 @@ from (values
   ('INWARD_STAGING',       'Inward Staging',       'INWARD',            'INWARD_VERIFIER',            null),
   ('TRANSIT',              'In Transit',           'TRANSIT',           null,                         null),
   ('INTERMEDIATE_STORE',   'Intermediate Store',   'FUNCTIONAL',        'INTERMEDIATE_STORE_MANAGER', 'INTERMEDIATE_STORE'),
+  -- DEC-61 (P1): one FUNCTIONAL location per Intermediate Store (legacy INTERMEDIATE_STORE stays).
+  ('ISTORE_OP',            'Intermediate Store OP', 'FUNCTIONAL',       'ISTORE_OP',                  'INTERMEDIATE_STORE'),
+  ('ISTORE_DT',            'Intermediate Store DT', 'FUNCTIONAL',       'ISTORE_DT',                  'INTERMEDIATE_STORE'),
+  ('ISTORE_RI',            'Intermediate Store RI', 'FUNCTIONAL',       'ISTORE_RI',                  'INTERMEDIATE_STORE'),
   ('TECHNICIAN_BENCH',     'Technician Bench',     'TECHNICIAN',        null,                         null),
   -- DEC-55 Q16: one location per department (Store issue moves stock here).
   ('DEPT_CLEANING',           'Department: Cleaning',            'TECHNICIAN', 'INTERMEDIATE_STORE_MANAGER', null),
@@ -617,6 +682,48 @@ from (values
 left join public.roles r on r.code = v.custodian_role
 left join public.departments d on d.code = v.department
 on conflict (code) do update set custodian_role_id = excluded.custodian_role_id, department_id = excluded.department_id;
+
+-- -----------------------------------------------------------------------------
+-- Intermediate Stores and the category -> store mapping (DEC-61; Q3 confirmed 2026-11-20, Q4
+-- PROVISIONAL): OP = ENCLOSED_OVAL + PRISMATIC, DT = DMT, RI = GENERAL and the default store for
+-- anything unmapped. Admins rename stores, add stores and edit the mapping in Admin -> Intermediate
+-- Stores. Same block as supabase/snippets/release_20261120_roles_intermediate_stores.sql.
+-- -----------------------------------------------------------------------------
+insert into public.intermediate_stores (code, name, role_id, location_id, is_default, sort_order)
+select v.code, v.name, r.id, l.id, v.is_default, v.ord
+  from (values
+    ('OP', 'Intermediate Store OP', 'ISTORE_OP', false, 10),
+    ('DT', 'Intermediate Store DT', 'ISTORE_DT', false, 20),
+    ('RI', 'Intermediate Store RI', 'ISTORE_RI', true,  30)
+  ) as v(code, name, role_code, is_default, ord)
+  join public.roles r on r.code = v.role_code
+  join public.inventory_locations l on l.code = v.role_code
+ where not exists (select 1 from public.intermediate_stores)
+on conflict (code) do nothing;
+
+insert into public.intermediate_store_category_map (store_id, category_id)
+select s.id, c.id
+  from (values
+    ('OP', 'ENCLOSED_OVAL'),
+    ('OP', 'PRISMATIC'),
+    ('DT', 'DMT'),
+    ('RI', 'GENERAL')
+  ) as v(store_code, category_code)
+  join public.intermediate_stores s on s.code = v.store_code
+  join public.product_categories c on c.code = v.category_code
+ where not exists (select 1 from public.intermediate_store_category_map m where m.category_id = c.id)
+on conflict do nothing;
+
+do $$
+begin
+  if (select count(*) from public.intermediate_stores) < 3
+     or (select count(*) from public.intermediate_store_category_map) < 4 then
+    raise exception 'DEC-61 seed incomplete: % stores, % mappings (expected 3 and 4)',
+      (select count(*) from public.intermediate_stores),
+      (select count(*) from public.intermediate_store_category_map);
+  end if;
+end
+$$;
 
 -- -----------------------------------------------------------------------------
 -- DMT return containers for the daily container audit (BR-18, DEC-08). Same rows as migration

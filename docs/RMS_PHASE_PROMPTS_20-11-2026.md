@@ -122,7 +122,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 | Phase | Title | Status | Log |
 |---|---|---|---|
 | P0 | Audit & decisions | [x] | 2026-11-20: `docs/RMS_FLOW_AUDIT_20-11-2026.md`; DEC-60…DEC-71 + supersession map; §3 corrected; Q23–Q26 added; baseline recorded (no code changed) |
-| P1 | Roles, Intermediate Stores, category mapping | [ ] | |
+| P1 | Roles, Intermediate Stores, category mapping | [x] | 2026-11-20: migration 20261120000100, module `intermediate_stores`, Admin → Intermediate Stores, roles MANAGEMENT / ISTORE_*, snippet release_20261120_roles_intermediate_stores.sql; all checks pass except the 3 P0 pre-existing pytest failures |
 | P2 | Step 1 — Gate entry v4 + confirm summary | [ ] | |
 | P3 | Step 2a — Unboxing + carton document | [ ] | |
 | P4 | Step 2b/2c — Items, Replacement/Sales-Return popup, categorisation lock, Admin/Management edit | [ ] | |

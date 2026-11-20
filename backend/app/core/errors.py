@@ -26,6 +26,9 @@ log = structlog.get_logger("rms.errors")
 
 _GUARD_CODE = re.compile(r"^G-(0[1-9]|1[0-9]|2[0-2])$")
 _GUARD_IN_DB_MESSAGE = re.compile(r"\b(G-(?:0[1-9]|1[0-9]|2[0-2]))\b")  # G-22: Phase 8
+# Coded DB rule errors that are not numbered guards; returned as 409 with that code.
+# STORE_MAPPING_MISSING: rms_private.assert_store_for_products (DEC-61, Phase P1).
+_CODED_DB_MESSAGE = re.compile(r"\b(STORE_MAPPING_MISSING):")
 
 
 class DomainError(Exception):
@@ -255,6 +258,15 @@ def register_exception_handlers(app: FastAPI, *, app_env: str) -> None:
                 guard,
                 first_line,
                 details={"guard": guard},
+                request_id=get_request_id(request),
+            )
+        coded = _CODED_DB_MESSAGE.search(orig)
+        if coded:
+            log.info("db_rule_rejected", code=coded.group(1))
+            return error_response(
+                409,
+                coded.group(1),
+                orig.splitlines()[0],
                 request_id=get_request_id(request),
             )
         log.error("database_error", exc_info=exc)

@@ -10,7 +10,7 @@
          seed_stations.sql -> stations added for the party import (DEC-37)
          seed_parties.sql / seed_products.sql -> party and item masters (config.toml [db.seed])
     4. rms_api role password, taken from backend\.env DATABASE_URL.
-    5. backend\scripts\uat_reset.py: removes DEMO placeholder masters and provisions the 12
+    5. backend\scripts\uat_reset.py: removes DEMO placeholder masters and provisions the 16
        workbook users with their roles (admin@rms.local is Super Admin).
     6. Verification: counts every master against its seed file; exits non-zero on any mismatch.
 .PARAMETER Password

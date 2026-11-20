@@ -99,6 +99,31 @@ UAT_USERS: list[dict[str, Any]] = [
         "roles": ["MANAGEMENT_VIEWER"],
         "is_super_admin": False,
     },
+    # Phase P1 20-11-2026: one user per Intermediate Store role (DEC-61) + Management (DEC-60).
+    {
+        "email": "opstore@rms.local",
+        "name": "Intermediate Store OP User",
+        "roles": ["ISTORE_OP"],
+        "is_super_admin": False,
+    },
+    {
+        "email": "dtstore@rms.local",
+        "name": "Intermediate Store DT User",
+        "roles": ["ISTORE_DT"],
+        "is_super_admin": False,
+    },
+    {
+        "email": "ristore@rms.local",
+        "name": "Intermediate Store RI User",
+        "roles": ["ISTORE_RI"],
+        "is_super_admin": False,
+    },
+    {
+        "email": "mgmt@rms.local",
+        "name": "Management Approver",
+        "roles": ["MANAGEMENT"],
+        "is_super_admin": False,
+    },
 ]
 
 # Transactional tables to clean for zero-demo-transactions UAT baseline

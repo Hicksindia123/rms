@@ -47,6 +47,8 @@ ALL_13_ROLES = [
     "TECHNICIAN",
     "TECHNICIAN_COORDINATOR",
 ]
+# Phase P1 20-11-2026: DEC-60 Management and DEC-61 one role per seeded Intermediate Store.
+P1_ROLES = ["MANAGEMENT", "ISTORE_OP", "ISTORE_DT", "ISTORE_RI"]
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -54,10 +56,10 @@ def _auth(token: str) -> dict[str, str]:
 
 
 async def test_all_13_roles_seeded(db_conn: Connection) -> None:
-    """Verify that exactly the 13 defined system roles exist in the database."""
+    """Exactly the 13 original system roles plus the P1 roles (DEC-60 / DEC-61) exist."""
     conn = as_admin(db_conn)
     rows = conn.execute(text("select code from public.roles order by code")).scalars().all()
-    assert set(rows) == set(ALL_13_ROLES), f"Mismatch in seeded roles: {rows}"
+    assert set(rows) == set(ALL_13_ROLES + P1_ROLES), f"Mismatch in seeded roles: {rows}"
 
 
 async def test_authz_matrix_role_permission_expectations(

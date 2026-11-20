@@ -90,11 +90,13 @@ select is((select count(*)::int from public.option_items where code in ('PACKAGI
 select set_eq($$select code from public.roles$$,
   array['SUPER_ADMIN','GATE_INWARD','INWARD_VERIFIER','REPLACEMENT_MANAGER','INTERMEDIATE_STORE_MANAGER',
         'TECHNICIAN_COORDINATOR','TECHNICIAN','SPARE_PARTS_TECHNICIAN','SPARE_PARTS_MANAGER','ACCOUNTS',
-        'DISPATCH','MAIN_STORE','MANAGEMENT_VIEWER'],
+        'DISPATCH','MAIN_STORE','MANAGEMENT_VIEWER',
+        -- Phase P1 20-11-2026: DEC-60 Management, DEC-61 one role per Intermediate Store
+        'MANAGEMENT','ISTORE_OP','ISTORE_DT','ISTORE_RI'],
   'roles match master plan §3.3');
-select is((select count(*)::int from public.permissions), 152, '20 modules × 7 actions + 5 department_routing (G2 approve = Store issue) + 4 final_actions + 3 ac_entry actions');
+select is((select count(*)::int from public.permissions), 156, '20 modules × 7 actions + 5 department_routing (G2 approve = Store issue) + 4 final_actions + 3 ac_entry + 4 intermediate_stores (DEC-61) actions');
 select is((select count(*)::int from public.role_permissions rp join public.roles r on r.id = rp.role_id
-            where r.code = 'SUPER_ADMIN'), 152, 'SUPER_ADMIN marker role holds every permission');
+            where r.code = 'SUPER_ADMIN'), 156, 'SUPER_ADMIN marker role holds every permission');
 select is((select count(*)::int from public.roles r
             where not exists (select 1 from public.role_permissions rp where rp.role_id = r.id)), 0,
           'every role has a default permission set');
@@ -129,6 +131,9 @@ select results_eq(
            ('HAZARD_QUARANTINE','HAZARD_QUARANTINE','SPARE_PARTS_MANAGER'),
            ('INTERMEDIATE_STORE','FUNCTIONAL','INTERMEDIATE_STORE_MANAGER'),
            ('INWARD_STAGING','INWARD','INWARD_VERIFIER'),
+           ('ISTORE_DT','FUNCTIONAL','ISTORE_DT'),
+           ('ISTORE_OP','FUNCTIONAL','ISTORE_OP'),
+           ('ISTORE_RI','FUNCTIONAL','ISTORE_RI'),
            ('MAIN_STORE','MAIN_STORE',null),
            ('NON_FUNCTIONAL_STORE','NON_FUNCTIONAL','SPARE_PARTS_MANAGER'),
            ('PENDING_HOLD','PENDING_HOLD',null),

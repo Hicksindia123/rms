@@ -25,6 +25,7 @@ _ROLE_REFERENCES = (
     "workflow_tasks where assigned_role_id",
     "role_dashboard_layouts where role_id",
     "role_journey_steps where role_id",
+    "intermediate_stores where role_id",  # DEC-61: a store role is never deleted
 )
 
 
