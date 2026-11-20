@@ -49,7 +49,7 @@ async def test_admin_edits_label_and_verifies_audit(
 
     courier_item = next(i for i in deliv_set["items"] if i["code"] == "COURIER_PARCEL")
     item_id = courier_item["id"]
-    assert courier_item["label"] == "Courier / Parcel"
+    assert courier_item["label"] == "Courier"  # seeded label since DEC-62 (gate v4)
 
     # 2. Update label to "Courier / Express Parcel"
     update_res = await client.put(
@@ -85,7 +85,7 @@ async def test_admin_edits_label_and_verifies_audit(
     )
     assert cur is not None
     assert cur["action"] == "OPTION_ITEM_UPDATE"
-    assert cur["before_label"] == "Courier / Parcel"
+    assert cur["before_label"] == "Courier"
     assert cur["after_label"] == "Courier / Express Parcel"
 
 

@@ -23,6 +23,19 @@ Change plan 2026-11-12 · Phase 2 (form S1_GATE_INWARD v2, docs/RMS_MASTER_PLAN_
 * AMD-05: each saved row whose type is in `gate.accounts_alert_doc_types` alerts Accounts once
   (event GS_DOCUMENT_FOUND; recipients come from its notification rule).
 GS pinned to form v1 (G-18) are still edited with the v1 fields.
+
+Phase P2 of docs/RMS_PHASE_PROMPTS_20-11-2026.md · DEC-62 (form S1_GATE_INWARD v4, marked by the
+`transport_document` field):
+* Received Through: Courier → courier name + docket no.; Transport → transport name only (no
+  vehicle no., Q5); By Hand → contact name + number (phone pattern). Rules come from the form's
+  required_when; the DB keeps goods_slips_courier/truck/rep_fields.
+* Documents are optional and image only: PARTY rows (GATE_DOCUMENT) and TRANSPORT rows
+  (GATE_TRANSPORT_DOCUMENT), no doc no. / date / remarks. `missing_documentation` (BR-03) is set
+  when "No Documents From Party" is chosen or no party document is recorded; the Accounts alert
+  (`gate.accounts_alert_doc_types`) still fires per party row.
+* Return Type (Offline / E-Commerce) and Gate Entry Date / No. stay (Q23, Q24).
+GS pinned to v1-v3 keep their own rules (G-18). An existing row whose type was deactivated later
+keeps its type on an edit; new or changed rows need an active type.
 """
 
 # --- P2-02 imports ---
@@ -329,6 +342,12 @@ DEFAULT_TIMEZONE = "Asia/Kolkata"
 DOC_NONE = "NO_DOCUMENT"  # DD r9
 MODE_TRUCK = "DIRECT_TRUCK"  # DD r3
 RETURN_OFFLINE = "OFFLINE_RETURN"  # AMD-01 / AMD-02: the return type that carries a gate entry
+# DEC-62: gate form v4 is recognised by this field; document sources and their option sets.
+V4_MARKER_FIELD = "transport_document"
+SOURCE_PARTY = "PARTY"
+SOURCE_TRANSPORT = "TRANSPORT"
+PARTY_DOC_SET = "GATE_DOCUMENT"
+TRANSPORT_DOC_SET = "GATE_TRANSPORT_DOCUMENT"
 # option_items.required_fields of GATE_DOCUMENT (DD r5-r8) → gs_gate_documents columns.
 _DOC_REQUIRED_FIELD_COLUMNS = {
     "gate_doc_no": "doc_no",
@@ -414,6 +433,10 @@ class GateInwardService:
                     )
                     for t in repo.gate_document_types(session)
                     if t["code"] != DOC_NONE
+                ],
+                transport_document_types=[
+                    GateDocumentTypeOut(code=t["code"], label=t["label"], required_fields=[])
+                    for t in repo.gate_document_types(session, TRANSPORT_DOC_SET)
                 ],
                 business_today=repo.business_today(session),
                 max_backdate_days=_max_backdate_days(session),
@@ -923,9 +946,8 @@ class GateInwardService:
             and contact.strip()
             and not re.search(pattern, contact.strip())
         ):
-            errors.setdefault("rep_contact", []).append(
-                "Representative Contact No. is not a valid phone number"
-            )
+            label = (_field(snapshot, "rep_contact") or {}).get("label") or "Contact number"
+            errors.setdefault("rep_contact", []).append(f"{label} is not a valid phone number")
 
         today = repo.business_today(session)
         gate_entry: dict[str, Any] = {
@@ -936,13 +958,44 @@ class GateInwardService:
         documents: list[dict[str, Any]] = []
         doc_code: str | None = None
         doc_date: date | None = None
-        if is_v2:
+        # Rows already saved on this GS (edit): a kept row may keep a type deactivated since.
+        existing_docs = (
+            {d["id"]: d for d in repo.list_gate_documents(session, gs_id)} if gs_id else {}
+        )
+        is_v4 = _field(snapshot, V4_MARKER_FIELD) is not None
+        if is_v4:
+            # DEC-62: documents are optional and image only. "No Documents From Party" (the
+            # no_document flag, BR-03) excludes party rows; a transport row may still be added.
+            no_document = clean.get("no_document") is True
+            gate_entry = self._validate_gate_entry(session, clean, today, gs_id, errors)
+            documents = _validate_documents_v4(
+                party_types=repo.gate_document_types(session, PARTY_DOC_SET, active_only=False),
+                transport_types=repo.gate_document_types(
+                    session, TRANSPORT_DOC_SET, active_only=False
+                ),
+                docs=payload.documents,
+                existing=existing_docs,
+                errors=errors,
+            )
+            has_party_doc = any(d["doc_source"] == SOURCE_PARTY for d in documents)
+            if no_document and has_party_doc:
+                label = (_field(snapshot, "no_document") or {}).get("label") or "No documents"
+                errors.setdefault("documents", []).append(
+                    f"Remove the party documents or clear '{label}'"
+                )
+            # BR-03: no party document recorded = missing documentation (flag + alerts).
+            missing_documentation = no_document or not has_party_doc
+        elif is_v2:
             # BR-03 / DEC-52: ticking "No Document Attached" is enough; no separate
             # acknowledgement is asked for at the gate.
             no_document = clean.get("no_document") is True
             gate_entry = self._validate_gate_entry(session, clean, today, gs_id, errors)
             documents = _validate_documents(
-                repo.gate_document_types(session), payload.documents, today, errors
+                repo.gate_document_types(session, active_only=False),
+                payload.documents,
+                today,
+                errors,
+                existing=existing_docs,
             )
             if no_document and documents:
                 errors.setdefault("documents", []).append(
@@ -1304,15 +1357,31 @@ def _doc_required_fields(doc_type: dict[str, Any]) -> list[str]:
     return [c for c in dict.fromkeys(cols) if c]
 
 
+def _kept_type(
+    dtype: dict[str, Any] | None, doc: GateDocumentIn, existing: dict[UUID, dict[str, Any]]
+) -> tuple[bool, str | None]:
+    """(usable, label) for a row's type: an active type, or the unchanged type of a row already
+    saved on the GS (deactivated since; G-18 keeps its label snapshot)."""
+    before = existing.get(doc.id) if doc.id is not None else None
+    if before is not None and before["doc_type_code"] == doc.doc_type_code:
+        return True, str(before["doc_type_label"])
+    if dtype is not None and dtype.get("is_active", True):
+        return True, str(dtype["label"])
+    return False, None
+
+
 def _validate_documents(
     types: list[dict[str, Any]],
     docs: list[GateDocumentIn],
     today: date,
     errors: dict[str, list[str]],
+    *,
+    existing: dict[UUID, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """AMD-04: each row needs an active GATE_DOCUMENT type (not NO_DOCUMENT, which is the
     GS-level flag) and the fields that type requires (DD r5-r8, option_items.required_fields)."""
     by_code = {t["code"]: t for t in types if t["code"] != DOC_NONE}
+    kept = existing or {}
     out: list[dict[str, Any]] = []
     seen: set[UUID] = set()
     for i, doc in enumerate(docs):
@@ -1322,7 +1391,8 @@ def _validate_documents(
                 errors.setdefault(f"{key}.id", []).append("Duplicate document row")
             seen.add(doc.id)
         dtype = by_code.get(doc.doc_type_code)
-        if dtype is None:
+        usable, label = _kept_type(dtype, doc, kept)
+        if dtype is None or not usable:
             errors.setdefault(f"{key}.doc_type_code", []).append(
                 "Unknown or inactive document type"
             )
@@ -1330,10 +1400,11 @@ def _validate_documents(
         row: dict[str, Any] = {
             "id": doc.id,
             "doc_type_code": dtype["code"],
-            "doc_type_label": dtype["label"],  # G-18 label snapshot
+            "doc_type_label": label,  # G-18 label snapshot
             "doc_no": _text(doc.doc_no),
             "doc_date": doc.doc_date,
             "remarks": _text(doc.remarks),
+            "doc_source": None,  # captured before gate v4 (DD r5-r8 rules, DEC-62)
         }
         for col in _doc_required_fields(dtype):
             if row[col] is None:
@@ -1343,6 +1414,66 @@ def _validate_documents(
         if doc.doc_date is not None and doc.doc_date > today:
             errors.setdefault(f"{key}.doc_date", []).append("Document Date cannot be in the future")
         out.append(row)
+    return out
+
+
+def _validate_documents_v4(
+    *,
+    party_types: list[dict[str, Any]],
+    transport_types: list[dict[str, Any]],
+    docs: list[GateDocumentIn],
+    existing: dict[UUID, dict[str, Any]],
+    errors: dict[str, list[str]],
+) -> list[dict[str, Any]]:
+    """DEC-62 (gate v4): each row is a document type + its picture(s). PARTY rows use the
+    GATE_DOCUMENT types (not NO_DOCUMENT, the GS-level flag), TRANSPORT rows the
+    GATE_TRANSPORT_DOCUMENT types. No document number, date or remarks are recorded (the DB CHECK
+    gs_gate_documents_v4_image_only says the same). A saved row never changes its source."""
+    by_source = {
+        SOURCE_PARTY: {t["code"]: t for t in party_types if t["code"] != DOC_NONE},
+        SOURCE_TRANSPORT: {t["code"]: t for t in transport_types},
+    }
+    not_recorded = {"doc_no": "Document No.", "doc_date": "Document Date", "remarks": "Remarks"}
+    out: list[dict[str, Any]] = []
+    seen: set[UUID] = set()
+    for i, doc in enumerate(docs):
+        key = f"documents.{i}"
+        source = doc.source or SOURCE_PARTY
+        if doc.id is not None:
+            if doc.id in seen:
+                errors.setdefault(f"{key}.id", []).append("Duplicate document row")
+            seen.add(doc.id)
+            before = existing.get(doc.id)
+            if before is not None and before["doc_source"] != source:
+                errors.setdefault(f"{key}.source", []).append(
+                    "A saved document cannot move between party and transport documents"
+                )
+        for col, col_label in not_recorded.items():
+            raw = getattr(doc, col)
+            if raw is not None and str(raw).strip():
+                errors.setdefault(f"{key}.{col}", []).append(
+                    f"{col_label} is not recorded on this gate form; attach a photo instead "
+                    "(DEC-62)"
+                )
+        dtype = by_source[source].get(doc.doc_type_code)
+        usable, label = _kept_type(dtype, doc, existing)
+        if dtype is None or not usable:
+            errors.setdefault(f"{key}.doc_type_code", []).append(
+                "Unknown or inactive document type for "
+                + ("transport documents" if source == SOURCE_TRANSPORT else "party documents")
+            )
+            continue
+        out.append(
+            {
+                "id": doc.id,
+                "doc_type_code": dtype["code"],
+                "doc_type_label": label,  # G-18 label snapshot
+                "doc_no": None,
+                "doc_date": None,
+                "remarks": None,
+                "doc_source": source,
+            }
+        )
     return out
 
 
@@ -1361,7 +1492,13 @@ def _save_documents(
         }
         if doc["id"] is None:
             changed.append(
-                repo.insert_gate_document(session, gs_id=gs_id, fields=fields, sort_order=order)
+                repo.insert_gate_document(
+                    session,
+                    gs_id=gs_id,
+                    fields=fields,
+                    sort_order=order,
+                    doc_source=doc.get("doc_source"),  # DEC-62
+                )
             )
             continue
         before = existing[doc["id"]]

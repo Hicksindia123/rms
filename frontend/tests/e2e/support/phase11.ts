@@ -136,7 +136,8 @@ export async function createOfflineGs(params: {
   cartonCount?: number;
   gateEntryDate?: string;
   gateEntryNo?: number;
-  documents?: Array<{ doc_type_code: string; doc_no: string; doc_date: string; remarks?: string }>;
+  /** Gate form v4 rows (DEC-62): type + source only. */
+  documents?: Array<{ doc_type_code: string; source: 'PARTY' | 'TRANSPORT' }>;
 }): Promise<Gs> {
   const party = await getParty();
   const backdate = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
@@ -146,8 +147,8 @@ export async function createOfflineGs(params: {
   const tag = params.tag;
 
   const docs = params.documents ?? [
-    { doc_type_code: 'COURIER_SLIP', doc_no: `CS-${tag}`, doc_date: gateEntryDate },
-    { doc_type_code: 'INVOICE', doc_no: `INV-${tag}`, doc_date: gateEntryDate },
+    { doc_type_code: 'COURIER_SLIP', source: 'TRANSPORT' as const },
+    { doc_type_code: 'INVOICE', source: 'PARTY' as const },
   ];
 
   const payload = {
@@ -188,7 +189,8 @@ export async function createEcommerceGs(params: {
       docket_no: `ECOM-${tag}`,
       gs_creation_format: 'AUTO_STANDARD',
     },
-    documents: [{ doc_type_code: 'DELIVERY_NOTE', doc_no: `DN-${tag}`, doc_date: TODAY }],
+    // DEC-62: Delivery Note is no longer a party document type on gate v4.
+    documents: [{ doc_type_code: 'HANDWRITTEN_SLIP', source: 'PARTY' }],
   };
 
   const res = await api<{ goods_slip: Gs }>(USERS.gate, 'POST', '/gs', payload, true);

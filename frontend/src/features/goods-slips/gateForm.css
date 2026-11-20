@@ -110,3 +110,109 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* DEC-62 (gate form v4): row-level required marks, summary sheet, upload progress, failed files. */
+.req-mark {
+  color: var(--color-danger);
+  margin-left: 0.25rem;
+}
+
+.gate-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.gate-summary__list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.gate-summary__row {
+  display: grid;
+  grid-template-columns: minmax(7rem, 40%) 1fr;
+  gap: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.gate-summary__row:last-child {
+  border-bottom: none;
+}
+
+.gate-summary__row dt {
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+
+.gate-summary__row dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.gate-summary__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.gate-summary__actions .btn {
+  min-height: 48px;
+  width: 100%;
+}
+
+.gate-uploads,
+.gate-failed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.gate-uploads li {
+  display: grid;
+  grid-template-columns: 1fr 5rem 3rem;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.gate-uploads__name,
+.gate-failed__name {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.gate-uploads progress {
+  width: 100%;
+}
+
+.gate-uploads__pct {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.gate-failed li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.gate-failed__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.gate-failed__actions .btn {
+  min-height: 44px;
+}

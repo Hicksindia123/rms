@@ -222,8 +222,8 @@ export interface Gs {
   gs_no: string;
 }
 
-/** Gate form v2 body (change plan 2026-11-12 Phase 2, AMD-01..AMD-04). E-Commerce returns have
- * no gate entry number (DEC-39), so parallel workers never collide on it (DEC-38). */
+/** Gate form v4 body (DEC-62): image-only document rows with a source (PARTY / TRANSPORT). E-Commerce
+ * returns have no gate entry number (DEC-39), so parallel workers never collide on it (DEC-38). */
 export function gateBody(
   partyId: string | undefined,
   tag: string,
@@ -241,20 +241,26 @@ export function gateBody(
       no_document: noDoc, // DEC-52: no separate acknowledgement
       gs_creation_format: 'AUTO_STANDARD',
     },
-    documents: noDoc
-      ? []
-      : [{ doc_type_code: 'INVOICE', doc_no: `INV-${tag}`, doc_date: '2026-11-01' }],
+    documents: noDoc ? [] : [{ doc_type_code: 'INVOICE', source: 'PARTY' }],
   };
 }
 
 /** Step-1 through the API as the gate user. */
 export async function createGs(tag: string): Promise<Gs> {
   let partyId: string | undefined;
-  const demoParties = await api<Array<{ id: string }>>(USERS.gate, 'GET', '/gs/lookups/parties?q=Demo');
+  const demoParties = await api<Array<{ id: string }>>(
+    USERS.gate,
+    'GET',
+    '/gs/lookups/parties?q=Demo',
+  );
   if (demoParties.length && demoParties[0]) {
     partyId = demoParties[0].id;
   } else {
-    const anyParties = await api<Array<{ id: string }>>(USERS.gate, 'GET', '/gs/lookups/parties?limit=5');
+    const anyParties = await api<Array<{ id: string }>>(
+      USERS.gate,
+      'GET',
+      '/gs/lookups/parties?limit=5',
+    );
     partyId = anyParties[0]?.id;
   }
   const created = await api<{ goods_slip: Gs }>(
@@ -408,4 +414,25 @@ export async function shot(page: Page, name: string): Promise<void> {
     path: `test-results/p2-08/${test.info().project.name}-${name}.png`,
     fullPage: true,
   });
+}
+
+/** Gate form v4 (DEC-62): choose "No Documents From Party" in the party document type list. */
+export async function chooseNoPartyDocuments(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Add party document' }).click();
+  await page
+    .getByTestId('party-documents')
+    .getByLabel(/Document type/)
+    .selectOption('NO_DOCUMENT');
+}
+
+/** Gate form v4 (DEC-62): "Submit & Create GS" opens the summary sheet; the GS is created only by
+ * its Submit button. Returns the created GS number from the success screen. */
+export async function submitGateViaSummary(page: Page): Promise<string> {
+  await page.getByRole('button', { name: 'Submit & Create GS' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Check before creating the GS' });
+  await expect(sheet.getByTestId('gate-summary')).toBeVisible();
+  await sheet.getByRole('button', { name: 'Submit', exact: true }).click();
+  const gsNo = page.getByTestId('created-gs-no');
+  await expect(gsNo).toBeVisible({ timeout: 30_000 });
+  return ((await gsNo.textContent()) ?? '').trim();
 }

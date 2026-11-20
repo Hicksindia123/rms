@@ -30,6 +30,8 @@ class GateDocumentIn(BaseModel):
     doc_no: str | None = Field(default=None, max_length=100)
     doc_date: date | None = None
     remarks: str | None = Field(default=None, max_length=1000)
+    # DEC-62 (gate form v4): who sent it. Omitted = PARTY. Ignored by gate forms v1-v3.
+    source: Literal["PARTY", "TRANSPORT"] | None = None
 
 
 class GateInwardIn(BaseModel):
@@ -90,6 +92,8 @@ class GateDocumentOut(BaseModel):
     doc_date: date | None
     remarks: str | None
     source_step: str
+    # DEC-62: PARTY / TRANSPORT (gate v4), CARTON (P3); null = captured before gate v4.
+    doc_source: str | None = None
     accounts_alerted_at: datetime | None
     files: list[GateDocumentFileOut] = Field(default_factory=list)
 
@@ -242,6 +246,8 @@ class GateFormOut(BaseModel):
     party_state_station_autofill: bool
     # AMD-04 / DEC-38: document row types and gate entry date limits for the UI.
     document_types: list[GateDocumentTypeOut] = Field(default_factory=list)
+    # DEC-62 (gate v4): "Documents From Transport" types (option set GATE_TRANSPORT_DOCUMENT).
+    transport_document_types: list[GateDocumentTypeOut] = Field(default_factory=list)
     business_today: date | None = None
     max_backdate_days: int | None = None
 

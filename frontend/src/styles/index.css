@@ -1704,7 +1704,8 @@ button.dataview__card:active {
 .drawer-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 900;
+  /* Above the phone bottom bar (.mobile-bottom-bar, 999) so the footer buttons stay tappable. */
+  z-index: 1000;
   display: flex;
   justify-content: flex-end;
   background-color: rgba(15, 23, 42, 0.45);

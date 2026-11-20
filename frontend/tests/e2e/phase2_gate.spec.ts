@@ -7,6 +7,7 @@ import {
   apiAvailable,
   asUser,
   categorize,
+  chooseNoPartyDocuments,
   createGs,
   type Device,
   expectNoHorizontalOverflow,
@@ -17,6 +18,7 @@ import {
   productId,
   runWorkerJob,
   shot,
+  submitGateViaSummary,
   unboxed,
   USERS,
 } from './support/stack';
@@ -309,18 +311,17 @@ test.describe('Phase 2 gate scenarios (P2-08)', () => {
     await gate.getByTestId('return-type-ECOMMERCE_RETURN').click();
     await gate.locator('#field-state').selectOption({ label: 'Uttar Pradesh' });
     await gate.locator('#field-station').selectOption({ label: 'Agra' });
-    await gate.locator('#field-party_name input').fill('Demo Party One');
-    await gate.getByRole('option', { name: /Demo Party One/ }).click();
+    // Any party of the station (reset-db.ps1 removes the DEMO parties).
+    await gate.locator('#field-party_name input').click();
+    await gate.locator('#field-party_name').getByRole('option').first().click();
     await gate.locator('#field-carton_count').fill('1');
     await gate.locator('#field-delivery_mode').selectOption('COURIER_PARCEL');
     await gate.locator('#field-courier_name').fill('DTDC');
     await gate.locator('#field-docket_no').fill(`E2E04-${String(Date.now())}`);
-    // DEC-52: ticking "No Document Attached" is enough; no acknowledgement checkbox.
-    await gate.getByLabel('No Document Attached').check();
-    await expect(gate.getByLabel('Missing documentation warning acknowledged')).toHaveCount(0);
+    // Gate v4 (DEC-62): "No Documents From Party" from the party document type list.
+    await chooseNoPartyDocuments(gate);
     await expectNoHorizontalOverflow(gate);
-    await gate.getByRole('button', { name: 'Create Goods Slip' }).click();
-    const gsNo = ((await gate.getByTestId('created-gs-no').textContent()) ?? '').trim();
+    const gsNo = await submitGateViaSummary(gate);
     expect(gsNo).not.toBe('');
     const listed = await api<{ items: Array<{ id: string; gs_no: string }> }>(
       USERS.aman,

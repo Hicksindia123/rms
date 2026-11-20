@@ -316,3 +316,73 @@ def force_gs_status(conn: Connection, gs_id: Any, status: str) -> None:
         )
     finally:
         c.execute(text("set local session_replication_role = origin"))
+
+
+# DEC-62 (Phase P2): GATE_DOCUMENT types deactivated for gate form v4 (never deleted).
+_GATE_V4_DEACTIVATED_TYPES = (
+    "DELIVERY_CHALLAN",
+    "LR_BILITY",
+    "DELIVERY_NOTE",
+    "OTHER",
+    "COURIER_SLIP",
+)
+
+
+def use_gate_form_v3(conn: Connection) -> None:
+    """Test SETUP only (rolled back with the test): publish gate form v3 again (`no_document`,
+    no acknowledgement field, no `transport_document`) and reactivate the GATE_DOCUMENT types gate
+    v4 retired, so the v2/v3 rules (DD r5-r8, BR-03 "document or flag") are still proven. GSs
+    pinned to v3 are validated against v3 by the service (G-18); new GSs use v4."""
+    c = as_admin(conn)
+    versions = c.execute(
+        text(
+            """select v.id, v.status, v.snapshot from public.form_versions v
+                 join public.form_definitions d on d.id = v.form_definition_id
+                where d.code = 'S1_GATE_INWARD' order by v.version_no desc"""
+        )
+    ).mappings()
+    v3_id = None
+    for v in versions:
+        keys = {f["field_key"] for f in (v["snapshot"] or {}).get("fields") or []}
+        legacy = {"missing_doc_warning_acknowledged", "transport_document"}
+        if "no_document" in keys and not keys & legacy:
+            v3_id = v["id"]
+            break
+    assert v3_id is not None, "gate form v3 not found"
+    # G-18 makes retired versions immutable; test setup swaps them with triggers off for these
+    # two statements only (as force_gs_status does), then restores them.
+    c.execute(text("set local session_replication_role = replica"))
+    try:
+        c.execute(
+            text(
+                """update public.form_versions set status = 'RETIRED'
+                    where status = 'PUBLISHED' and form_definition_id =
+                          (select id from public.form_definitions where code = 'S1_GATE_INWARD')"""
+            )
+        )
+        c.execute(
+            text("update public.form_versions set status = 'PUBLISHED' where id = :id"),
+            {"id": v3_id},
+        )
+    finally:
+        c.execute(text("set local session_replication_role = origin"))
+    c.execute(
+        text(
+            """update public.option_items oi set is_active = true
+                 from public.option_sets os
+                where os.id = oi.option_set_id and os.code = 'GATE_DOCUMENT'
+                  and oi.code = any(:codes)"""
+        ),
+        {"codes": list(_GATE_V4_DEACTIVATED_TYPES)},
+    )
+
+
+@pytest.fixture(autouse=True)
+def _gate_form_default(request: pytest.FixtureRequest) -> None:
+    """Integration tests create GSs with gate v3 payloads (document no. / date, vehicle no.), so
+    they run on gate form v3 by default, inside their rolled-back transaction. The GS columns the
+    later steps read are the same for v3 and v4 GSs. Tests marked `gate_v4` (test_gate_v4.py) run
+    on the published v4 (DEC-62); the Playwright suite runs on the real (v4) database."""
+    if request.node.get_closest_marker("gate_v4") or "db_conn" not in request.fixturenames:
+        return
+    use_gate_form_v3(request.getfixturevalue("db_conn"))

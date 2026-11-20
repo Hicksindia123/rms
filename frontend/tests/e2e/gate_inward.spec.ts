@@ -57,18 +57,21 @@ test.describe('Gate inward (P2-02)', () => {
     await page.locator('#field-gate_entry_no').fill(String(Date.now()).slice(-9));
     await page.locator('#field-state').selectOption({ label: 'Uttar Pradesh' });
     await page.locator('#field-station').selectOption({ label: 'Agra' });
-    await page.locator('#field-party_name input').fill('Demo Party One');
-    await page.getByRole('option', { name: /Demo Party One/ }).click();
+    // Any party of the station (reset-db.ps1 removes the DEMO parties).
+    await page.locator('#field-party_name input').click();
+    await page.locator('#field-party_name').getByRole('option').first().click();
 
     await page.locator('#field-carton_count').fill('3');
     await page.locator('#field-delivery_mode').selectOption('COURIER_PARCEL');
     await page.locator('#field-courier_name').fill('DTDC');
     await page.locator('#field-docket_no').fill(`E2E-${String(Date.now())}`);
 
-    // "No Document Attached" (BR-03 / DEC-03) replaces the document rows; DEC-52: no extra
-    // acknowledgement checkbox.
-    await page.getByLabel('No Document Attached').check();
-    await expect(page.getByLabel('Missing documentation warning acknowledged')).toHaveCount(0);
+    // Gate v4 (DEC-62): "No Documents From Party" (BR-03 / DEC-03) replaces the document rows.
+    await page.getByRole('button', { name: 'Add party document' }).click();
+    await page
+      .getByTestId('party-documents')
+      .getByLabel(/Document type/)
+      .selectOption('NO_DOCUMENT');
 
     // The sticky submit bar stays reachable without horizontal scroll at phone width.
     const overflow = await page.evaluate(
@@ -76,14 +79,21 @@ test.describe('Gate inward (P2-02)', () => {
     );
     expect(overflow).toBe(false);
 
-    await page.getByRole('button', { name: 'Create Goods Slip' }).click();
+    // DEC-62: the summary sheet; the GS is created only by its Submit.
+    await page.getByRole('button', { name: 'Submit & Create GS' }).click();
+    await page
+      .getByRole('dialog', { name: 'Check before creating the GS' })
+      .getByRole('button', { name: 'Submit', exact: true })
+      .click();
     const gsNo = page.getByTestId('created-gs-no');
     await expect(gsNo).toHaveText(/^\S+\/\d{4}-\d{2}\/\d{5}$|^\S+$/);
     const createdNo = (await gsNo.textContent())?.trim() ?? '';
     expect(createdNo.length).toBeGreaterThan(0);
-    await expect(page.getByRole('alert').filter({ hasText: 'No Document Attached' })).toBeVisible();
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'No Documents From Party' }),
+    ).toBeVisible();
 
-    await page.getByRole('button', { name: /Print tag \(3 cartons\)/ }).click();
+    await page.getByRole('button', { name: /Print GS Tag \(3 cartons\)/ }).click();
     const sheet = page.getByTestId('tag-sheet');
     await expect(sheet.locator('article')).toHaveCount(3);
     await expect(sheet).toContainText('Carton 1 of 3'); // AMD-03

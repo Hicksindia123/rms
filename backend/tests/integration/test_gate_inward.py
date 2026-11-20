@@ -323,7 +323,7 @@ async def test_no_document_flags_and_notifies_accounts_and_rm(
     body = res.json()
     assert body["goods_slip"]["missing_documentation"] is True
     assert body["warnings"][0]["code"] == "MISSING_DOCUMENTATION"
-    assert "No Document Attached" in body["warnings"][0]["message"]  # configured label
+    assert "No Documents From Party" in body["warnings"][0]["message"]  # configured label (DEC-62)
     rows = fetch_all(
         db_conn,
         """select user_id, priority, type from public.notifications

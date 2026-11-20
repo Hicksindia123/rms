@@ -26,7 +26,7 @@ insert into public.goods_slips (
   (select id from public.states limit 1),
   (select id from public.stations limit 1),
   'COURIER_PARCEL', 'Test Express', 'DOCK-99001', 2,
-  'DELIVERY_CHALLAN', 'CH-99001', '2026-11-03', 'ITEMIZATION'
+  'INVOICE', 'INV-99001', '2026-11-03', 'ITEMIZATION'
 );
 
 -- 3. Create items: one EO (requires_full_opening=true) and one DMT

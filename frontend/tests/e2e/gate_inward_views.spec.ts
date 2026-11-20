@@ -91,16 +91,17 @@ test.describe('GS screens responsive (P2-02)', () => {
       });
 
       await page.goto('/#/gs/new');
-      await expect(page.getByRole('button', { name: 'Create Goods Slip' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Submit & Create GS' })).toBeVisible();
+      // Gate v4 (DEC-62, Q5): Transport = transport name only, no vehicle number.
       await page.locator('#field-delivery_mode').selectOption('DIRECT_TRUCK');
-      await expect(page.locator('#field-vehicle_no')).toBeVisible();
+      await expect(page.locator('#field-vehicle_no')).toHaveCount(0);
       await expect(page.locator('#field-transporter_name')).toBeVisible();
       await page.locator('#field-delivery_mode').selectOption('SELF_PARTY_REP');
       await expect(page.locator('#field-rep_contact')).toBeVisible();
       // UI-side conditional validation (the backend rejection is proven by pytest / curl).
       await page.locator('#field-rep_contact').fill('12345');
-      await page.getByRole('button', { name: 'Create Goods Slip' }).click();
-      await expect(page.getByText('Representative Name is required')).toBeVisible();
+      await page.getByRole('button', { name: 'Submit & Create GS' }).click();
+      await expect(page.getByText('Contact Name is required')).toBeVisible();
       await noOverflow(page);
       await axeClean(page);
       await page.screenshot({ path: `test-results/p2-02/${vp.label}-gs-new.png`, fullPage: true });

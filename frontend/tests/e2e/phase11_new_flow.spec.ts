@@ -107,9 +107,10 @@ test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
       cartonCount: 2,
       gateEntryDate: backdate,
       gateEntryNo,
+      // Gate form v4 (DEC-62): image-only rows, transport + party document.
       documents: [
-        { doc_type_code: 'COURIER_SLIP', doc_no: `CS-${tag}`, doc_date: backdate },
-        { doc_type_code: 'INVOICE', doc_no: `INV-${tag}`, doc_date: backdate },
+        { doc_type_code: 'COURIER_SLIP', source: 'TRANSPORT' },
+        { doc_type_code: 'INVOICE', source: 'PARTY' },
       ],
     });
 

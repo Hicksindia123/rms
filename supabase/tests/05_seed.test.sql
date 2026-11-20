@@ -9,8 +9,8 @@ select plan(25);
 -- P3-08: + 1 system option (JV_ONLY in CN_TYPE, §8.6 / BR-34 / DEC-23) that is not a workbook row.
 -- Change plan 2026-11-12 Phase 2: + RETURN_TYPE (2, AMD-01) + 4 GATE_DOCUMENT row types (AMD-04).
 -- Phase 3: + GS_STATUS (12 status labels, AMD-08; + HELD_AT_INTERMEDIATE_STORE, AMD-13).
-select is((select count(*)::int from public.option_items), 104,
-          '104 option items (79 DD rows + 5 WF r6 + JV_ONLY + 2 AMD-01 + 4 AMD-04 + 13 AMD-08/13)');
+select is((select count(*)::int from public.option_items), 105,
+          '105 option items (79 DD rows + 5 WF r6 + JV_ONLY + 2 AMD-01 + 4 AMD-04 + 13 AMD-08/13 + 1 DEC-62)');
 select is((select count(*)::int from public.option_items where source_ref like 'DD r%'), 79,
           '79 option items come from Roles_Steps_Dropdowns');
 select is((select count(distinct source_ref)::int from public.option_items where source_ref like 'DD r%'), 79,
@@ -20,7 +20,7 @@ select set_eq(
   $$select generate_series(2, 80)$$,
   'DD rows r2..r80 are all present');
 select is((select count(*)::int from public.option_items where source_ref = 'WF r6'), 5, '5 RM item actions from WF r6');
-select is((select count(*)::int from public.option_sets), 37, '37 option sets (+ RETURN_TYPE, AMD-01; + GS_STATUS, AMD-08)');
+select is((select count(*)::int from public.option_sets), 38, '38 option sets (+ RETURN_TYPE, AMD-01; + GS_STATUS, AMD-08; + GATE_TRANSPORT_DOCUMENT, DEC-62)');
 
 select results_eq(
   $$select os.code::text, count(*)::int from public.option_items oi
@@ -30,7 +30,7 @@ select results_eq(
     ('CSR_APPROVAL',2),('CSR_FINAL_STATUS',1),('CUSTODY_ASSIGNMENT',4),('CUSTODY_TRANSFER_MODE',1),
     ('DAILY_CONTAINER_AUDIT',1),('DATA_ENTRY_BY',2),('DELIVERY_MODE',3),('DMT_CONDITION',8),
     ('DMT_EXTRACTION_TYPE',2),('DOCUMENT_PHOTO',1),('EO_CONDITION',4),('EO_EXTRACTION_TYPE',2),
-    ('EO_INSPECTION_PROTOCOL',1),('GATE_DOCUMENT',9),('GS_CREATION_FORMAT',1),('GS_STATUS',13),('GST_PORTAL_VERIFICATION',2),
+    ('EO_INSPECTION_PROTOCOL',1),('GATE_DOCUMENT',9),('GATE_TRANSPORT_DOCUMENT',1),('GS_CREATION_FORMAT',1),('GS_STATUS',13),('GST_PORTAL_VERIFICATION',2),
     ('PARTS_STORAGE_SEPARATION',2),('PARTY_DOC_VERIFICATION',3),('PARTY_NOTIFICATION_STATUS',1),
     ('POST_SERVICING_CLASSIFICATION',3),('PRISMATIC_CONDITION',3),('PRISMATIC_EXTRACTION_TYPE',2),
     ('RATE_VERIFICATION_REF',2),('RECEIVED_DOC_CLASSIFICATION',4),('RECOVERABLE_PART_TYPE',4),
@@ -44,7 +44,8 @@ select results_eq(
      where oi.source_ref in ('DD r9','DD r22','DD r23','DD r33','DD r39','DD r46','DD r70','DD r76','DD r80')
      order by substring(oi.source_ref from 5)::int$$,
   $$values
-    ('DD r9',  'NO_DOCUMENT',               'No Document Attached', 'CONDITIONAL'),
+    -- DD r9 relabelled by the user's gate v4 decision (DEC-62, 2026-11-20); code unchanged.
+    ('DD r9',  'NO_DOCUMENT',               'No Documents From Party', 'CONDITIONAL'),
     ('DD r22', 'DMT_OK_PKG_DAMAGED',        'VISUALLY OKAY but unpacked or maybe packaging is damaged', 'YES'),
     ('DD r23', 'DMT_OTHER_BRANDS',          'OTHER BRANDS', 'NO'),
     ('DD r33', 'PRS_BULB_BROKEN_NO_HG',     'BULB BROKEN WITHOUT MERCURY', 'NO'),

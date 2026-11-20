@@ -1120,18 +1120,22 @@ def gate_entry_no_taken(
     ).scalar()
 
 
-def gate_document_types(session: Session) -> list[dict[str, Any]]:
-    """Active GATE_DOCUMENT option items (code, label, required_fields)."""
+def gate_document_types(
+    session: Session, set_code: str = "GATE_DOCUMENT", *, active_only: bool = True
+) -> list[dict[str, Any]]:
+    """Document type option items (code, label, required_fields, is_active) of GATE_DOCUMENT or,
+    for gate v4 transport documents, GATE_TRANSPORT_DOCUMENT (DEC-62)."""
     rows = session.execute(
         text(
             """
-            select oi.code, oi.label, oi.required_fields, oi.sort_order
+            select oi.code, oi.label, oi.required_fields, oi.sort_order, oi.is_active
               from public.option_items oi
               join public.option_sets os on os.id = oi.option_set_id
-             where os.code = 'GATE_DOCUMENT' and oi.is_active
+             where os.code = :set_code and (oi.is_active or not :active_only)
              order by oi.sort_order, oi.code
             """
-        )
+        ),
+        {"set_code": set_code, "active_only": active_only},
     ).mappings()
     return [dict(r) for r in rows]
 
@@ -1141,7 +1145,8 @@ def list_gate_documents(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
         text(
             """
             select d.id, d.gs_id, d.doc_type_code, d.doc_type_label, d.doc_no, d.doc_date,
-                   d.remarks, d.source_step, d.sort_order, d.accounts_alerted_at, d.created_at
+                   d.remarks, d.source_step, d.doc_source, d.sort_order, d.accounts_alerted_at,
+                   d.created_at
               from public.gs_gate_documents d
              where d.gs_id = :gs_id
              order by d.sort_order, d.created_at
@@ -1175,19 +1180,26 @@ def insert_gate_document(
     fields: dict[str, Any],
     sort_order: int,
     source_step: str = "S1_GATE",
+    doc_source: str | None = None,
 ) -> UUID:
     doc_id = session.execute(
         text(
             """
             insert into public.gs_gate_documents
                    (gs_id, doc_type_code, doc_type_label, doc_no, doc_date, remarks,
-                    source_step, sort_order)
+                    source_step, doc_source, sort_order)
             values (:gs_id, :doc_type_code, :doc_type_label, :doc_no, :doc_date, :remarks,
-                    :source_step, :sort_order)
+                    :source_step, :doc_source, :sort_order)
             returning id
             """
         ),
-        {"gs_id": gs_id, "sort_order": sort_order, "source_step": source_step, **fields},
+        {
+            "gs_id": gs_id,
+            "sort_order": sort_order,
+            "source_step": source_step,
+            "doc_source": doc_source,
+            **fields,
+        },
     ).scalar_one()
     return UUID(str(doc_id))
 

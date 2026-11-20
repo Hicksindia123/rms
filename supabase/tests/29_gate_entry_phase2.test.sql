@@ -3,7 +3,7 @@
 -- count + G-02 per carton · AMD-04 gate document rows and GATE_DOC files · AMD-05 settings.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(24);
+select plan(26);
 
 select has_table('public', 'gs_gate_documents', 'gs_gate_documents exists');
 select ok(
@@ -82,10 +82,20 @@ select throws_like(
   $$insert into public.gs_gate_documents (gs_id, doc_type_code, doc_type_label, doc_no)
     select id, 'INVOICE', 'Invoice', 'INV-1' from public.goods_slips where gs_no = 'PGTAP-PH2-1'$$,
   '%gs_gate_documents_formal_fields%', 'DD r5: an invoice row needs number and date');
+-- DEC-62 (gate v4): the courier slip is a TRANSPORT document (option set GATE_TRANSPORT_DOCUMENT),
+-- party documents are image only; a party row is what excludes the "no document" flag.
 select lives_ok(
-  $$insert into public.gs_gate_documents (gs_id, doc_type_code, doc_type_label, doc_no)
-    select id, 'COURIER_SLIP', 'Courier Slip', 'AWB-1' from public.goods_slips where gs_no = 'PGTAP-PH2-1'$$,
-  'AMD-04: a courier slip row is accepted at the gate');
+  $$insert into public.gs_gate_documents (gs_id, doc_type_code, doc_type_label, doc_source)
+    select id, 'COURIER_SLIP', 'Courier Slip', 'TRANSPORT' from public.goods_slips where gs_no = 'PGTAP-PH2-1'$$,
+  'AMD-04 / DEC-62: a courier slip row is accepted at the gate');
+select throws_like(
+  $$insert into public.gs_gate_documents (gs_id, doc_type_code, doc_type_label, doc_source, doc_no)
+    select id, 'INVOICE', 'Invoice', 'PARTY', 'INV-1' from public.goods_slips where gs_no = 'PGTAP-PH2-1'$$,
+  '%gs_gate_documents_v4_image_only%', 'DEC-62: a gate v4 party row has no document number');
+select lives_ok(
+  $$insert into public.gs_gate_documents (gs_id, doc_type_code, doc_type_label, doc_source)
+    select id, 'INVOICE', 'Invoice', 'PARTY' from public.goods_slips where gs_no = 'PGTAP-PH2-1'$$,
+  'DEC-62: a gate v4 party row is a type + picture only');
 select throws_like(
   $$update public.goods_slips set missing_documentation = true where gs_no = 'PGTAP-PH2-1'$$,
   '%remove the document rows%', 'DEC-03: "no document" cannot be set while rows exist');

@@ -157,16 +157,16 @@ def test_20_concurrent_creates_get_unique_sequential_numbers(
     service = GateInwardService(UnitOfWork(_factory(db_engine), request_id="concurrency"))
     payload = GateInwardIn(
         party_id=committed_setup["party_id"],
-        # Form v2: E-Commerce has no gate entry number (DEC-39), so 20 identical payloads are valid.
+        # Published gate form v4 (DEC-62; committed data, so not the v3 test default). E-Commerce
+        # has no gate entry number (DEC-39), so 20 identical payloads are valid.
         values={
             "return_type": "ECOMMERCE_RETURN",
             "carton_count": 1,
             "delivery_mode": "COURIER_PARCEL",
             "courier_name": "DTDC",
             "docket_no": "D-1",
-            "no_document": False,
         },
-        documents=[GateDocumentIn(doc_type_code="HANDWRITTEN_SLIP", remarks="slip")],
+        documents=[GateDocumentIn(doc_type_code="HANDWRITTEN_SLIP", source="PARTY")],
     )
 
     def create(i: int) -> dict[str, Any]:

@@ -62,6 +62,8 @@ export interface GateForm {
   contact_phone_pattern: string | null;
   party_state_station_autofill: boolean;
   document_types: GateDocumentType[];
+  /** DEC-62 (gate v4): "Documents From Transport" types (GATE_TRANSPORT_DOCUMENT). */
+  transport_document_types?: GateDocumentType[];
   /** Business date (DEC-38: gate entry date never later than this). */
   business_today: string | null;
   /** DEC-38 `gate.max_backdate_days`; null = unlimited. */
@@ -86,6 +88,8 @@ export interface GateDocument {
   doc_date: string | null;
   remarks: string | null;
   source_step: string;
+  /** DEC-62: PARTY / TRANSPORT (gate v4), CARTON (P3); null = captured before gate v4. */
+  doc_source?: 'PARTY' | 'TRANSPORT' | 'CARTON' | null;
   accounts_alerted_at: string | null;
   files: GateDocumentFile[];
 }
@@ -96,6 +100,8 @@ export interface GateDocumentInput {
   doc_no?: string | null;
   doc_date?: string | null;
   remarks?: string | null;
+  /** DEC-62 (gate v4): who sent the document; omitted = PARTY. */
+  source?: 'PARTY' | 'TRANSPORT';
 }
 
 export interface GoodsSlip {

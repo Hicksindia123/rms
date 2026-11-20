@@ -32,6 +32,10 @@ FORM_CORE_FIELDS: dict[str, dict[str, CoreFieldDef]] = {
         "carton_count": CoreFieldDef("carton_count", "number", guarded_required=True),
         "delivery_mode": CoreFieldDef("delivery_mode", "dropdown", guarded_required=True),
         "no_document": CoreFieldDef("no_document", "checkbox", guarded_required=False),
+        # DEC-62 (form v4): marks the image-only party / transport documents; optional.
+        "transport_document": CoreFieldDef(
+            "transport_document", "dropdown", guarded_required=False
+        ),
         "gs_creation_format": CoreFieldDef("gs_creation_format", "dropdown", guarded_required=True),
     },
     "S1_UNBOXING": {
