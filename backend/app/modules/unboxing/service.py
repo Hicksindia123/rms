@@ -430,7 +430,14 @@ class UnboxingService:
             party_name=self._party_name(session, user, perms, gs_id),
             doc_ids=[doc_id],
         )
-        log.info("carton_document_added", gs_id=str(gs_id), doc_type=row["doc_type_code"])
+        # Q27 (user 2026-11-20): a document found in a carton clears the gate's "no document" tag.
+        cleared = gs_service.clear_no_document_flag(session, gs, by=user.id)
+        log.info(
+            "carton_document_added",
+            gs_id=str(gs_id),
+            doc_type=row["doc_type_code"],
+            no_document_cleared=cleared,
+        )
         return self._doc_row_out(session, gs_id, doc_id)
 
     def update_carton_document(
@@ -463,11 +470,13 @@ class UnboxingService:
         self, user: CurrentUser, perms: EffectivePermissions, gs_id: UUID, doc_id: UUID
     ) -> None:
         with self._uow.transaction(user.id) as session:
-            self._lock_unboxing(session, user, perms, gs_id)
-            self._carton_row(session, gs_id, doc_id)
+            gs = self._lock_unboxing(session, user, perms, gs_id)
+            doc = self._carton_row(session, gs_id, doc_id)
             gs_service.set_audit_reason(session, "Carton-opening document row removed")
             gs_service.delete_document_row(session, doc_id)
             gs_service.set_audit_reason(session, None)
+            if doc["doc_source"] == gs_service.SOURCE_CARTON:
+                gs_service.restore_no_document_flag(session, gs)  # Q27
 
     def _carton_row(self, session: Session, gs_id: UUID, doc_id: UUID) -> dict[str, Any]:
         doc = gs_service.get_document_row(session, gs_id, doc_id)

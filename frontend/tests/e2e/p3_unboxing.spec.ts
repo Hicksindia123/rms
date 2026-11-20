@@ -105,6 +105,9 @@ test.describe('P3 unboxing: video per carton + optional carton document', () => 
       });
       await expect(page.getByTestId('carton-document')).toContainText('File 1');
       await expect(checklist).toContainText('added');
+      // Q27: the carton document cleared the gate's "No Documents From Party" tag.
+      await expect(page.getByTestId('no-document-cleared')).toBeVisible();
+      await expect(page.getByTestId('no-party-documents')).toHaveCount(0);
       await expectNoHorizontalOverflow(page);
       await page.screenshot({
         path: `test-results/p3/${vp.name}-unboxing-ready.png`,

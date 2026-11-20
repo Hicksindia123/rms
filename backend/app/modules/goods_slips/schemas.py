@@ -149,6 +149,8 @@ class GoodsSlipOut(BaseModel):
     gate_doc_date: date | None
     gate_doc_remarks: str | None
     missing_documentation: bool
+    # Q27: set when a document found in a carton cleared the gate's "no document" tag.
+    missing_documentation_cleared_at: datetime | None = None
     category_code: str | None
     # P2-04: the Step-3 choice is kept when a rejected CSR is converted to RO (BR-08).
     original_category_code: str | None = None

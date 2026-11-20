@@ -217,6 +217,15 @@ describe('UnboxingPage (P3: G-02 = video per carton, DEC-63)', () => {
     expect(items[0]?.documentId).toBe('doc-c');
   });
 
+  it('says when the carton document cleared the gate "no document" tag (Q27)', async () => {
+    const st = state(READY, { gate_documents: [cartonDoc()] });
+    st.goods_slip.missing_documentation_cleared_at = '2026-11-20T10:00:00Z';
+    stateFn.mockResolvedValue(st);
+    render(<UnboxingPage gsId="gs-1" onBack={vi.fn()} onOpenGs={vi.fn()} onNext={vi.fn()} />);
+    expect(await screen.findByTestId('no-document-cleared')).toBeInTheDocument();
+    expect(screen.queryByTestId('no-party-documents')).toBeNull();
+  });
+
   it('shows the saved carton document instead of a second form', async () => {
     stateFn.mockResolvedValue(state(READY, { gate_documents: [cartonDoc()] }));
     render(<UnboxingPage gsId="gs-1" onBack={vi.fn()} onOpenGs={vi.fn()} onNext={vi.fn()} />);

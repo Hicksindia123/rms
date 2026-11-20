@@ -117,6 +117,8 @@ export interface UnboxingState {
     carton_count: number;
     box_count: number;
     missing_documentation: boolean;
+    /** Q27: a document found in a carton cleared the gate's "No Documents From Party" tag. */
+    missing_documentation_cleared_at?: string | null;
     gate_document_code: string | null;
     gate_document_label: string | null;
   };

@@ -136,7 +136,13 @@ export function UnboxingPage({ gsId, onBack, onOpenGs, onNext }: Props) {
       {gs.missing_documentation ? (
         <div className="banner" role="status" data-testid="no-party-documents">
           No documents from party were recorded at the gate; Accounts has been alerted. If a carton
-          holds a document, add it below.
+          holds a document, add it below: that clears the tag.
+        </div>
+      ) : gs.missing_documentation_cleared_at ? (
+        <div className="banner banner--success" role="status" data-testid="no-document-cleared">
+          The gate recorded &ldquo;No Documents From Party&rdquo;; the document found in a carton
+          cleared it ({formatDateTime(gs.missing_documentation_cleared_at)}). Removing that document
+          brings the tag back.
         </div>
       ) : null}
 

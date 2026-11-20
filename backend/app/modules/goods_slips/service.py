@@ -2100,6 +2100,29 @@ def add_document_row(
     )
 
 
+def clear_no_document_flag(session: Session, gs: dict[str, Any], *, by: UUID) -> bool:
+    """Q27 (user 2026-11-20): a document found in a carton clears the gate's "No Documents From
+    Party" tag (BR-03 flag). Audited; the DB checks the stamp (status UNBOXING, CARTON row).
+    Returns True when the flag was cleared."""
+    if not gs["missing_documentation"]:
+        return False
+    set_audit_reason(session, "Document found in a carton: 'No Documents From Party' cleared (Q27)")
+    repo.set_no_document_cleared(session, gs["id"], by=by)
+    set_audit_reason(session, None)
+    return True
+
+
+def restore_no_document_flag(session: Session, gs: dict[str, Any]) -> bool:
+    """Q27: the carton document that cleared the tag was removed during unboxing, so nothing from
+    the party is recorded again: the flag comes back. Returns True when it was restored."""
+    if gs.get("missing_documentation_cleared_at") is None:
+        return False
+    set_audit_reason(session, "Carton document removed: 'No Documents From Party' restored (Q27)")
+    repo.set_no_document_cleared(session, gs["id"], by=None)
+    set_audit_reason(session, None)
+    return True
+
+
 def get_document_row(session: Session, gs_id: UUID, doc_id: UUID) -> dict[str, Any]:
     doc = next((d for d in repo.list_gate_documents(session, gs_id) if d["id"] == doc_id), None)
     if doc is None:

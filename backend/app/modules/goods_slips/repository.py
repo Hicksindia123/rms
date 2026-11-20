@@ -28,7 +28,8 @@ def get_goods_slip(
           delivery_mode_code, courier_name, docket_no, vehicle_no, transporter_id,
           rep_name, rep_contact, box_count, carton_count, return_type_code, gate_entry_date,
           gate_entry_no, gate_document_code, gate_doc_no,
-          gate_doc_date, gate_doc_remarks, missing_documentation, category_code,
+          gate_doc_date, gate_doc_remarks, missing_documentation,
+          missing_documentation_cleared_at, category_code,
           original_category_code, status, has_open_pendency, has_discrepancy,
           has_hazard, has_rejections, closed_at, closure_type, created_at,
           created_by, updated_at
@@ -302,6 +303,7 @@ _GS_VIEW_SELECT = """
            g.return_type_code, rt.label as return_type_label, g.gate_entry_date, g.gate_entry_no,
            g.gate_document_code, gd.label as gate_document_label,
            g.gate_doc_no, g.gate_doc_date, g.gate_doc_remarks, g.missing_documentation,
+           g.missing_documentation_cleared_at,
            g.category_code, g.original_category_code, g.csr_commercial_path,
            g.categorized_at, g.has_open_pendency, g.has_discrepancy, g.has_hazard,
            g.has_rejections, g.cancelled_at, g.cancel_reason,
@@ -1138,6 +1140,23 @@ def gate_document_types(
         {"set_code": set_code, "active_only": active_only},
     ).mappings()
     return [dict(r) for r in rows]
+
+
+def set_no_document_cleared(session: Session, gs_id: UUID, *, by: UUID | None) -> None:
+    """Q27: clear (by = the user) or restore (by = None) the "No Documents From Party" flag."""
+    session.execute(
+        text(
+            """
+            update public.goods_slips
+               set missing_documentation = (cast(:by as uuid) is null),
+                   missing_documentation_cleared_at = case when cast(:by as uuid) is null
+                                                           then null else now() end,
+                   missing_documentation_cleared_by = cast(:by as uuid)
+             where id = :gs_id
+            """
+        ),
+        {"gs_id": gs_id, "by": by},
+    )
 
 
 def list_gate_documents(session: Session, gs_id: UUID) -> list[dict[str, Any]]:

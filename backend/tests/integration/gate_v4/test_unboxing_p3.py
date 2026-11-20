@@ -207,15 +207,33 @@ async def test_carton_document_is_optional_typed_and_image_only(
     assert res.status_code == 200, res.text
 
 
-async def test_carton_document_on_a_gs_without_party_documents(
-    client: AsyncClient, actors: Actors, masters: Masters
+async def test_carton_document_clears_the_no_document_tag(
+    client: AsyncClient, actors: Actors, masters: Masters, db_conn: Connection
 ) -> None:
+    """Q27 (user 2026-11-20): a document found in a carton clears the gate's "No Documents From
+    Party" tag; removing it during unboxing restores the tag. Audited (G-17)."""
     gs_id = await _unboxing_gs(client, actors, masters, no_document=True)
-    res = await _carton_doc(client, actors.aman, gs_id, {"doc_type_code": "INVOICE"})
+    res = await _carton_doc(client, actors.aman, gs_id, {"doc_type_code": "HANDWRITTEN_SLIP"})
     assert res.status_code == 201, res.text
+    doc_id = res.json()["id"]
     state = (await client.get(f"/api/v1/gs/{gs_id}/unboxing", headers=_auth(actors.aman))).json()
-    # BR-03: the gate flag stays as recorded (open question to the user, P3 report).
+    assert state["goods_slip"]["missing_documentation"] is False
+    assert state["goods_slip"]["missing_documentation_cleared_at"] is not None
+    audit = fetch_all(
+        db_conn,
+        "select reason from public.audit_log where table_name = 'public.goods_slips' "
+        "and row_id = :g and reason like '%Q27%'",
+        g=gs_id,
+    )
+    assert audit, "the cleared tag is audited"
+
+    res = await client.delete(
+        f"/api/v1/gs/{gs_id}/carton-documents/{doc_id}", headers=_auth(actors.aman)
+    )
+    assert res.status_code == 204, res.text
+    state = (await client.get(f"/api/v1/gs/{gs_id}/unboxing", headers=_auth(actors.aman))).json()
     assert state["goods_slip"]["missing_documentation"] is True
+    assert state["goods_slip"]["missing_documentation_cleared_at"] is None
 
 
 async def test_carton_document_only_while_unboxing(
@@ -251,6 +269,14 @@ def test_db_carton_document_rules(db_conn: Connection) -> None:
     )
     with pytest.raises(DBAPIError, match="v4_image_only"), conn.begin_nested():
         conn.execute(insert, {"g": gs_id, "t": "INVOICE", "n": "INV-1"})
+    clear = text(
+        "update public.goods_slips set missing_documentation = false, "
+        "missing_documentation_cleared_at = now(), missing_documentation_cleared_by = created_by "
+        "where id = :g"
+    )
+    # Q27: the tag is cleared only by a carton document.
+    with pytest.raises(DBAPIError, match="Q27"), conn.begin_nested():
+        conn.execute(clear, {"g": gs_id})
     conn.execute(insert, {"g": gs_id, "t": "INVOICE", "n": None})  # flagged GS: allowed
     with pytest.raises(DBAPIError, match="one_carton_doc"), conn.begin_nested():
         conn.execute(insert, {"g": gs_id, "t": "DEBIT_NOTE", "n": None})

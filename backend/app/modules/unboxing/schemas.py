@@ -22,6 +22,8 @@ class UnboxingGs(BaseModel):
     carton_count: int  # AMD-03
     box_count: int  # deprecated mirror of carton_count
     missing_documentation: bool
+    # Q27: the gate recorded "No Documents From Party"; a carton document cleared it.
+    missing_documentation_cleared_at: datetime | None = None
     gate_document_code: str | None
     gate_document_label: str | None
 
