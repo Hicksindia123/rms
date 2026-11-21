@@ -87,6 +87,9 @@ Questions not answered on 2026-11-20 (Q1, Q2, Q4–Q7, Q9, Q13–Q16, Q18–Q20)
 | Q27 | (P3 report) The gate recorded "No Documents From Party", then a document turns up in a carton. Clear the tag? | Keep the gate record | **User 2026-11-20: yes, clear it** when a carton document is recorded at unboxing (restored if that document is removed during unboxing). Built in migration 20261120000400 |
 | Q28 | (P3 report) Revoke the RM's `unboxing.approve` (only used by the retired exception)? | Revoke | **User 2026-11-20: yes** |
 | Q26 | HICKS logo on the Transfer Slip / Replacement Slip / Dispatch Slip PDFs: no logo file exists in the system, and the PDF code cannot draw images yet. Can you supply the logo (PNG/SVG)? | Upload it in Admin → Branding. Until then the PDFs show the company name in text | **User 2026-11-20: use the logo file in the repo root** (`PNG LOGO HICKS.png`, 214×76 PNG) in the PDFs |
+| Q29 | (P6 report) A GS on slips of several stores: may a store start routing (P7) once its own slip is acknowledged, before the other stores acknowledge? | Yes, per store | **User 2026-11-21: yes**, each Intermediate Store starts its work after its own acknowledgement |
+| Q30 | (P6 report) Name of the new GS status STORE_ACKNOWLEDGED | "Acknowledged by Store" | **User 2026-11-21: confirmed** |
+| Q31 | (P6 report) The STORE_ROUTING task has no screen until P7 | P7 handles it | **User 2026-11-21: P7 handles it** |
 
 ---
 
