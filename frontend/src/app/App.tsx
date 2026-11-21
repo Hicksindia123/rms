@@ -291,6 +291,17 @@ const DepartmentIssuePage = lazy(() =>
     default: m.DepartmentIssuePage,
   })),
 );
+// DEC-67 (P7): department routing by the Intermediate Store user.
+const StoreRoutingQueuePage = lazy(() =>
+  import('@/features/department-routing/StoreRoutingQueuePage').then((m) => ({
+    default: m.StoreRoutingQueuePage,
+  })),
+);
+const StoreRoutingGsPage = lazy(() =>
+  import('@/features/department-routing/StoreRoutingGsPage').then((m) => ({
+    default: m.StoreRoutingGsPage,
+  })),
+);
 const DepartmentIssueNotePrintPage = lazy(() =>
   import('@/features/department-routing/DepartmentIssueNotePrintPage').then((m) => ({
     default: m.DepartmentIssueNotePrintPage,
@@ -335,6 +346,7 @@ type NavTab =
   | 'dispatch'
   | 'department-routing'
   | 'department-issue'
+  | 'store-routing'
   | 'transfer-slips'
   | 'department-receiving'
   | 'accounts-entry'
@@ -381,6 +393,7 @@ const STATIC_TABS: ReadonlySet<string> = new Set([
   'dispatch',
   'department-routing',
   'department-issue',
+  'store-routing',
   'transfer-slips',
   'department-receiving',
   'accounts-entry',
@@ -1488,7 +1501,9 @@ function Shell() {
                     <DepartmentIssueNotePrintPage
                       routingId={second}
                       onBack={() => {
-                        navigate('/department-routing');
+                        // DEC-67: back to where the DIN was opened (store routing or RM queue).
+                        if (window.history.length > 1) window.history.back();
+                        else navigate('/department-routing');
                       }}
                     />
                   ) : second === 'receiving' ? (
@@ -1568,6 +1583,43 @@ function Shell() {
                   <EmptyState
                     title="Access Restricted"
                     hint="You do not have permission to view Transfer Slips."
+                  />
+                )}
+              </RequireAuth>
+            )}
+            {activeTab === 'store-routing' && (
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
+                {can('store_routing', 'view') || isSuperAdmin ? (
+                  second ? (
+                    // DEC-67: one goods slip; the store routes its own lines (saving = issue).
+                    <StoreRoutingGsPage
+                      key={second}
+                      gsId={second}
+                      onBack={() => {
+                        navigate('/store-routing');
+                      }}
+                      onOpenGs={(id: string) => {
+                        navigate(`/gs/${id}`);
+                      }}
+                      onOpenPrint={(id: string) => {
+                        navigate(`/department-routing/${id}/print`);
+                      }}
+                    />
+                  ) : (
+                    <StoreRoutingQueuePage
+                      onOpenGs={(id: string) => {
+                        navigate(`/store-routing/${id}`);
+                      }}
+                    />
+                  )
+                ) : (
+                  <EmptyState
+                    title="Access Restricted"
+                    hint="You do not have permission to view Department Routing."
                   />
                 )}
               </RequireAuth>

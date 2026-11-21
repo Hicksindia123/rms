@@ -78,6 +78,9 @@ export interface RoutingPlanLine {
   issued_by_name?: string | null;
   cancelled_at?: string | null;
   cancel_reason?: string | null;
+  /** DEC-67: the Intermediate Store that routed the pieces (null = legacy RM plan). */
+  store_id?: string | null;
+  store_code?: string | null;
 }
 
 export interface RoutingPlanOut {
@@ -138,6 +141,9 @@ export interface DepartmentRoutingOut {
   /** DEC-55: where the Store issue moved the stock (older routings: Technician Bench). */
   location_code?: string | null;
   location_name?: string | null;
+  /** DEC-67: the Intermediate Store the pieces left (null = legacy Intermediate Store). */
+  store_code?: string | null;
+  store_name?: string | null;
   lines: DepartmentRoutingLineOut[];
 }
 
@@ -309,4 +315,115 @@ export interface GsRoutingState {
   updated_at: string;
   items: GsRoutingItemState[];
   plan_lines: RoutingPlanLine[];
+}
+
+// ---------------------------------------------------------------------------------------------
+// DEC-67 (Phase P7): department routing by the Intermediate Store user. Shapes mirror
+// backend/app/modules/department_routing/schemas.py (Store* models).
+// ---------------------------------------------------------------------------------------------
+export type StoreRoutingStatus =
+  'AWAITING_ACKNOWLEDGEMENT' | 'ROUTING_PENDING' | 'AT_DEPARTMENTS' | 'READY_FOR_ANALYSIS';
+
+export interface StoreProgress {
+  store_id: string;
+  store_code: string;
+  store_name: string;
+  total_qty: number;
+  unrouted_qty: number;
+  at_dept_qty: number;
+  no_work_qty: number;
+  status: StoreRoutingStatus;
+  /** The signed-in user acts for this store. */
+  is_mine: boolean;
+}
+
+export interface StoreRoutingDepartment {
+  field_id: string;
+  code: string;
+  label: string;
+  /** "Issue to Store": no stock move, ready for analysis. */
+  is_no_work: boolean;
+}
+
+export interface StoreRoutingCondition {
+  field_id: string;
+  field_code: string;
+  field_label: string;
+  original_qty: number;
+  current_qty: number;
+  routable_qty: number;
+}
+
+export interface StoreRoutingItem {
+  item_id: string;
+  line_no: number;
+  item_name: string;
+  sku_code?: string | null;
+  store?: { id: string; code: string; name: string } | null;
+  is_mine: boolean;
+  acknowledged: boolean;
+  received_qty: number;
+  routable_qty: number;
+  at_departments_qty: number;
+  conditions: StoreRoutingCondition[];
+  allowed_departments: StoreRoutingDepartment[];
+  routed: RoutingPlanLine[];
+}
+
+export interface StoreDin {
+  id: string;
+  routing_no: string;
+  department_code: string;
+  department_label: string;
+  status: string;
+  store_id?: string | null;
+  store_code?: string | null;
+  qty_sent: number;
+  qty_received: number;
+  dispatched_at: string;
+  dispatched_by_name?: string | null;
+}
+
+export interface StoreRoutingGs {
+  gs_id: string;
+  gs_no: string;
+  status: string;
+  party_name?: string | null;
+  station_name?: string | null;
+  stores: StoreProgress[];
+  items: StoreRoutingItem[];
+  dins: StoreDin[];
+  can_route: boolean;
+}
+
+export interface StoreRoutingQueueRow {
+  gs_id: string;
+  gs_no: string;
+  status: string;
+  party_name?: string | null;
+  station_name?: string | null;
+  since?: string | null;
+  stores: StoreProgress[];
+}
+
+export interface StoreRoutingLineIn {
+  gs_item_id: string;
+  source_bucket_field_id: string | null;
+  department_field_id: string;
+  qty: number;
+  notes?: string | null;
+}
+
+export interface StoreRoutingIn {
+  store_id: string;
+  lines: StoreRoutingLineIn[];
+  remarks?: string | null;
+}
+
+export interface StoreRoutingResult {
+  gs_id: string;
+  gs_status: string;
+  store: StoreProgress;
+  dins: StoreDin[];
+  no_work_qty: number;
 }

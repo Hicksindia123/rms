@@ -190,7 +190,7 @@ _PLAN_LINE_COLS = """
     p.department_field_id, p.department_code, p.department_label, p.is_no_work,
     p.qty, p.status, p.notes, p.planned_at, pb.full_name as planned_by_name,
     p.routing_id, r.routing_no, p.issued_at, ib.full_name as issued_by_name,
-    p.cancelled_at, p.cancel_reason
+    p.cancelled_at, p.cancel_reason, p.store_id, ist.code as store_code
 """
 _PLAN_LINE_JOINS = """
     join public.goods_slips gs on gs.id = p.gs_id
@@ -199,6 +199,7 @@ _PLAN_LINE_JOINS = """
     left join public.department_routings r on r.id = p.routing_id
     left join public.profiles pb on pb.id = p.planned_by
     left join public.profiles ib on ib.id = p.issued_by
+    left join public.intermediate_stores ist on ist.id = p.store_id
 """
 
 
@@ -212,20 +213,24 @@ def insert_plan_line(
     qty: int,
     notes: str | None,
     planned_by: UUID,
+    store_id: UUID | None = None,
 ) -> UUID:
-    """Insert one plan line. Snapshots, is_no_work and status are set by the DB guard."""
+    """Insert one plan line. Snapshots, is_no_work and status are set by the DB guard.
+    `store_id` set = DEC-67 store routing; None = legacy RM plan (DEC-55)."""
     value = session.execute(
         text(
             """
             insert into public.department_routing_plan_lines
               (gs_id, gs_item_id, source_bucket_field_id, department_field_id,
-               department_code, department_label, qty, notes, planned_by)
+               department_code, department_label, qty, notes, planned_by, store_id)
             values
-              (:gs_id, :gs_item_id, :bucket_id, :dept_id, '-', '-', :qty, :notes, :planned_by)
+              (:gs_id, :gs_item_id, :bucket_id, :dept_id, '-', '-', :qty, :notes, :planned_by,
+               :store_id)
             returning id
             """
         ),
         {
+            "store_id": store_id,
             "gs_id": gs_id,
             "gs_item_id": gs_item_id,
             "bucket_id": source_bucket_field_id,
@@ -727,16 +732,18 @@ def create_department_routing(
     location_id: UUID,
     remarks: str | None = None,
     lines: list[dict[str, Any]],
+    store_id: UUID | None = None,
 ) -> dict[str, Any]:
-    """Insert a new department routing header and lines. Each line dict gets its new `id`."""
+    """Insert a new department routing header and lines. Each line dict gets its new `id`.
+    `store_id` set = DEC-67 (the store's location is the source); None = legacy (DEC-55)."""
     stmt_ins = text(
         """
         insert into public.department_routings (
           routing_no, gs_id, department_field_id, department_code, department_label,
-          status, dispatched_by, notes, location_id
+          status, dispatched_by, notes, location_id, store_id
         ) values (
           :routing_no, :gs_id, :dept_field_id, :dept_code, :dept_label,
-          'DISPATCHED', :dispatched_by, :notes, :location_id
+          'DISPATCHED', :dispatched_by, :notes, :location_id, :store_id
         )
         returning id, routing_no, gs_id, department_field_id, department_code, department_label,
                   status, dispatched_at, dispatched_by, notes as remarks
@@ -754,6 +761,7 @@ def create_department_routing(
                 "dispatched_by": dispatched_by,
                 "notes": remarks,
                 "location_id": location_id,
+                "store_id": store_id,
             },
         )
         .mappings()
@@ -806,11 +814,14 @@ def get_routing(session: Session, routing_id: UUID) -> dict[str, Any] | None:
           u.full_name as dispatched_by_name,
           r.notes as remarks,
           coalesce(loc.code, 'TECHNICIAN_BENCH') as location_code,
-          coalesce(loc.name, 'Technician Bench') as location_name
+          coalesce(loc.name, 'Technician Bench') as location_name,
+          ist.code as store_code,
+          ist.name as store_name
         from public.department_routings r
         join public.goods_slips gs on gs.id = r.gs_id
         left join public.profiles u on u.id = r.dispatched_by
         left join public.inventory_locations loc on loc.id = r.location_id
+        left join public.intermediate_stores ist on ist.id = r.store_id
         where r.id = :id
         """
     )
@@ -1070,3 +1081,182 @@ def get_gs_department_legs(session: Session, gs_id: UUID) -> list[dict[str, Any]
         legs.append(leg)
 
     return legs
+
+
+# --- DEC-67 (Phase P7): department routing by the Intermediate Store user ------------------------
+
+
+def get_store(session: Session, store_id: UUID) -> dict[str, Any] | None:
+    row = (
+        session.execute(
+            text(
+                """
+                select s.id, s.code, s.name, s.role_id, s.location_id, s.is_active,
+                       l.code as location_code
+                  from public.intermediate_stores s
+                  join public.inventory_locations l on l.id = s.location_id
+                 where s.id = :id
+                """
+            ),
+            {"id": store_id},
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row else None
+
+
+def user_store_role_ids(session: Session, user_id: UUID) -> list[UUID]:
+    """Stores whose own role the user holds (Management is not a store user, DEC-66)."""
+    rows = session.execute(
+        text(
+            """
+            select s.id from public.intermediate_stores s
+              join public.user_roles ur on ur.role_id = s.role_id
+             where ur.user_id = :uid
+             order by s.sort_order, s.code
+            """
+        ),
+        {"uid": user_id},
+    ).scalars()
+    return [UUID(str(r)) for r in rows]
+
+
+def user_acts_for_store(session: Session, user_id: UUID, store_id: UUID) -> bool:
+    return bool(
+        session.execute(
+            text("select rms_private.user_acts_for_store(:u, :s)"), {"u": user_id, "s": store_id}
+        ).scalar_one()
+    )
+
+
+def get_routing_gs(session: Session, gs_id: UUID) -> dict[str, Any] | None:
+    row = (
+        session.execute(
+            text(
+                """
+                select g.id, g.gs_no, g.status, g.item_field_profile_version_id,
+                       pa.name as party_name, st.name as station_name
+                  from public.goods_slips g
+                  left join public.parties pa on pa.id = g.party_id
+                  left join public.stations st on st.id = g.station_id
+                 where g.id = :id
+                """
+            ),
+            {"id": gs_id},
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row else None
+
+
+def store_progress(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
+    """DEC-67: per Intermediate Store on the GS (DB function, also used by the journey queue)."""
+    rows = session.execute(
+        text(
+            """
+            select store_id, store_code, store_name, total_qty, unrouted_qty, at_dept_qty,
+                   no_work_qty, status
+              from rms_private.gs_store_routing_progress(:g)
+            """
+        ),
+        {"g": gs_id},
+    ).mappings()
+    return [dict(r) for r in rows]
+
+
+def routing_items(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
+    """Physical lines of the GS with their store (live transfer slips), acknowledgement and the
+    pieces still to route / at departments (the DB helpers the guards use)."""
+    rows = session.execute(
+        text(
+            """
+            select gi.id as item_id, gi.line_no, gi.product_id, gi.received_qty,
+                   coalesce(gi.product_name_snapshot, pr.name, 'Item') as item_name,
+                   coalesce(gi.product_code_snapshot, pr.code) as sku_code,
+                   s.id as store_id, s.code as store_code, s.name as store_name,
+                   coalesce(rms_private.gs_item_acknowledged(gi.id), false) as acknowledged,
+                   rms_private.gs_item_routable_qty(gi.id) as routable_qty,
+                   coalesce((select sum(rl.qty_sent - rl.qty_received)
+                               from public.department_routing_lines rl
+                               join public.department_routings r on r.id = rl.routing_id
+                              where rl.gs_item_id = gi.id
+                                and r.status in ('DISPATCHED', 'PARTIALLY_RECEIVED')), 0)::int
+                     as at_departments_qty
+              from public.gs_items gi
+              left join public.products pr on pr.id = gi.product_id
+              left join public.intermediate_stores s on s.id = rms_private.gs_item_store(gi.id)
+             where gi.gs_id = :g and gi.removed_at is null and gi.received_qty > 0
+             order by gi.line_no
+            """
+        ),
+        {"g": gs_id},
+    ).mappings()
+    return [dict(r) for r in rows]
+
+
+def allowed_departments(
+    session: Session, product_id: UUID, version_id: UUID | None
+) -> list[dict[str, Any]]:
+    """DEC-67 (P0 F9): the product's departments under the GS's pinned profile version."""
+    rows = session.execute(
+        text(
+            """
+            select field_id, code, label, sort_order,
+                   rms_private.department_is_no_work(code) as is_no_work
+              from rms_private.resolve_item_field_profile(:product_id, :version_id)
+             where field_group = 'DEPARTMENT'
+             order by sort_order asc, label asc
+            """
+        ),
+        {"product_id": product_id, "version_id": version_id},
+    ).mappings()
+    return [dict(r) for r in rows]
+
+
+def list_gs_dins(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
+    rows = session.execute(
+        text(
+            """
+            select r.id, r.routing_no, r.department_code, r.department_label, r.status,
+                   r.store_id, s.code as store_code, r.dispatched_at,
+                   u.full_name as dispatched_by_name,
+                   coalesce(sum(rl.qty_sent), 0)::int as qty_sent,
+                   coalesce(sum(rl.qty_received), 0)::int as qty_received
+              from public.department_routings r
+              join public.department_routing_lines rl on rl.routing_id = r.id
+              left join public.intermediate_stores s on s.id = r.store_id
+              left join public.profiles u on u.id = r.dispatched_by
+             where r.gs_id = :g
+             group by r.id, s.code, u.full_name
+             order by r.dispatched_at, r.routing_no
+            """
+        ),
+        {"g": gs_id},
+    ).mappings()
+    return [dict(r) for r in rows]
+
+
+def store_routing_queue(session: Session, statuses: tuple[str, ...]) -> list[dict[str, Any]]:
+    """GSs on the Intermediate Stores (P6/P7 statuses) with the time their first slip was
+    acknowledged. The per-store progress is read per GS by the service."""
+    rows = session.execute(
+        text(
+            """
+            select g.id as gs_id, g.gs_no, g.status, pa.name as party_name,
+                   st.name as station_name,
+                   (select min(s.acknowledged_at)
+                      from public.transfer_slip_gs tg
+                      join public.transfer_slips s on s.id = tg.slip_id
+                     where tg.gs_id = g.id and s.status = 'ACKNOWLEDGED') as since
+              from public.goods_slips g
+              left join public.parties pa on pa.id = g.party_id
+              left join public.stations st on st.id = g.station_id
+             where g.status = any(:statuses)
+             order by since nulls last, g.gs_no
+            """
+        ),
+        {"statuses": list(statuses)},
+    ).mappings()
+    return [dict(r) for r in rows]

@@ -99,6 +99,9 @@ class RoutingPlanLineOut(BaseModel):
     issued_by_name: str | None = None
     cancelled_at: datetime | None = None
     cancel_reason: str | None = None
+    # DEC-67: the Intermediate Store that routed the pieces (None = legacy RM plan, DEC-55).
+    store_id: UUID | None = None
+    store_code: str | None = None
 
 
 class RoutingPlanOut(BaseModel):
@@ -165,6 +168,9 @@ class DepartmentRoutingOut(BaseModel):
     # DEC-55: where the Store issue moved the stock (legacy routings: Technician Bench).
     location_code: str | None = None
     location_name: str | None = None
+    # DEC-67: the Intermediate Store the pieces left (None = legacy Intermediate Store).
+    store_code: str | None = None
+    store_name: str | None = None
     lines: list[DepartmentRoutingLineOut] = Field(default_factory=list)
 
 
@@ -315,3 +321,136 @@ class ReceivingQueueItemOut(BaseModel):
     total_sent: int
     total_received: int
     total_pending: int
+
+
+# ---------------------------------------------------------------------------
+# DEC-67 (Phase P7): department routing by the Intermediate Store user
+# ---------------------------------------------------------------------------
+class StoreRoutingLineIn(BaseModel):
+    gs_item_id: UUID
+    # The current condition the pieces come from (required when the item is split, DEC-56).
+    source_bucket_field_id: UUID | None = None
+    department_field_id: UUID
+    qty: int = Field(gt=0, le=100_000, description="Pieces routed to the department")
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class StoreRoutingIn(BaseModel):
+    """One routing of one store's goods of a GS. Saving is the issue (DIN per department)."""
+
+    store_id: UUID
+    lines: list[StoreRoutingLineIn] = Field(min_length=1, max_length=500)
+    remarks: str | None = Field(default=None, max_length=500)
+
+
+class StoreRefOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    code: str
+    name: str
+
+
+class StoreProgressOut(BaseModel):
+    """DEC-67: one Intermediate Store's part of a GS."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    store_id: UUID
+    store_code: str
+    store_name: str
+    total_qty: int
+    unrouted_qty: int
+    at_dept_qty: int
+    no_work_qty: int
+    # AWAITING_ACKNOWLEDGEMENT | ROUTING_PENDING | AT_DEPARTMENTS | READY_FOR_ANALYSIS
+    status: str
+    # The signed-in user acts for this store (may route its lines).
+    is_mine: bool = False
+
+
+class StoreRoutingDepartmentOut(BaseModel):
+    """A department allowed for the product by the GS's pinned profile version (DEC-59, F9)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    field_id: UUID
+    code: str
+    label: str
+    is_no_work: bool
+
+
+class StoreRoutingConditionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    field_id: UUID
+    field_code: str
+    field_label: str
+    original_qty: int
+    current_qty: int
+    routable_qty: int
+
+
+class StoreRoutingItemOut(BaseModel):
+    item_id: UUID
+    line_no: int
+    item_name: str
+    sku_code: str | None = None
+    store: StoreRefOut | None = None
+    is_mine: bool
+    acknowledged: bool
+    received_qty: int
+    routable_qty: int
+    at_departments_qty: int
+    conditions: list[StoreRoutingConditionOut]
+    allowed_departments: list[StoreRoutingDepartmentOut]
+    routed: list[RoutingPlanLineOut]
+
+
+class StoreDinOut(BaseModel):
+    """A Department Issue Note of the GS (one per department per routing)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    routing_no: str
+    department_code: str
+    department_label: str
+    status: str
+    store_id: UUID | None = None
+    store_code: str | None = None
+    qty_sent: int
+    qty_received: int
+    dispatched_at: datetime
+    dispatched_by_name: str | None = None
+
+
+class StoreRoutingGsOut(BaseModel):
+    gs_id: UUID
+    gs_no: str
+    status: str
+    party_name: str | None = None
+    station_name: str | None = None
+    stores: list[StoreProgressOut]
+    items: list[StoreRoutingItemOut]
+    dins: list[StoreDinOut]
+    # The user may route at least one line of this GS now.
+    can_route: bool
+
+
+class StoreRoutingQueueRowOut(BaseModel):
+    gs_id: UUID
+    gs_no: str
+    status: str
+    party_name: str | None = None
+    station_name: str | None = None
+    since: datetime | None = None
+    stores: list[StoreProgressOut]
+
+
+class StoreRoutingResultOut(BaseModel):
+    gs_id: UUID
+    gs_status: str
+    store: StoreProgressOut
+    dins: list[StoreDinOut]
+    no_work_qty: int

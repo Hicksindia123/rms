@@ -124,7 +124,9 @@ CATEGORISATION = "CATEGORISATION"  # AMD-08: counting submitted, category not ye
 LOCKED_STATUS = "PENDING_TRANSFER_SLIP"  # DEC-64: categorisation locked, stock booked
 SLIPS_STATUS = "TRANSFER_SLIP_GENERATED"  # DEC-65: on live transfer slips (voided on edit, Q10)
 ACK_STATUS = "STORE_ACKNOWLEDGED"  # DEC-66: slips acknowledged; still editable until routing
-EDITABLE_LOCKED = (LOCKED_STATUS, SLIPS_STATUS, ACK_STATUS)
+# DEC-67 (P7): department routing started; listed so an edit attempt answers EDIT_WINDOW_CLOSED.
+ROUTING_STATUS = "STORE_PROCESSING"
+EDITABLE_LOCKED = (LOCKED_STATUS, SLIPS_STATUS, ACK_STATUS, ROUTING_STATUS)
 HOLD_STATUS = "SALES_RETURN_HOLD"  # DEC-64 / Q11: Complete Sales Return parked
 STATUS_FOR_STEP = {
     "S1_CSR_APPROVAL": "CSR_APPROVAL_PENDING",

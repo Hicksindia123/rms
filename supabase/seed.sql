@@ -197,6 +197,7 @@ insert into _seed_role_matrix values
   -- Change plan Phase 6 (AMD-14, DEC-42). The Phase 6 migration granted these with a roles join,
   -- which inserts nothing on a fresh `supabase db reset` (roles are seed data); the grants live here.
   ('REPLACEMENT_MANAGER',        'department_routing', array['view','create','export']),
+  ('REPLACEMENT_MANAGER',        'store_routing',   array['view']),               -- DEC-67: progress of the stores
   ('INWARD_VERIFIER',            'department_routing', array['view','edit']),
   -- DEC-55 (gap plan G2): the Store Manager issues planned goods to departments (DIN).
   ('INTERMEDIATE_STORE_MANAGER', 'department_routing', array['view','approve']),
@@ -235,6 +236,7 @@ insert into _seed_role_matrix values
   ('MANAGEMENT',                 'dispatch',        array['view']),
   ('MANAGEMENT',                 'credit_notes',    array['view']),
   ('MANAGEMENT',                 'department_routing', array['view']),
+  ('MANAGEMENT',                 'store_routing',   array['view']),               -- DEC-67: sees store routing
   ('MANAGEMENT',                 'final_actions',   array['view']),
   ('MANAGEMENT',                 'ac_entry',        array['view']),
   ('MANAGEMENT',                 'intermediate_stores', array['view']),
@@ -245,6 +247,14 @@ insert into _seed_role_matrix values
   ('ISTORE_OP',                  'transfer_slips',  array['view','approve']),
   ('ISTORE_DT',                  'transfer_slips',  array['view','approve']),
   ('ISTORE_RI',                  'transfer_slips',  array['view','approve']),
+  -- DEC-67 (P7): route the store's own goods (saving = issue, DIN); department_routing view opens
+  -- the DIN print and the GS department legs.
+  ('ISTORE_OP',                  'store_routing',   array['view','create']),
+  ('ISTORE_DT',                  'store_routing',   array['view','create']),
+  ('ISTORE_RI',                  'store_routing',   array['view','create']),
+  ('ISTORE_OP',                  'department_routing', array['view']),
+  ('ISTORE_DT',                  'department_routing', array['view']),
+  ('ISTORE_RI',                  'department_routing', array['view']),
   ('ISTORE_OP',                  'dashboards',      array['view']),
   ('ISTORE_OP',                  'notifications',   array['view']),
   ('ISTORE_OP',                  'goods_slips',     array['view']),
@@ -379,6 +389,9 @@ select r.id, s.id, m.ord
     ('ISTORE_OP',                  'ACK_TRANSFER_SLIPS', 10),   -- DEC-66
     ('ISTORE_DT',                  'ACK_TRANSFER_SLIPS', 10),
     ('ISTORE_RI',                  'ACK_TRANSFER_SLIPS', 10),
+    ('ISTORE_OP',                  'STORE_DEPT_ROUTING', 20),   -- DEC-67
+    ('ISTORE_DT',                  'STORE_DEPT_ROUTING', 20),
+    ('ISTORE_RI',                  'STORE_DEPT_ROUTING', 20),
     ('ISTORE_OP',                  'GS_LIST',        100),
     ('ISTORE_DT',                  'GS_LIST',        100),
     ('ISTORE_RI',                  'GS_LIST',        100)
@@ -617,6 +630,7 @@ from (values
   ('PENDING_TRANSFER_SLIP', 'Pending Transfer Slip', 72, 'DEC-64'),
   ('TRANSFER_SLIP_GENERATED', 'Transfer Slip Generated', 73, 'DEC-65'),
   ('STORE_ACKNOWLEDGED', 'Acknowledged by Store', 74, 'DEC-66'),
+  ('STORE_PROCESSING', 'In Store Processing', 74, 'DEC-67'),
   ('SALES_RETURN_HOLD', 'Sales Return – On Hold', 74, 'DEC-64'),
   ('HELD_AT_INTERMEDIATE_STORE', 'Held at Intermediate Store', 75, 'AMD-13'),
   ('IN_PROCESS', 'In Process', 80, '§6.5'),

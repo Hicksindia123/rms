@@ -51,8 +51,19 @@ from app.modules.department_routing.schemas import (
     RmRoutingQueueItemOut,
     RoutingPlanLineOut,
     RoutingPlanOut,
+    StoreDinOut,
     StoreIssueIn,
+    StoreProgressOut,
+    StoreRefOut,
+    StoreRoutingConditionOut,
+    StoreRoutingDepartmentOut,
+    StoreRoutingGsOut,
+    StoreRoutingIn,
+    StoreRoutingItemOut,
+    StoreRoutingQueueRowOut,
+    StoreRoutingResultOut,
 )
+from app.modules.goods_slips import service as gs_service
 from app.modules.inventory import ledger_service
 from app.modules.notifications import service as notifications
 
@@ -69,6 +80,12 @@ RECEIVING_ROLE_SETTING = "department.receiving_role"
 # DEC-55 Q16: department code -> its own inventory location code (configuration).
 LOCATION_BY_CODE_SETTING = "department.location_by_code"
 _ROLE_CODE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+# DEC-67 (Phase P7): a store routes while the GS is on its stores (Q29: after ITS acknowledgement).
+STORE_ROUTING_STATUSES = ("TRANSFER_SLIP_GENERATED", "STORE_ACKNOWLEDGED", "STORE_PROCESSING")
+PROCESSING_STATUS = "STORE_PROCESSING"
+ROUTING_TASK_STEP = "STORE_ROUTING"  # DEC-66: task per GS and store, opened at acknowledgement
+ROUTING_PENDING = "ROUTING_PENDING"
 
 
 class DepartmentRoutingService:
@@ -681,6 +698,396 @@ class DepartmentRoutingService:
             lines=len(lines_to_create),
         )
         return DepartmentReceiptOut.model_validate(receipt)
+
+    # --- DEC-67 (Phase P7): department routing by the Intermediate Store user ----------------
+    #
+    # After its own transfer slip is acknowledged (P6, Q29) a store routes ITS lines of a GS per
+    # item + current condition. Saving the routing IS the issue: plan lines are written and, for
+    # work departments, issued in the same transaction (one DIN per department, stock store
+    # location -> department location through rms_move_stock). "Issue to Store" (no-work) lines
+    # move no stock and are ready for analysis (P9). The DB enforces the same rules (migration
+    # 20261121000300); the checks here give the clear 4xx answers first.
+
+    @staticmethod
+    def _store_scope(session: Session, actor: CurrentUser) -> set[UUID] | None:
+        """Stores whose goods the user sees. None = every store (Super Admin and viewers without
+        a store role: RM, Management); a store user sees only the stores whose role they hold."""
+        if actor.is_super_admin:
+            return None
+        return set(repo.user_store_role_ids(session, actor.id)) or None
+
+    @staticmethod
+    def _acts_for(
+        session: Session, actor: CurrentUser, cache: dict[UUID, bool], store_id: UUID
+    ) -> bool:
+        if store_id not in cache:
+            cache[store_id] = repo.user_acts_for_store(session, actor.id, store_id)
+        return cache[store_id]
+
+    def _progress(
+        self, session: Session, actor: CurrentUser, gs_id: UUID, cache: dict[UUID, bool]
+    ) -> list[StoreProgressOut]:
+        return [
+            StoreProgressOut.model_validate(
+                {**p, "is_mine": self._acts_for(session, actor, cache, p["store_id"])}
+            )
+            for p in repo.store_progress(session, gs_id)
+        ]
+
+    def store_queue(
+        self, session: Session, actor: CurrentUser, *, pending_only: bool
+    ) -> list[StoreRoutingQueueRowOut]:
+        """DEC-67: goods slips on the Intermediate Stores, one row per GS with the progress of
+        each store the user sees. `pending_only`: a visible store still has goods to route."""
+        scope = self._store_scope(session, actor)
+        cache: dict[UUID, bool] = {}
+        out: list[StoreRoutingQueueRowOut] = []
+        for row in repo.store_routing_queue(session, STORE_ROUTING_STATUSES):
+            stores = [
+                p
+                for p in self._progress(session, actor, row["gs_id"], cache)
+                if scope is None or p.store_id in scope
+            ]
+            if not stores:
+                continue
+            if pending_only and not any(p.status == ROUTING_PENDING for p in stores):
+                continue
+            out.append(StoreRoutingQueueRowOut.model_validate({**row, "stores": stores}))
+        return out
+
+    def store_gs(self, session: Session, actor: CurrentUser, gs_id: UUID) -> StoreRoutingGsOut:
+        """DEC-67: the routing view of one GS. Every line carries its store; `is_mine` marks the
+        lines the user may route (the UI shows the others read-only behind a toggle)."""
+        gs = repo.get_routing_gs(session, gs_id)
+        if not gs:
+            raise NotFound(f"Goods slip {gs_id} not found", code="GS_NOT_FOUND")
+        cache: dict[UUID, bool] = {}
+        stores = self._progress(session, actor, gs_id, cache)
+        scope = self._store_scope(session, actor)
+        if not stores or (scope is not None and not any(p.store_id in scope for p in stores)):
+            # A store user sees only goods slips its store has goods of (as for slips, DEC-66).
+            raise NotFound(
+                f"Goods slip {gs['gs_no']} has no goods at your Intermediate Store",
+                code="GS_NOT_AT_STORE",
+            )
+        routable_status = gs["status"] in STORE_ROUTING_STATUSES
+        lines_by_item: dict[UUID, list[RoutingPlanLineOut]] = {}
+        for pl in repo.list_plan_lines(session, gs_id=gs_id):
+            if pl["status"] != "CANCELLED":
+                lines_by_item.setdefault(pl["gs_item_id"], []).append(
+                    RoutingPlanLineOut.model_validate(pl)
+                )
+        depts_by_product: dict[UUID, list[StoreRoutingDepartmentOut]] = {}
+        items: list[StoreRoutingItemOut] = []
+        for it in repo.routing_items(session, gs_id):
+            mine = it["store_id"] is not None and self._acts_for(
+                session, actor, cache, it["store_id"]
+            )
+            if it["product_id"] not in depts_by_product:
+                depts_by_product[it["product_id"]] = [
+                    StoreRoutingDepartmentOut.model_validate(d)
+                    for d in repo.allowed_departments(
+                        session, it["product_id"], gs["item_field_profile_version_id"]
+                    )
+                ]
+            item_free = it["routable_qty"] if it["acknowledged"] and routable_status else 0
+            conditions = [
+                StoreRoutingConditionOut.model_validate(
+                    {**c, "routable_qty": max(min(c["free_qty"], item_free), 0)}
+                )
+                for c in repo.get_item_condition_balances(session, it["item_id"])
+                if c["current_qty"] > 0
+            ]
+            items.append(
+                StoreRoutingItemOut(
+                    item_id=it["item_id"],
+                    line_no=it["line_no"],
+                    item_name=it["item_name"],
+                    sku_code=it["sku_code"],
+                    store=(
+                        StoreRefOut(id=it["store_id"], code=it["store_code"], name=it["store_name"])
+                        if it["store_id"]
+                        else None
+                    ),
+                    is_mine=mine,
+                    acknowledged=it["acknowledged"],
+                    received_qty=it["received_qty"],
+                    routable_qty=item_free,
+                    at_departments_qty=it["at_departments_qty"],
+                    conditions=conditions,
+                    allowed_departments=depts_by_product[it["product_id"]],
+                    routed=lines_by_item.get(it["item_id"], []),
+                )
+            )
+        return StoreRoutingGsOut(
+            gs_id=gs["id"],
+            gs_no=gs["gs_no"],
+            status=gs["status"],
+            party_name=gs["party_name"],
+            station_name=gs["station_name"],
+            stores=stores,
+            items=items,
+            dins=[StoreDinOut.model_validate(d) for d in repo.list_gs_dins(session, gs_id)],
+            can_route=any(i.is_mine and i.routable_qty > 0 for i in items),
+        )
+
+    def route_store_goods(
+        self,
+        uow: UnitOfWork,
+        *,
+        actor: CurrentUser,
+        gs_id: UUID,
+        payload: StoreRoutingIn,
+        idem: IdempotencyKey,
+    ) -> IdempotentResult:
+        """DEC-67: one transaction; a duplicate Idempotency-Key returns the first result (G-16)."""
+        with uow.transaction(actor.id) as session:
+            return run_idempotent(
+                session,
+                idem,
+                actor.id,
+                lambda: (
+                    200,
+                    self._route_store(session, actor, gs_id, payload).model_dump(mode="json"),
+                ),
+            )
+
+    def _route_store(
+        self, session: Session, actor: CurrentUser, gs_id: UUID, payload: StoreRoutingIn
+    ) -> StoreRoutingResultOut:
+        # 1. Lock the GS (G-20 serialisation; P6 acknowledgements lock it too).
+        gs_service.lock_goods_slip(session, gs_id)
+        gs = repo.get_routing_gs(session, gs_id)
+        if not gs:  # pragma: no cover - locked just above
+            raise NotFound(f"Goods slip {gs_id} not found", code="GS_NOT_FOUND")
+        if gs["status"] not in STORE_ROUTING_STATUSES:
+            raise Conflict(
+                f"Goods slip {gs['gs_no']} is not at its Intermediate Stores (status "
+                f"{gs['status']}); it cannot be routed (DEC-67)",
+                code="INVALID_GS_STATUS",
+            )
+        store = repo.get_store(session, payload.store_id)
+        if not store:
+            raise NotFound("Intermediate Store not found", code="STORE_NOT_FOUND")
+        if not repo.user_acts_for_store(session, actor.id, store["id"]):
+            raise PermissionDenied(
+                f"Only a user of {store['name']} routes its goods (DEC-67)",
+                code="NOT_STORE_USER",
+                details={"store_code": store["code"]},
+            )
+        if repo.has_current_ac_slip(session, gs_id):
+            raise SystemGuardViolation(
+                "G-21",
+                f"G-21: final actions of {gs['gs_no']} are finalised; nothing can be routed",
+            )
+
+        # 2. Validate every line before writing anything.
+        items = {it["item_id"]: it for it in repo.routing_items(session, gs_id)}
+        version = gs["item_field_profile_version_id"]
+        allowed: dict[UUID, set[UUID]] = {}
+        depts: dict[UUID, dict[str, Any]] = {}
+        conditions: dict[UUID, dict[UUID, dict[str, Any]]] = {}
+        cond_left: dict[tuple[UUID, UUID], int] = {}
+        item_left: dict[UUID, int] = {}
+        for line in payload.lines:
+            it = items.get(line.gs_item_id)
+            if not it:
+                raise ValidationFailed(
+                    f"Item {line.gs_item_id} is not a physical line of goods slip {gs['gs_no']}",
+                    code="ITEM_NOT_IN_GS",
+                )
+            label = f"item #{it['line_no']} ({it['item_name']})"
+            if it["store_id"] != store["id"]:
+                raise PermissionDenied(
+                    f"{label.capitalize()} belongs to "
+                    f"{it['store_name'] or 'no Intermediate Store'}; only that store routes it "
+                    "(DEC-67)",
+                    code="ITEM_OF_OTHER_STORE",
+                    details={"store_code": it["store_code"]},
+                )
+            if not it["acknowledged"]:
+                raise Conflict(
+                    f"{label.capitalize()} is not acknowledged by {store['name']} yet",
+                    code="ITEM_NOT_ACKNOWLEDGED",
+                )
+            dept = depts.get(line.department_field_id)
+            if dept is None:
+                found = repo.get_department_field(session, line.department_field_id)
+                if not found or not found["is_active"]:
+                    raise ValidationFailed(
+                        f"Department field {line.department_field_id} is not an active department",
+                        code="INVALID_DEPARTMENT",
+                    )
+                dept = {**found, "no_work": repo.department_is_no_work(session, found["code"])}
+                if not dept["no_work"]:
+                    dept["location_id"] = self._department_location(session, found["code"])
+                depts[line.department_field_id] = dept
+            if it["product_id"] not in allowed:
+                allowed[it["product_id"]] = {
+                    d["field_id"]
+                    for d in repo.allowed_departments(session, it["product_id"], version)
+                }
+            if dept["id"] not in allowed[it["product_id"]]:
+                raise ValidationFailed(
+                    f"Department '{dept['label']}' is not allowed for {label} (DEC-59, the goods "
+                    "slip's profile version)",
+                    code="DEPARTMENT_NOT_ALLOWED",
+                )
+            if line.gs_item_id not in conditions:
+                conditions[line.gs_item_id] = {
+                    c["field_id"]: c
+                    for c in repo.get_item_condition_balances(session, line.gs_item_id)
+                }
+                item_left[line.gs_item_id] = int(it["routable_qty"])
+            conds = conditions[line.gs_item_id]
+            if line.source_bucket_field_id is None:
+                if any(c["current_qty"] > 0 for c in conds.values()):
+                    raise ValidationFailed(
+                        f"{label.capitalize()} is split by condition; choose the condition of "
+                        "each routing line",
+                        code="CONDITION_REQUIRED",
+                    )
+            else:
+                cond = conds.get(line.source_bucket_field_id)
+                if cond is None or cond["current_qty"] <= 0:
+                    raise ValidationFailed(
+                        f"The chosen condition is not part of {label}'s split",
+                        code="CONDITION_NOT_IN_ITEM",
+                    )
+                key = (line.gs_item_id, line.source_bucket_field_id)
+                left = cond_left.setdefault(key, int(cond["free_qty"]))
+                if line.qty > left:
+                    raise SystemGuardViolation(
+                        "G-20",
+                        f"G-20: {label} condition '{cond['field_label']}': only {max(left, 0)} "
+                        f"pc(s) left to route, {line.qty} requested.",
+                    )
+                cond_left[key] = left - line.qty
+            if line.qty > item_left[line.gs_item_id]:
+                raise SystemGuardViolation(
+                    "G-20",
+                    f"G-20: {label}: only {item_left[line.gs_item_id]} pc(s) left to route at "
+                    f"{store['name']}, {line.qty} requested.",
+                )
+            item_left[line.gs_item_id] -= line.qty
+
+        # 3. Write: one plan line per payload line (NO_WORK for "Issue to Store"), then one DIN
+        #    per work department: routing lines, plan lines ISSUED, stock store -> department.
+        groups: dict[UUID, list[dict[str, Any]]] = {}
+        no_work_qty = 0
+        for line in payload.lines:
+            plan_line_id = repo.insert_plan_line(
+                session,
+                gs_id=gs_id,
+                gs_item_id=line.gs_item_id,
+                source_bucket_field_id=line.source_bucket_field_id,
+                department_field_id=line.department_field_id,
+                qty=line.qty,
+                notes=line.notes,
+                planned_by=actor.id,
+                store_id=store["id"],
+            )
+            if depts[line.department_field_id]["no_work"]:
+                no_work_qty += line.qty
+                continue
+            groups.setdefault(line.department_field_id, []).append(
+                {
+                    "plan_line_id": plan_line_id,
+                    "gs_item_id": line.gs_item_id,
+                    "source_bucket_field_id": line.source_bucket_field_id,
+                    "lot_id": self._lot_for_item(session, line.gs_item_id),
+                    "qty_sent": line.qty,
+                    "notes": line.notes,
+                }
+            )
+        routing_ids: list[UUID] = []
+        for dept_id, lines_to_create in groups.items():
+            dept = depts[dept_id]
+            routing_no = repo.next_number(session, "DEPT_ROUTING")
+            routing = repo.create_department_routing(
+                session,
+                routing_no=routing_no,
+                gs_id=gs_id,
+                department_field_id=dept["id"],
+                department_code=dept["code"],
+                department_label=dept["label"],
+                dispatched_by=actor.id,
+                location_id=dept["location_id"],
+                remarks=payload.remarks,
+                lines=lines_to_create,
+                store_id=store["id"],
+            )
+            routing_ids.append(routing["id"])
+            for ld in lines_to_create:
+                repo.mark_plan_line_issued(
+                    session,
+                    plan_line_id=ld["plan_line_id"],
+                    routing_id=routing["id"],
+                    routing_line_id=ld["id"],
+                    issued_by=actor.id,
+                )
+            for idx, ld in enumerate(lines_to_create, start=1):
+                ledger_service.move_stock(
+                    session,
+                    lot_id=ld["lot_id"],
+                    from_location_id=store["location_id"],
+                    to_location_id=dept["location_id"],
+                    qty=ld["qty_sent"],
+                    movement_type="ISSUE",
+                    reference_type="department_routings",
+                    reference_id=routing["id"],
+                    idempotency_key=f"dept-routing:{routing['id']}:{idx}",
+                    actor_id=actor.id,
+                    reason=f"{store['name']}: issued to department {dept['label']} (DEC-67)",
+                )
+
+        # 4. G-20 after every write (the DB triggers check it too).
+        repo.validate_reconciliation(session, gs_id)
+
+        # 5. The first routing of any store moves the GS on (Q29: other stores may still be
+        #    acknowledging); the store's routing task stays open while it has goods to route.
+        status = gs["status"]
+        if status != PROCESSING_STATUS:
+            gs_service.change_status_within_step(
+                session,
+                gs_id=gs_id,
+                from_status=status,
+                to_status=PROCESSING_STATUS,
+                step_code=ROUTING_TASK_STEP,
+                reason=f"Department routing started by {store['name']} (DEC-67)",
+                by=actor.id,
+            )
+            status = PROCESSING_STATUS
+        cache: dict[UUID, bool] = {}
+        progress = next(
+            p for p in self._progress(session, actor, gs_id, cache) if p.store_id == store["id"]
+        )
+        gs_service.sync_step_task(
+            session,
+            gs_id=gs_id,
+            step_code=ROUTING_TASK_STEP,
+            role_id=store["role_id"],
+            needed=progress.status == ROUTING_PENDING,
+        )
+        log.info(
+            "store_routing_saved",
+            gs_id=str(gs_id),
+            store=store["code"],
+            lines=len(payload.lines),
+            dins=len(routing_ids),
+            no_work_qty=no_work_qty,
+        )
+        return StoreRoutingResultOut(
+            gs_id=gs_id,
+            gs_status=status,
+            store=progress,
+            dins=[
+                StoreDinOut.model_validate(d)
+                for d in repo.list_gs_dins(session, gs_id)
+                if d["id"] in routing_ids
+            ],
+            no_work_qty=no_work_qty,
+        )
 
 
 department_routing_service = DepartmentRoutingService()

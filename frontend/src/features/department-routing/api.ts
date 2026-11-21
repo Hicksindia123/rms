@@ -14,6 +14,10 @@ import type {
   RoutingPlanLine,
   RoutingPlanOut,
   StoreIssueIn,
+  StoreRoutingGs,
+  StoreRoutingIn,
+  StoreRoutingQueueRow,
+  StoreRoutingResult,
 } from './types';
 
 /** CLAUDE.md rule h: an error message always carries the request id when the API returned one. */
@@ -85,4 +89,21 @@ export const departmentRoutingApi = {
 
   getGsDepartmentLegs: (gsId: string) =>
     apiRequest<DepartmentLegOut[]>(`/department-routing/gs/${encodeURIComponent(gsId)}/legs`),
+
+  /** DEC-67: goods slips on the Intermediate Stores (a store user: its own stores only). */
+  getStoreQueue: (pendingOnly: boolean) =>
+    apiRequest<StoreRoutingQueueRow[]>(
+      `/department-routing/store/queue?pending_only=${pendingOnly ? 'true' : 'false'}`,
+    ),
+
+  /** DEC-67: routing view of one GS (every line with its store; `is_mine` = may route). */
+  getStoreGs: (gsId: string) =>
+    apiRequest<StoreRoutingGs>(`/department-routing/store/gs/${encodeURIComponent(gsId)}`),
+
+  /** DEC-67: saving the routing is the issue (DIN, stock moves). Idempotency-Key (G-16). */
+  routeStoreGoods: (gsId: string, payload: StoreRoutingIn, idempotencyKey: string) =>
+    apiRequest<StoreRoutingResult>(
+      `/department-routing/store/gs/${encodeURIComponent(gsId)}/route`,
+      { method: 'POST', body: payload, idempotencyKey },
+    ),
 };

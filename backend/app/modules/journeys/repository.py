@@ -166,6 +166,21 @@ _QUEUES: dict[str, str] = {
           from public.transfer_slips s
          where s.status = 'GENERATED'
            and rms_private.user_acts_for_store(cast(:uid as uuid), s.store_id)""",
+    # DEC-67: goods slips on which one of the signed-in user's Intermediate Stores still has goods
+    # to route (department_routing store queue, Q29: right after its own acknowledgement).
+    # Scoped by :uid (Super Admin: all stores).
+    "STORE_ROUTING": f"""
+        select {_GS_COLS}, g.id as target_id,
+               coalesce((select min(s.acknowledged_at)
+                           from public.transfer_slip_gs tg
+                           join public.transfer_slips s on s.id = tg.slip_id
+                          where tg.gs_id = g.id and s.status = 'ACKNOWLEDGED'),
+                        g.created_at) as since
+          from public.goods_slips g {_GS_JOINS}
+         where g.status in ('TRANSFER_SLIP_GENERATED', 'STORE_ACKNOWLEDGED', 'STORE_PROCESSING')
+           and exists (select 1 from rms_private.gs_store_routing_progress(g.id) p
+                        where p.status = 'ROUTING_PENDING'
+                          and rms_private.user_acts_for_store(cast(:uid as uuid), p.store_id))""",  # noqa: S608
     # DEC-65: the RM's open edit requests on locked GSs (Management / Super Admin).
     "EDIT_REQUESTS": f"""
         select {_GS_COLS}, g.id as target_id, r.requested_at as since
@@ -219,7 +234,8 @@ def list_user_steps(session: Session, user_id: UUID) -> list[dict[str, Any]]:
 
 
 def _params(sql: str, user_id: UUID | None) -> dict[str, Any]:
-    """A user-scoped queue (DEC-66 STORE_ACK) binds :uid; the others take no parameters."""
+    """A user-scoped queue (DEC-66 STORE_ACK, DEC-67 STORE_ROUTING) binds :uid; the others take
+    no parameters."""
     return {"uid": str(user_id) if user_id else None} if ":uid" in sql else {}
 
 

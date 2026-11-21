@@ -192,7 +192,7 @@ select throws_matching(
       values ('88888888-0000-0000-0000-000000000201', '88888888-0000-0000-0000-0000000000a1', 1);
       set constraints trg_dept_routing_lines_from_plan, trg_dept_routing_lines_g20 immediate;
     end $x$ $q$,
-  'has no issued routing plan line; the RM plans and the Store Manager issues',
+  'has no issued routing plan line of the same store',
   'DEC-55: the RM cannot move pieces to a department without a Store issue'
 );
 

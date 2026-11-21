@@ -19,6 +19,7 @@ const STATUS_VARIANT: Record<string, BadgeVariant> = {
   PENDING_TRANSFER_SLIP: 'warning',
   TRANSFER_SLIP_GENERATED: 'info', // DEC-65: in transit to the Intermediate Stores
   STORE_ACKNOWLEDGED: 'success', // DEC-66: every slip acknowledged by its store
+  STORE_PROCESSING: 'info', // DEC-67: the stores route / work on the goods
   SALES_RETURN_HOLD: 'warning',
   HELD_AT_INTERMEDIATE_STORE: 'success',
   COMMERCIAL_RESOLUTION: 'warning',

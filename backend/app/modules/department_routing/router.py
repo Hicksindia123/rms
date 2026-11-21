@@ -7,6 +7,11 @@ Permissions (T4 — the real `department_routing` actions):
   create  RM plans the routing / cancels an un-issued plan line (DEC-55)
   approve Store Manager issues planned lines to a department and prints the DIN (DEC-55)
   edit    receive goods back from a department (DEC-42 role check in the service)
+
+DEC-67 (Phase P7) store routing, permission module `store_routing`:
+  view    the stores' routing queue and the routing view of a GS
+  create  an Intermediate Store user routes the store's own goods (saving = the issue, DIN);
+          the service and the DB check the user acts for the store
 """
 
 from __future__ import annotations
@@ -37,6 +42,10 @@ from app.modules.department_routing.schemas import (
     RoutingPlanLineOut,
     RoutingPlanOut,
     StoreIssueIn,
+    StoreRoutingGsOut,
+    StoreRoutingIn,
+    StoreRoutingQueueRowOut,
+    StoreRoutingResultOut,
 )
 from app.modules.department_routing.service import department_routing_service
 
@@ -46,6 +55,48 @@ ViewUser = Annotated[CurrentUser, Depends(require("department_routing", "view"))
 CreateUser = Annotated[CurrentUser, Depends(require("department_routing", "create"))]
 EditUser = Annotated[CurrentUser, Depends(require("department_routing", "edit"))]
 IssueUser = Annotated[CurrentUser, Depends(require("department_routing", "approve"))]
+StoreViewUser = Annotated[CurrentUser, Depends(require("store_routing", "view"))]
+StoreRouteUser = Annotated[CurrentUser, Depends(require("store_routing", "create"))]
+
+
+@router.get("/store/queue", response_model=list[StoreRoutingQueueRowOut])
+def get_store_routing_queue(
+    user: StoreViewUser,
+    uow: UowDep,
+    pending_only: bool = Query(default=True),
+) -> list[StoreRoutingQueueRowOut]:
+    """DEC-67: goods slips on the Intermediate Stores with each store's progress. A store user
+    sees only its own stores; `pending_only` keeps the rows with goods still to route."""
+    with uow.transaction(user.id) as session:
+        return department_routing_service.store_queue(session, user, pending_only=pending_only)
+
+
+@router.get("/store/gs/{gs_id}", response_model=StoreRoutingGsOut)
+def get_store_routing_gs(
+    gs_id: UUID,
+    user: StoreViewUser,
+    uow: UowDep,
+) -> StoreRoutingGsOut:
+    """DEC-67: routing view of one GS: every line with its store (`is_mine` = the user may
+    route it), current conditions, allowed departments (pinned profile), routed lines, DINs."""
+    with uow.transaction(user.id) as session:
+        return department_routing_service.store_gs(session, user, gs_id)
+
+
+@router.post("/store/gs/{gs_id}/route", response_model=StoreRoutingResultOut)
+def route_store_goods(
+    gs_id: UUID,
+    payload: StoreRoutingIn,
+    user: StoreRouteUser,
+    uow: UowDep,
+    idem: IdempotencyKeyDep,
+) -> JSONResponse:
+    """DEC-67: the store user routes its goods per item + condition. Saving is the issue: one
+    DIN per work department, stock store -> department (rms_move_stock); "Issue to Store" moves
+    no stock. One transaction, `Idempotency-Key` required (G-16)."""
+    return department_routing_service.route_store_goods(
+        uow, actor=user, gs_id=gs_id, payload=payload, idem=idem
+    ).to_response()
 
 
 @router.get("/outcome-heads", response_model=list[DepartmentOutcomeHeadOut])

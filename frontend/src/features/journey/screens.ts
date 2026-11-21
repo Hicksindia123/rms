@@ -60,6 +60,7 @@ const SCREEN_PATHS: Record<string, string> = {
   'dispatch-queue': '/dispatch',
   'department-routing': '/department-routing',
   'department-issue': '/department-issue',
+  'store-routing': '/store-routing', // DEC-67
   'transfer-slips': '/transfer-slips',
   'transfer-slip-acks': '/transfer-slips/acknowledge', // DEC-66
   'department-receiving': '/department-receiving',
@@ -104,6 +105,8 @@ export function itemPath(
       return '/department-issue';
     case 'transfer-slips':
       return '/transfer-slips';
+    case 'gs-store-routing': // DEC-67: the store routes its goods of this GS
+      return `/store-routing/${item.gs_id}`;
     case 'transfer-slip': // DEC-66: the queue item is the slip itself
       return `/transfer-slips/${item.target_id}`;
     case 'accounts-docs':
@@ -134,6 +137,7 @@ const ICONS: Record<string, LucideIcon> = {
   ACK_TRANSFER_SLIPS: PackageCheck,
   DEPT_ROUTING: Building2,
   DEPT_ISSUE: FolderInput,
+  STORE_DEPT_ROUTING: Building2,
   DEPT_RECEIVING: CheckCircle2,
   FINAL_ACTIONS: Split,
   ACCOUNTS_DOCS: FileSpreadsheet,

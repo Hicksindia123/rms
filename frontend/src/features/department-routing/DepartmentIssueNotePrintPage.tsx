@@ -129,7 +129,7 @@ export const DepartmentIssueNotePrintPage: React.FC<DepartmentIssueNotePrintPage
           <div>
             <span className="text-slate-400 block font-medium">Source Location:</span>
             <span className="font-semibold text-slate-800 dark:text-slate-200">
-              Intermediate Store (FUNCTIONAL)
+              {routing.store_name ?? 'Intermediate Store (FUNCTIONAL)'}
             </span>
           </div>
 
