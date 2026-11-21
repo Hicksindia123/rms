@@ -16,6 +16,8 @@ import {
   type Lot,
   type StepOption,
 } from './api';
+import { EditRequestPanel } from '@/features/transfer-slips/EditRequestPanel';
+
 import { CsrDecisionCard } from './DecisionCards';
 import {
   DocumentPanel,
@@ -28,12 +30,15 @@ import {
 
 /** DEC-64: statuses of the new flow (codes; labels come from GS_STATUS). */
 const LOCKED = 'PENDING_TRANSFER_SLIP';
+/** DEC-65: on live transfer slips; a post-lock edit voids them (Q10). */
+const ON_SLIPS = 'TRANSFER_SLIP_GENERATED';
 const HOLD = 'SALES_RETURN_HOLD';
 const CATEGORISATION = 'CATEGORISATION';
 
 interface Props {
   gsId: string;
   onBack: () => void;
+  onOpenSlip?: (slipId: string) => void;
 }
 
 /** "Requires approval" for options whose allowed_status is CONDITIONAL (e.g. CSR, DD r17). */
@@ -57,7 +62,7 @@ function ActionError({ error }: { error: ApiError | null }) {
  * qty) → "Next" → popup Replacement / Complete Sales Return → categorisation (condition split per
  * line, G-19) → Lock. After the lock only Super Admin / Management edit (reason, until routing).
  * Legacy statuses (CSR approval, inspection, RM review) keep their sections. Labels: GS_STATUS. */
-export function ItemizationPage({ gsId, onBack }: Props) {
+export function ItemizationPage({ gsId, onBack, onOpenSlip }: Props) {
   const fetcher = useCallback(() => itemizationApi.state(gsId), [gsId]);
   const query = useApiQuery<ItemizationState>(fetcher);
   const state = query.data?.goods_slip.id === gsId ? query.data : null;
@@ -154,6 +159,23 @@ export function ItemizationPage({ gsId, onBack }: Props) {
                 : ''}
             </div>
           ) : null}
+          {gs.status === ON_SLIPS ? (
+            <div className="banner banner--success" role="status" data-testid="on-transfer-slips">
+              <Lock size={16} aria-hidden="true" /> Categorisation locked; the goods are on transfer
+              slips, in transit to the Intermediate Stores.
+              {p.can_edit_locked
+                ? ' Changing a line voids its transfer slips; the Replacement Manager regenerates them.'
+                : ''}
+            </div>
+          ) : null}
+          {gs.status === LOCKED || gs.status === ON_SLIPS ? (
+            <EditRequestPanel
+              gsId={gs.id}
+              canResolve={p.can_edit_locked === true}
+              version={state}
+              {...(onOpenSlip ? { onOpenSlip } : {})}
+            />
+          ) : null}
           <LinesSection state={state} onChanged={query.reload} />
           {p.can_choose_return ? (
             <ReturnChoiceSection
@@ -171,7 +193,7 @@ export function ItemizationPage({ gsId, onBack }: Props) {
               }}
             />
           ) : null}
-          {gs.category_code && ![CATEGORISATION, LOCKED, HOLD].includes(gs.status) ? (
+          {gs.category_code && ![CATEGORISATION, LOCKED, ON_SLIPS, HOLD].includes(gs.status) ? (
             <DecisionSection state={state} onChanged={query.reload} />
           ) : null}
           {state.lots.length > 0 ? <StockSection state={state} onChanged={query.reload} /> : null}

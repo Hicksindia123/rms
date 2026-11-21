@@ -54,6 +54,8 @@ from app.modules.search.router import router as search_router
 from app.modules.servicing.router import router as servicing_router
 from app.modules.store_issue.router import router as store_issue_router
 from app.modules.tasks.router import router as tasks_router
+from app.modules.transfer_slips.router import gs_router as transfer_slips_gs_router
+from app.modules.transfer_slips.router import router as transfer_slips_router
 from app.modules.unboxing.router import router as unboxing_router
 from app.modules.users.router import me_router as users_me_router
 from app.modules.users.router import router as users_router
@@ -142,6 +144,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Phase P1 20-11-2026 (DEC-61): Intermediate Stores.
     app.include_router(intermediate_stores_admin_router, prefix=API_PREFIX)
     app.include_router(intermediate_stores_router, prefix=API_PREFIX)
+    # Phase P5 20-11-2026 (DEC-65): transfer slips + edit requests.
+    app.include_router(transfer_slips_router, prefix=API_PREFIX)
+    app.include_router(transfer_slips_gs_router, prefix=API_PREFIX)
 
     if settings.app_env in ("test", "local"):
         from app.modules.test_support.router import router as test_router

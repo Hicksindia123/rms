@@ -67,6 +67,7 @@ from app.modules.goods_slips import service as gs_service
 from app.modules.inventory import ledger_service
 from app.modules.notifications import service as notifications
 from app.modules.party_notifications import email_service as party_email
+from app.shared.branding import template_logo
 from app.shared.pdf import (
     SlipColumn,
     SlipDocument,
@@ -855,6 +856,7 @@ class AcEntryService:
             brand_color=str(repo.get_setting(session, "branding_primary_color") or ""),
             paper_size=str(layout.get("paper_size") or "A4"),
             orientation=str(layout.get("orientation") or "portrait"),
+            logo=template_logo(session, layout),  # DEC-65 / Q26
         )
 
 

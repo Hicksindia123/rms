@@ -146,6 +146,20 @@ _QUEUES: dict[str, str] = {
          where g.status not in ('CLOSED', 'CANCELLED')
            and not exists (select 1 from public.party_emails e
                             where e.ac_action_slip_id = s.id and e.status = 'SENT')""",  # noqa: S608
+    # DEC-65: categorisation locked, waiting for the RM's transfer slip, no open edit request
+    # (transfer_slips pending list).
+    "PENDING_TRANSFER_SLIP": f"""
+        select {_GS_COLS}, g.id as target_id, {_SINCE_STATUS} as since
+          from public.goods_slips g {_GS_JOINS}
+         where g.status = 'PENDING_TRANSFER_SLIP'
+           and not exists (select 1 from public.gs_edit_requests r
+                            where r.gs_id = g.id and r.status = 'OPEN')""",  # noqa: S608
+    # DEC-65: the RM's open edit requests on locked GSs (Management / Super Admin).
+    "EDIT_REQUESTS": f"""
+        select {_GS_COLS}, g.id as target_id, r.requested_at as since
+          from public.gs_edit_requests r
+          join public.goods_slips g on g.id = r.gs_id {_GS_JOINS}
+         where r.status = 'OPEN'""",  # noqa: S608
 }
 
 QUEUE_CODES = frozenset(_QUEUES)

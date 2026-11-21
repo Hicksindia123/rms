@@ -17,10 +17,12 @@ import {
   LayoutDashboard,
   ListChecks,
   Mail,
+  MessageSquareWarning,
   Package,
   PackageOpen,
   PlusCircle,
   Receipt,
+  Send,
   ShieldAlert,
   Split,
   Tags,
@@ -57,6 +59,7 @@ const SCREEN_PATHS: Record<string, string> = {
   'dispatch-queue': '/dispatch',
   'department-routing': '/department-routing',
   'department-issue': '/department-issue',
+  'transfer-slips': '/transfer-slips',
   'department-receiving': '/department-receiving',
   'accounts-entry': '/accounts-entry',
   'accounts-docs': '/accounts',
@@ -97,6 +100,8 @@ export function itemPath(
       return '/department-receiving';
     case 'department-issue':
       return '/department-issue';
+    case 'transfer-slips':
+      return '/transfer-slips';
     case 'accounts-docs':
       return '/accounts';
     case 'dispatch-slips':
@@ -119,6 +124,8 @@ const ICONS: Record<string, LucideIcon> = {
   CATEGORISATION: Tags,
   INSPECTION: ClipboardCheck,
   RM_REVIEW: FileCheck2,
+  TRANSFER_SLIPS: Send,
+  EDIT_REQUESTS: MessageSquareWarning,
   STORE_ACCEPT: Warehouse,
   DEPT_ROUTING: Building2,
   DEPT_ISSUE: FolderInput,

@@ -14,7 +14,9 @@ class NumberSeriesUpdate(BaseModel):
     pattern: str = Field(
         ...,
         pattern=r"^.*\{SEQ(:[1-9][0-9]?)?\}.*$",
-        description="Pattern containing tokens like {PREFIX}, {FY}, {YYYY}, {YY}, {MM}, {SEQ:n}",
+        description=(
+            "Pattern containing tokens like {PREFIX}, {STORE}, {FY}, {YYYY}, {YY}, {MM}, {SEQ:n}"
+        ),
     )
     reset_policy: str = Field(..., pattern="^(NEVER|YEARLY_FY|MONTHLY)$")
     fy_start_month: int = Field(4, ge=1, le=12)

@@ -271,6 +271,16 @@ const DepartmentReceivingQueuePage = lazy(() =>
   })),
 );
 // Gap plan G2 (DEC-55): Store Manager issues planned routing to departments.
+const TransferSlipsPage = lazy(() =>
+  import('@/features/transfer-slips/TransferSlipsPage').then((m) => ({
+    default: m.TransferSlipsPage,
+  })),
+);
+const TransferSlipDetailPage = lazy(() =>
+  import('@/features/transfer-slips/TransferSlipDetailPage').then((m) => ({
+    default: m.TransferSlipDetailPage,
+  })),
+);
 const DepartmentIssuePage = lazy(() =>
   import('@/features/department-routing/DepartmentIssuePage').then((m) => ({
     default: m.DepartmentIssuePage,
@@ -320,6 +330,7 @@ type NavTab =
   | 'dispatch'
   | 'department-routing'
   | 'department-issue'
+  | 'transfer-slips'
   | 'department-receiving'
   | 'accounts-entry'
   | 'dispatch-slips'
@@ -365,6 +376,7 @@ const STATIC_TABS: ReadonlySet<string> = new Set([
   'dispatch',
   'department-routing',
   'department-issue',
+  'transfer-slips',
   'department-receiving',
   'accounts-entry',
   'dispatch-slips',
@@ -1052,6 +1064,13 @@ function Shell() {
                     onBack={() => {
                       navigate(`/gs/${second}`);
                     }}
+                    {...(can('transfer_slips', 'view') || isSuperAdmin
+                      ? {
+                          onOpenSlip: (id: string) => {
+                            navigate(`/transfer-slips/${id}`);
+                          },
+                        }
+                      : {})}
                   />
                 ) : second && third === 'unboxing' ? (
                   <UnboxingPage
@@ -1494,6 +1513,42 @@ function Shell() {
                   <EmptyState
                     title="Access Restricted"
                     hint="You do not have permission to view Department Routing."
+                  />
+                )}
+              </RequireAuth>
+            )}
+            {activeTab === 'transfer-slips' && (
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
+                {can('transfer_slips', 'view') || isSuperAdmin ? (
+                  second ? (
+                    <TransferSlipDetailPage
+                      slipId={second}
+                      onBack={() => {
+                        navigate('/transfer-slips');
+                      }}
+                      onOpenGs={(id: string) => {
+                        navigate(`/gs/${id}`);
+                      }}
+                    />
+                  ) : (
+                    <TransferSlipsPage
+                      canGenerate={can('transfer_slips', 'create') || isSuperAdmin}
+                      onOpenGs={(id: string) => {
+                        navigate(`/gs/${id}`);
+                      }}
+                      onOpenSlip={(id: string) => {
+                        navigate(`/transfer-slips/${id}`);
+                      }}
+                    />
+                  )
+                ) : (
+                  <EmptyState
+                    title="Access Restricted"
+                    hint="You do not have permission to view Transfer Slips."
                   />
                 )}
               </RequireAuth>

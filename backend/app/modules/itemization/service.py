@@ -98,6 +98,7 @@ from app.modules.itemization.schemas import (
     option_out,
 )
 from app.modules.notifications import service as notifications
+from app.modules.transfer_slips import service as transfer_slips
 from app.shared.rules_engine import evaluate_rule
 
 log = structlog.get_logger("rms.itemization")
@@ -121,6 +122,7 @@ ENTITY_TYPE = "goods_slip"
 # §6.5 system statuses entered by each workflow step (labels are configurable, statuses are not).
 CATEGORISATION = "CATEGORISATION"  # AMD-08: counting submitted, category not yet chosen
 LOCKED_STATUS = "PENDING_TRANSFER_SLIP"  # DEC-64: categorisation locked, stock booked
+SLIPS_STATUS = "TRANSFER_SLIP_GENERATED"  # DEC-65: on live transfer slips (voided on edit, Q10)
 HOLD_STATUS = "SALES_RETURN_HOLD"  # DEC-64 / Q11: Complete Sales Return parked
 STATUS_FOR_STEP = {
     "S1_CSR_APPROVAL": "CSR_APPROVAL_PENDING",
@@ -1088,7 +1090,7 @@ class ItemizationService:
         item_id: UUID,
         payload: LockedLineIn,
     ) -> dict[str, Any]:
-        gs = self._lock_locked_edit(session, user, perms, gs_id)
+        gs = self._lock_locked_edit(session, user, perms, gs_id, payload.reason)
         item = self._own_item(session, gs_id, item_id)
         if item.get("removed_at") is not None:
             raise Conflict("This line was removed after the lock", code="LINE_ALREADY_REMOVED")
@@ -1161,7 +1163,7 @@ class ItemizationService:
         gs_id: UUID,
         payload: LockedAddLineIn,
     ) -> dict[str, Any]:
-        gs = self._lock_locked_edit(session, user, perms, gs_id)
+        gs = self._lock_locked_edit(session, user, perms, gs_id, payload.reason)
         product = self._product(session, payload.product_id)
         _require_quantity(payload.documented_qty, payload.received_qty)
         item_id = repo.insert_item(
@@ -1213,7 +1215,7 @@ class ItemizationService:
     ) -> dict[str, Any]:
         """A line whose stock is on the ledger stays as history with qty 0 (its stock is
         adjusted out); a line without stock movements is deleted."""
-        gs = self._lock_locked_edit(session, user, perms, gs_id)
+        gs = self._lock_locked_edit(session, user, perms, gs_id, payload.reason)
         item = self._own_item(session, gs_id, item_id)
         if item.get("removed_at") is not None:
             raise Conflict("This line was already removed", code="LINE_ALREADY_REMOVED")
@@ -1235,7 +1237,12 @@ class ItemizationService:
         return self._locked_out(session, user, perms, gs_id, rev_no)
 
     def _lock_locked_edit(
-        self, session: Session, user: CurrentUser, perms: EffectivePermissions, gs_id: UUID
+        self,
+        session: Session,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        gs_id: UUID,
+        reason: str,
     ) -> dict[str, Any]:
         gs = gs_service.lock_goods_slip(session, gs_id)
         gs_service.get_visible_goods_slip(session, user, perms, gs_id)
@@ -1243,7 +1250,7 @@ class ItemizationService:
             raise PermissionDenied(
                 "After the categorisation lock only Super Admin or Management may edit (DEC-64)"
             )
-        if gs["status"] != LOCKED_STATUS:
+        if gs["status"] not in (LOCKED_STATUS, SLIPS_STATUS):
             raise Conflict(
                 "Only a goods slip whose categorisation is locked is edited here",
                 code="GS_NOT_LOCKED",
@@ -1254,7 +1261,10 @@ class ItemizationService:
                 "Department routing has started; the goods slip can no longer be edited (DEC-64)",
                 code="EDIT_WINDOW_CLOSED",
             )
-        return gs
+        # DEC-65 / Q10: the live transfer slips of the GS are voided first (stock back to Inward
+        # Staging, every GS on them back to PENDING_TRANSFER_SLIP); the RM regenerates them.
+        transfer_slips.void_live_slips_for_gs(session, user, gs_id, reason=reason)
+        return gs_service.lock_goods_slip(session, gs_id)
 
     def _after_locked_edit(
         self, session: Session, user: CurrentUser, gs: dict[str, Any], action: str, reason: str
@@ -2028,8 +2038,9 @@ class ItemizationService:
         approve = CSR_STEP in step_codes_for(session, user, "APPROVE")
         may_perform = perform and perms.allows("itemization", "create")
         edit_lines = status in ("ITEMIZATION", CATEGORISATION) and may_perform
-        locked_editor = status == LOCKED_STATUS and perms.allows("itemization", "configure")
-        window_closed = status == LOCKED_STATUS and repo.routing_started(session, gs_id)
+        locked = status in (LOCKED_STATUS, SLIPS_STATUS)  # DEC-65: a slip edit voids it (Q10)
+        locked_editor = locked and perms.allows("itemization", "configure")
+        window_closed = locked and repo.routing_started(session, gs_id)
         info = repo.categorization_info(session, gs_id) or {}
         return ItemizationStateOut(
             goods_slip=_gs_out(gs),

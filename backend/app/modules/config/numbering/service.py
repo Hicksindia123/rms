@@ -27,8 +27,12 @@ def render_number_pattern(
     fy_start_month: int = 4,
     fy_format: str = "LONG",
     reset_policy: str = "YEARLY_FY",
+    scope: str | None = None,
 ) -> tuple[str, str, str]:
-    """Render a pattern string into a formatted number along with (fy_string, period_key)."""
+    """Render a pattern string into a formatted number along with (fy_string, period_key).
+
+    `scope` replaces the {STORE} token (DEC-65: one counter per Intermediate Store), same as
+    rms_private.next_number(series, date, scope)."""
     year = on_date.year
     month = on_date.month
 
@@ -59,9 +63,13 @@ def render_number_pattern(
     else:
         period_key = f"FY{fy_start}"
 
+    if "{STORE}" in pattern:
+        period_key = f"{period_key}:{scope or ''}"
+
     # String token replacements
     res = pattern
     res = res.replace("{PREFIX}", prefix or "")
+    res = res.replace("{STORE}", scope or "")
     res = res.replace("{FY}", fy_str)
     res = res.replace("{YYYY}", f"{year:04d}")
     res = res.replace("{YY}", f"{year % 100:02d}")
@@ -214,6 +222,16 @@ class NumberSeriesService:
         series = self.get_series(user, code)
 
         with self._uow.transaction(user.id) as session:
+            # DEC-65: a {STORE} series is previewed for the default Intermediate Store.
+            scope = (
+                session.execute(
+                    text(
+                        "select code from public.intermediate_stores where is_default and is_active"
+                    )
+                ).scalar()
+                if "{STORE}" in series.pattern
+                else None
+            )
             # Determine period key
             _, fy_str, period_key = render_number_pattern(
                 series.pattern,
@@ -223,6 +241,7 @@ class NumberSeriesService:
                 series.fy_start_month,
                 series.fy_format,
                 series.reset_policy,
+                scope,
             )
 
             # Query existing counter for that period
@@ -248,6 +267,7 @@ class NumberSeriesService:
                     series.fy_start_month,
                     series.fy_format,
                     series.reset_policy,
+                    scope,
                 )
                 next_numbers.append(formatted)
 

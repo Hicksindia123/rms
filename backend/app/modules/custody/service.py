@@ -247,8 +247,12 @@ def initiate_transfer(
     initiated_by: UUID | None = None,
     supersedes_transfer_id: UUID | None = None,
     task_step_code: str = HANDOVER_STEP,
+    transfer_no: str | None = None,
 ) -> UUID:
-    """Create a transfer and dispatch its quantities to TRANSIT (one transaction)."""
+    """Create a transfer and dispatch its quantities to TRANSIT (one transaction).
+
+    `transfer_no`: a number the caller already drew (DEC-65: a Transfer Slip's custody transfer
+    carries the slip number); default = the next number of series TRANSFER."""
     source = _location(session, from_location_code)
     target = _location(session, to_location_code)
     transit = _transit(session)
@@ -292,7 +296,7 @@ def initiate_transfer(
             )
     transfer_id = repo.insert_transfer(
         session,
-        transfer_no=_next_transfer_no(session),
+        transfer_no=transfer_no or _next_transfer_no(session),
         gs_id=gs_id,
         from_location_id=source["id"],
         to_location_id=target["id"],
@@ -712,6 +716,26 @@ def cancel_transfer(session: Session, *, user: CurrentUser, transfer_id: UUID, r
         raise PermissionDenied(
             "Only the initiator may cancel this transfer", code="NOT_TRANSFER_INITIATOR"
         )
+    _cancel(session, transfer, user=user, reason=reason)
+
+
+def void_transfer(session: Session, *, user: CurrentUser, transfer_id: UUID, reason: str) -> None:
+    """DEC-65 / Q10: a Transfer Slip is voided because a goods slip on it was edited after the lock.
+    Same as a cancel (every piece goes back from TRANSIT to the source), but the caller (the
+    transfer-slip service, Super Admin / Management) has already authorised it, so the initiator
+    rule does not apply. Only a transfer that has not been counted can be voided (G-09)."""
+    transfer = _locked(session, transfer_id)
+    if transfer["status"] != "INITIATED":
+        raise Conflict(
+            "Only a transfer that has not been counted can be voided",
+            code="TRANSFER_NOT_CANCELLABLE",
+            details={"transfer_no": transfer["transfer_no"], "status": transfer["status"]},
+        )
+    _cancel(session, transfer, user=user, reason=reason)
+
+
+def _cancel(session: Session, transfer: dict[str, Any], *, user: CurrentUser, reason: str) -> None:
+    transfer_id = transfer["id"]
     reason = reason.strip()
     repo.set_cancelled(session, transfer_id, by=user.id, reason=reason)
     if transfer["stock_moved"]:

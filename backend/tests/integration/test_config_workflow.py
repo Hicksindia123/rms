@@ -249,7 +249,7 @@ async def test_print_templates_and_sample_preview(
     res = await client.get("/api/v1/config/templates", headers=_auth(token))
     assert res.status_code == 200
     tpls = res.json()
-    assert len(tpls) == 7  # + DISPATCH_SLIP (change plan Phase 8, AMD-19)
+    assert len(tpls) == 8  # + DISPATCH_SLIP (Phase 8, AMD-19), TRANSFER_SLIP (P5, DEC-65)
     codes = {t["code"] for t in tpls}
     assert codes == {
         "REPLACEMENT_SLIP",
@@ -259,7 +259,16 @@ async def test_print_templates_and_sample_preview(
         "CN_SUMMARY",
         "AC_ACTIONS_SLIP",
         "DISPATCH_SLIP",
+        "TRANSFER_SLIP",
     }
+    # DEC-65 / Q26: the slip PDFs print the logo.
+    by_code = {t["code"]: t for t in tpls}
+    for code in ("TRANSFER_SLIP", "AC_ACTIONS_SLIP", "DISPATCH_SLIP"):
+        assert by_code[code]["layout"]["show_logo"] is True, code
+    ts = await client.get(
+        "/api/v1/config/templates/TRANSFER_SLIP/sample-data", headers=_auth(token)
+    )
+    assert ts.status_code == 200 and ts.json()["sample_data"]["is_sample_preview"] is True
 
     # 2. Get sample preview data
     samp_res = await client.get(

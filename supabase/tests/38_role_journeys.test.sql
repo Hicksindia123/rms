@@ -15,8 +15,8 @@ select ok((select relrowsecurity from pg_class where oid = 'public.role_journey_
 select ok(not has_table_privilege('authenticated', 'public.journey_steps', 'select'),
           'authenticated cannot read journey_steps directly');
 
-select is((select count(*)::int from public.journey_steps where kind = 'STEP'), 15,
-          'catalogue seeds the 15 journey steps of the target workflow (G2: DEPT_ISSUE)');
+select is((select count(*)::int from public.journey_steps where kind = 'STEP'), 17,
+          'catalogue seeds the 17 journey steps of the target workflow (G2: DEPT_ISSUE; DEC-65: TRANSFER_SLIPS, EDIT_REQUESTS)');
 select is((select value from public.system_settings where key = 'features.on_hold'),
           '["dismantling", "spare_parts", "battery", "pcb_subinventory"]'::jsonb,
           'features.on_hold default (DEC-44, PROVISIONAL)');

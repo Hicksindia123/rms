@@ -6,6 +6,10 @@ This module only lays it out; it holds no business values (CLAUDE.md rule e).
 
 Output is deterministic (reportlab `invariant`): the same document data gives the same bytes, so
 the stored file's SHA-256 identifies its content.
+
+DEC-65 / Q26: an optional PNG logo is drawn left of the title block when the template has
+`show_logo` on (the owning service passes the bytes); a table can be printed greyed with
+strike-through (`SlipTable.muted`, used for the "other stores" section of a Transfer Slip).
 """
 
 from __future__ import annotations
@@ -22,7 +26,9 @@ from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 from reportlab.lib.pagesizes import A4, A5, landscape, portrait
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
+    Image,
     KeepTogether,
     Paragraph,
     SimpleDocTemplate,
@@ -65,6 +71,8 @@ class SlipTable:
     rows: Sequence[Sequence[str]]
     total_row: Sequence[str] | None = None
     empty_text: str = "No lines"
+    # DEC-65: greyed + strike-through rows (information only, e.g. another store's items).
+    muted: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +96,8 @@ class SlipDocument:
     paper_size: str = "A4"
     orientation: str = "portrait"
     signatures_title: str = "Signatures"
+    # DEC-65 / Q26: PNG / JPEG bytes of the logo (None = company name only).
+    logo: bytes | None = None
 
 
 def _color(value: str) -> colors.Color:
@@ -102,6 +112,14 @@ def _page_size(paper: str, orientation: str) -> tuple[float, float]:
 
 def _p(text: Any, style: ParagraphStyle) -> Paragraph:
     return Paragraph(escape("" if text is None else str(text)).replace("\n", "<br/>"), style)
+
+
+def _logo_flowable(data: bytes, max_w: float, max_h: float) -> Image:
+    """The logo scaled to fit max_w x max_h, keeping its aspect ratio."""
+    reader = ImageReader(io.BytesIO(data))
+    w, h = reader.getSize()
+    scale = min(max_w / float(w), max_h / float(h))
+    return Image(io.BytesIO(data), width=float(w) * scale, height=float(h) * scale)
 
 
 def render_slip_pdf(doc: SlipDocument) -> bytes:
@@ -136,12 +154,34 @@ def render_slip_pdf(doc: SlipDocument) -> bytes:
     )
     cell_style = {"left": s_cell, "right": s_cell_r, "center": s_cell_c}
 
-    story: list[Any] = [
+    s_muted = ParagraphStyle("slip_muted", parent=s_cell, textColor=colors.HexColor("#94a3b8"))
+    s_muted_r = ParagraphStyle("slip_muted_r", parent=s_muted, alignment=TA_RIGHT)
+    s_muted_c = ParagraphStyle("slip_muted_c", parent=s_muted, alignment=TA_CENTER)
+    muted_style = {"left": s_muted, "right": s_muted_r, "center": s_muted_c}
+
+    heading: list[Any] = [
         _p(doc.title, s_title),
         *([_p(doc.subtitle, s_sub)] if doc.subtitle else []),
         _p(doc.document_ref, s_ref),
-        Spacer(1, 4 * mm),
     ]
+    if doc.logo:
+        logo_w = 38 * mm
+        head = Table(
+            [[_logo_flowable(doc.logo, logo_w, 16 * mm), heading]],
+            colWidths=[logo_w + 3 * mm, usable_w - logo_w - 3 * mm],
+        )
+        head.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ]
+            )
+        )
+        story: list[Any] = [head, Spacer(1, 4 * mm)]
+    else:
+        story = [*heading, Spacer(1, 4 * mm)]
 
     # Header sections, two per row.
     blocks: list[Table] = []
@@ -187,6 +227,17 @@ def render_slip_pdf(doc: SlipDocument) -> bytes:
         data: list[list[Any]] = [[_p(c.header, s_th) for c in table.columns]]
         if table.rows:
             for row in table.rows:
+                if table.muted:
+                    data.append(
+                        [
+                            Paragraph(
+                                f"<strike>{escape(str(value))}</strike>" if value else "",
+                                muted_style[col.align],
+                            )
+                            for value, col in zip(row, table.columns, strict=True)
+                        ]
+                    )
+                    continue
                 data.append(
                     [
                         _p(value, cell_style[col.align])
@@ -204,7 +255,7 @@ def render_slip_pdf(doc: SlipDocument) -> bytes:
             )
         t = Table(data, colWidths=widths, repeatRows=1)
         style: list[tuple[Any, ...]] = [
-            ("BACKGROUND", (0, 0), (-1, 0), brand),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#94a3b8") if table.muted else brand),
             ("GRID", (0, 0), (-1, -1), 0.4, colors.lightgrey),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),

@@ -58,6 +58,7 @@ from app.modules.final_actions.schemas import (
     SaveFinalActionsIn,
 )
 from app.modules.notifications import service as notifications
+from app.shared.branding import template_logo
 from app.shared.pdf import (
     SlipColumn,
     SlipDocument,
@@ -1034,6 +1035,7 @@ class FinalActionsService:
             brand_color=str(brand or ""),
             paper_size=str(layout.get("paper_size") or "A4"),
             orientation=str(layout.get("orientation") or "portrait"),
+            logo=template_logo(session, layout),  # DEC-65 / Q26
         )
 
     # === print / re-print ===

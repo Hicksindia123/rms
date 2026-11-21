@@ -195,6 +195,57 @@ SAMPLE_DATA_REGISTRY: dict[str, dict[str, Any]] = {
             {"field": "transporter", "description": "Courier or transporter info"},
         ],
     },
+    # Phase P5 (DEC-65): server-side PDF of the Intermediate Store transfer slip.
+    "TRANSFER_SLIP": {
+        "sample_data": {
+            "is_sample_preview": True,
+            "slip_no": "TRF/OP/2026-27/0001",
+            "store_name": "Intermediate Store OP",
+            "generated_at": "21-11-2026 11:30",
+            "generated_by": "Replacement Manager (SAMPLE PREVIEW)",
+            "goods_slips": [
+                {
+                    "gs_no": "GS/2026-27/00042",
+                    "party_name": "Acme Healthcare Diagnostics (SAMPLE PREVIEW)",
+                    "station_name": "Agra",
+                    "state_name": "Uttar Pradesh",
+                    "cartons": 3,
+                    "received_date": "18-11-2026",
+                }
+            ],
+            "relevant": [
+                {
+                    "line_no": 1,
+                    "product_code": "EO-01",
+                    "product_name": "Enclosed Oval Thermometer",
+                    "condition": "Broken body",
+                    "qty": 4,
+                }
+            ],
+            "others": [
+                {
+                    "line_no": 2,
+                    "product_name": "Digital Thermometer",
+                    "condition": "Not working",
+                    "qty": 2,
+                    "store_name": "Intermediate Store DT",
+                }
+            ],
+            "relevant_qty": 4,
+            "grand_total_qty": 6,
+        },
+        "data_dictionary": [
+            {"field": "slip_no", "description": "Transfer Slip number (series TRANSFER_SLIP)"},
+            {"field": "store_name", "description": "Intermediate Store the slip is addressed to"},
+            {"field": "generated_at", "description": "When the RM generated the slip"},
+            {"field": "generated_by", "description": "Replacement Manager who generated it"},
+            {"field": "goods_slips", "description": "GS block per goods slip on the slip"},
+            {"field": "relevant", "description": "Items for this store, per GS (with subtotal)"},
+            {"field": "others", "description": "Other items of these GSs (greyed, other store)"},
+            {"field": "relevant_qty", "description": "Total relevant qty (this store)"},
+            {"field": "grand_total_qty", "description": "All items of the included GSs"},
+        ],
+    },
     "TRANSFER_NOTE": {
         "sample_data": {
             "is_sample_preview": True,

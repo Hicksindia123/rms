@@ -124,6 +124,7 @@ insert into _seed_role_matrix values
   ('REPLACEMENT_MANAGER',        'credit_notes',    array['view','create','approve']),
   ('REPLACEMENT_MANAGER',        'reports',         array['view','export']),
   ('REPLACEMENT_MANAGER',        'audit',           array['view']),
+  ('REPLACEMENT_MANAGER',        'transfer_slips',  array['view','create']),  -- DEC-65: generate slips, edit requests
 
   ('INTERMEDIATE_STORE_MANAGER', 'dashboards',      array['view']),
   ('INTERMEDIATE_STORE_MANAGER', 'notifications',   array['view']),
@@ -224,6 +225,7 @@ insert into _seed_role_matrix values
   ('MANAGEMENT',                 'unboxing',        array['view']),
   ('MANAGEMENT',                 'attachments',     array['view']),
   ('MANAGEMENT',                 'itemization',     array['view','configure']),  -- DEC-64 d: edits after the lock
+  ('MANAGEMENT',                 'transfer_slips',  array['view']),               -- DEC-65: sees slips + edit requests
   ('MANAGEMENT',                 'inspection',      array['view']),
   ('MANAGEMENT',                 'container_audit', array['view']),
   ('MANAGEMENT',                 'custody',         array['view']),
@@ -309,6 +311,7 @@ select r.id, s.id, m.ord
     ('INWARD_VERIFIER',            'REPORTS',        120),
 
     -- DEC-64 (Q9): no RM_REVIEW entry; legacy RM_REVIEW GSs are opened from the goods slip.
+    ('REPLACEMENT_MANAGER',        'TRANSFER_SLIPS',  10),   -- DEC-65
     ('REPLACEMENT_MANAGER',        'DEPT_ROUTING',    20),
     ('REPLACEMENT_MANAGER',        'FINAL_ACTIONS',   30),
     ('REPLACEMENT_MANAGER',        'APPROVALS',      100),
@@ -363,6 +366,7 @@ select r.id, s.id, m.ord
 
     -- DEC-60 / DEC-61 (P1): Management and the Intermediate Store users. Their journey steps
     -- (approval queue, acknowledgement, routing, receiving, analysis) come with P6-P10.
+    ('MANAGEMENT',                 'EDIT_REQUESTS',   10),   -- DEC-65
     ('MANAGEMENT',                 'DASHBOARD',      100),
     ('MANAGEMENT',                 'GS_LIST',        110),
     ('MANAGEMENT',                 'PENDENCIES',     120),
@@ -379,8 +383,8 @@ on conflict (role_id, journey_step_id) do nothing;
 -- Fail loudly on a typo in the journey matrix (same rule as the permission matrix).
 do $$
 begin
-  if (select count(*) from public.role_journey_steps) < 51 then
-    raise exception 'role journey seed incomplete: % rows (expected 51)',
+  if (select count(*) from public.role_journey_steps) < 53 then
+    raise exception 'role journey seed incomplete: % rows (expected 53)',
       (select count(*) from public.role_journey_steps);
   end if;
 end
@@ -604,6 +608,7 @@ from (values
   ('INSPECTION', 'Inspection', 60, '§6.5'),
   ('RM_REVIEW', 'RM Review', 70, '§6.5'),
   ('PENDING_TRANSFER_SLIP', 'Pending Transfer Slip', 72, 'DEC-64'),
+  ('TRANSFER_SLIP_GENERATED', 'Transfer Slip Generated', 73, 'DEC-65'),
   ('SALES_RETURN_HOLD', 'Sales Return – On Hold', 74, 'DEC-64'),
   ('HELD_AT_INTERMEDIATE_STORE', 'Held at Intermediate Store', 75, 'AMD-13'),
   ('IN_PROCESS', 'In Process', 80, '§6.5'),
@@ -3703,7 +3708,11 @@ select v.event_type, v.name, true, v.roles, array['IN_APP'], v.priority, true
   from (values
     ('CATEGORISATION_LOCKED', 'RM: goods slip ready for its transfer slip', array['REPLACEMENT_MANAGER'], 'NORMAL'),
     ('SALES_RETURN_HOLD', 'RM & Management: Complete Sales Return on hold', array['REPLACEMENT_MANAGER', 'MANAGEMENT'], 'NORMAL'),
-    ('LOCKED_GS_EDITED', 'RM & locker: goods slip edited after the lock', array['REPLACEMENT_MANAGER'], 'HIGH')
+    ('LOCKED_GS_EDITED', 'RM & locker: goods slip edited after the lock', array['REPLACEMENT_MANAGER'], 'HIGH'),
+    -- DEC-65 (P5): transfer slips (the store users get the custody TRANSFER_CANCELLED alert on a void).
+    ('TRANSFER_SLIP_VOIDED', 'RM: transfer slip voided, regenerate it', array['REPLACEMENT_MANAGER'], 'HIGH'),
+    ('GS_EDIT_REQUESTED', 'Management & Super Admin: edit request for a locked goods slip', array['MANAGEMENT', 'SUPER_ADMIN'], 'HIGH'),
+    ('GS_EDIT_REQUEST_RESOLVED', 'RM: edit request resolved', array['REPLACEMENT_MANAGER'], 'NORMAL')
   ) as v(event_type, name, roles, priority)
  where not exists (select 1 from public.notification_rules r where r.event_type = v.event_type);
 

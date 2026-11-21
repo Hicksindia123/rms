@@ -9,8 +9,8 @@ select plan(25);
 -- P3-08: + 1 system option (JV_ONLY in CN_TYPE, §8.6 / BR-34 / DEC-23) that is not a workbook row.
 -- Change plan 2026-11-12 Phase 2: + RETURN_TYPE (2, AMD-01) + 4 GATE_DOCUMENT row types (AMD-04).
 -- Phase 3: + GS_STATUS (12 status labels, AMD-08; + HELD_AT_INTERMEDIATE_STORE, AMD-13).
-select is((select count(*)::int from public.option_items), 107,
-          '107 option items (79 DD rows + 5 WF r6 + JV_ONLY + 2 AMD-01 + 4 AMD-04 + 13 AMD-08/13 + 1 DEC-62 + 2 DEC-64)');
+select is((select count(*)::int from public.option_items), 108,
+          '108 option items (79 DD rows + 5 WF r6 + JV_ONLY + 2 AMD-01 + 4 AMD-04 + 13 AMD-08/13 + 1 DEC-62 + 2 DEC-64 + 1 DEC-65)');
 select is((select count(*)::int from public.option_items where source_ref like 'DD r%'), 79,
           '79 option items come from Roles_Steps_Dropdowns');
 select is((select count(distinct source_ref)::int from public.option_items where source_ref like 'DD r%'), 79,
@@ -30,7 +30,7 @@ select results_eq(
     ('CSR_APPROVAL',2),('CSR_FINAL_STATUS',1),('CUSTODY_ASSIGNMENT',4),('CUSTODY_TRANSFER_MODE',1),
     ('DAILY_CONTAINER_AUDIT',1),('DATA_ENTRY_BY',2),('DELIVERY_MODE',3),('DMT_CONDITION',8),
     ('DMT_EXTRACTION_TYPE',2),('DOCUMENT_PHOTO',1),('EO_CONDITION',4),('EO_EXTRACTION_TYPE',2),
-    ('EO_INSPECTION_PROTOCOL',1),('GATE_DOCUMENT',9),('GATE_TRANSPORT_DOCUMENT',1),('GS_CREATION_FORMAT',1),('GS_STATUS',15),('GST_PORTAL_VERIFICATION',2),
+    ('EO_INSPECTION_PROTOCOL',1),('GATE_DOCUMENT',9),('GATE_TRANSPORT_DOCUMENT',1),('GS_CREATION_FORMAT',1),('GS_STATUS',16),('GST_PORTAL_VERIFICATION',2),
     ('PARTS_STORAGE_SEPARATION',2),('PARTY_DOC_VERIFICATION',3),('PARTY_NOTIFICATION_STATUS',1),
     ('POST_SERVICING_CLASSIFICATION',3),('PRISMATIC_CONDITION',3),('PRISMATIC_EXTRACTION_TYPE',2),
     ('RATE_VERIFICATION_REF',2),('RECEIVED_DOC_CLASSIFICATION',4),('RECOVERABLE_PART_TYPE',4),
@@ -95,9 +95,9 @@ select set_eq($$select code from public.roles$$,
         -- Phase P1 20-11-2026: DEC-60 Management, DEC-61 one role per Intermediate Store
         'MANAGEMENT','ISTORE_OP','ISTORE_DT','ISTORE_RI'],
   'roles match master plan §3.3');
-select is((select count(*)::int from public.permissions), 156, '20 modules × 7 actions + 5 department_routing (G2 approve = Store issue) + 4 final_actions + 3 ac_entry + 4 intermediate_stores (DEC-61) actions');
+select is((select count(*)::int from public.permissions), 158, '20 modules × 7 actions + 5 department_routing (G2 approve = Store issue) + 4 final_actions + 3 ac_entry + 4 intermediate_stores (DEC-61) + 2 transfer_slips (DEC-65) actions');
 select is((select count(*)::int from public.role_permissions rp join public.roles r on r.id = rp.role_id
-            where r.code = 'SUPER_ADMIN'), 156, 'SUPER_ADMIN marker role holds every permission');
+            where r.code = 'SUPER_ADMIN'), 158, 'SUPER_ADMIN marker role holds every permission');
 select is((select count(*)::int from public.roles r
             where not exists (select 1 from public.role_permissions rp where rp.role_id = r.id)), 0,
           'every role has a default permission set');
@@ -146,7 +146,7 @@ select results_eq(
   'inventory locations, classes and custodians');
 
 select set_eq($$select code from public.number_series$$,
-  array['GS','TRANSFER','TECH_BATCH','DISMANTLE','STORE_ISSUE','DISPATCH','DEPT_ROUTING','DEPT_RECEIPT','AC_ACTION_SLIP','DISPATCH_SLIP'], 'number series');
+  array['GS','TRANSFER','TECH_BATCH','DISMANTLE','STORE_ISSUE','DISPATCH','DEPT_ROUTING','DEPT_RECEIPT','AC_ACTION_SLIP','DISPATCH_SLIP','TRANSFER_SLIP'], 'number series');
 select is((select pattern from public.number_series where code = 'GS'), 'GS/{FY}/{SEQ:5}', 'GS placeholder pattern (DEC-01)');
 
 select results_eq(
