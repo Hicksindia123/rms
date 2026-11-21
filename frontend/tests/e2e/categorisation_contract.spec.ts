@@ -119,6 +119,8 @@ async function submitCategorisation(page: Page, gsId: string): Promise<void> {
 }
 
 test.describe('Counting → Categorisation (allowed_counts contract)', () => {
+  // DEC-64 (P4): the separate categorisation section was replaced by the split editor on the categorisation screen (covered by p4_categorisation_lock.spec.ts). Port the allowed_counts contract checks in P12.
+  test.fixme(true, 'DEC-64 (P4): flow retired; rebuild in P5 / P12');
   test('Scenario 1: 6 of 6 (ITM-00180) loads, saves, submits to RM review; RM review loads', async ({
     browser,
   }) => {

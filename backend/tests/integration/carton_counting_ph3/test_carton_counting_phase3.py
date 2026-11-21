@@ -63,7 +63,7 @@ async def test_status_and_step_labels_come_from_config(
     assert labels["ITEMIZATION"] == "Counting"
     assert labels["CATEGORISATION"] == "Categorisation"
     assert labels["HELD_AT_INTERMEDIATE_STORE"] == "Held at Intermediate Store"
-    assert len(labels) == 13
+    assert len(labels) == 15  # + PENDING_TRANSFER_SLIP, SALES_RETURN_HOLD (DEC-64)
 
     # Workflow v2 (G-18: codes unchanged): the open S1_UNBOX task shows the new step label.
     gs = (await _create(client, actors.gate, masters, _values())).json()["goods_slip"]
@@ -239,7 +239,8 @@ async def test_counting_draft_submit_and_categorise(
     assert replay.headers.get("Idempotency-Replayed") == "true"
     state = first.json()
     assert state["goods_slip"]["status"] == "CATEGORISATION"
-    assert state["permissions"]["can_edit_lines"] is False
+    # DEC-64: lines stay editable in CATEGORISATION until the categorisation lock.
+    assert state["permissions"]["can_edit_lines"] is True
     assert state["permissions"]["can_categorize"] is True
     res = await submit_counting(client, actors.aman, gs_id)
     assert res.status_code == 409 and res.json()["error"]["code"] == "COUNTING_ALREADY_SUBMITTED"
@@ -251,9 +252,9 @@ async def test_counting_draft_submit_and_categorise(
     )
     assert hist == [{"to_status": "CATEGORISATION", "step_code": "S1_ITEMIZE"}]
 
-    # Lines are frozen once the count is submitted.
+    # DEC-64: lines can still be corrected in CATEGORISATION (before the lock).
     res = await add_line(client, actors.aman, gs_id, products.dmt, 1, 1)
-    assert res.status_code == 409
+    assert res.status_code == 201, res.text
 
     res = await categorize(client, actors.aman, gs_id, "RO", submit=False)
     assert res.status_code == 200, res.text
@@ -346,8 +347,7 @@ async def test_db_counting_order(
             text("update public.goods_slips set status = 'CATEGORISATION' where id = :g"),
             {"g": gs_id},
         )
-    with pytest.raises(DBAPIError, match="cannot be added or removed"), conn.begin_nested():
-        conn.execute(text("delete from public.gs_items where gs_id = :g"), {"g": gs_id})
+    # DEC-64: lines may still change in CATEGORISATION (before the lock).
     with pytest.raises(DBAPIError, match="without a category"), conn.begin_nested():
         conn.execute(
             text("update public.goods_slips set status = 'INSPECTION' where id = :g"), {"g": gs_id}

@@ -50,6 +50,9 @@ export interface ItemLine {
   bucket_total?: number;
   /** G-19: bucket_total == received_qty. */
   is_balanced?: boolean;
+  /** DEC-64 d: removed after the lock by Super Admin / Management (kept as history, qty 0). */
+  removed_at?: string | null;
+  removal_reason?: string | null;
 }
 
 export interface LineBucket {
@@ -190,6 +193,8 @@ export interface ItemizationGs {
   original_category_code: string | null;
   csr_commercial_path: boolean;
   categorized_at: string | null;
+  /** DEC-64: categorisation locked (inward stock booked). */
+  categorisation_locked_at?: string | null;
 }
 
 export interface Totals {
@@ -219,14 +224,28 @@ export interface ItemizationState {
     /** AMD-08: Counting -> CATEGORISATION. */
     can_submit_counting: boolean;
     can_categorize: boolean;
-    /** DEC-53: one "Submit to RM Review" once every line's split balances (G-19). */
+    /** DEC-53 "Submit to RM Review": retired by DEC-64 (always false). */
     can_submit_to_rm?: boolean;
+    /** DEC-64: the Replacement / Complete Sales Return popup ("Next" on the item screen). */
+    can_choose_return?: boolean;
+    /** DEC-64: lock the categorisation (every line's split balances, G-19). */
+    can_lock?: boolean;
+    /** DEC-64 d: Super Admin / Management may edit after the lock (until the first routing). */
+    can_edit_locked?: boolean;
+    edit_window_closed?: boolean;
     can_decide: boolean;
     can_reopen: boolean;
     can_request_correction: boolean;
     can_decide_correction: boolean;
     can_check_packaging: boolean;
   };
+  /** DEC-64: the popup choices (RETURN_CATEGORY, labels from configuration). */
+  return_choices?: StepOption[];
+}
+
+export interface ItemizationCommandResult {
+  state: ItemizationState;
+  revision_no: number | null;
 }
 
 export interface CategorizeResult {
@@ -273,13 +292,47 @@ export const itemizationApi = {
     apiRequest<ProductFields>(
       `/itemization/lookups/products/${encodeURIComponent(productId)}/fields`,
     ),
-  /** DEC-53: Counting & Categorisation -> RM Review in one transaction. */
-  submitItemization: (gsId: string, remarks: string | null, idempotencyKey: string) =>
-    apiRequest<{ goods_slip_id: string; status: string }>(`${gs(gsId)}/itemization/submit`, {
+  /** DEC-64: the popup after the item lines (RO = Replacement, CSR = Complete Sales Return). */
+  chooseReturn: (gsId: string, categoryCode: string, idempotencyKey: string) =>
+    apiRequest<ItemizationCommandResult>(`${gs(gsId)}/itemization/return-choice`, {
+      method: 'POST',
+      body: { category_code: categoryCode },
+      idempotencyKey,
+    }),
+  /** DEC-64: lock the categorisation (inward stock booked once, Q12). */
+  lockCategorisation: (gsId: string, remarks: string | null, idempotencyKey: string) =>
+    apiRequest<ItemizationCommandResult>(`${gs(gsId)}/categorisation/lock`, {
       method: 'POST',
       body: { remarks },
       idempotencyKey,
     }),
+  /** DEC-64 d: Super Admin / Management edits after the lock (reason required). */
+  lockedUpdateLine: (
+    gsId: string,
+    itemId: string,
+    body: Omit<Partial<LineInput>, 'remarks'> & { reason: string },
+    idempotencyKey: string,
+  ) =>
+    apiRequest<ItemizationCommandResult>(`${gs(gsId)}/locked/items/${encodeURIComponent(itemId)}`, {
+      method: 'PATCH',
+      body,
+      idempotencyKey,
+    }),
+  lockedAddLine: (
+    gsId: string,
+    body: Omit<LineInput, 'remarks'> & { reason: string },
+    idempotencyKey: string,
+  ) =>
+    apiRequest<ItemizationCommandResult>(`${gs(gsId)}/locked/items`, {
+      method: 'POST',
+      body,
+      idempotencyKey,
+    }),
+  lockedRemoveLine: (gsId: string, itemId: string, reason: string, idempotencyKey: string) =>
+    apiRequest<ItemizationCommandResult>(
+      `${gs(gsId)}/locked/items/${encodeURIComponent(itemId)}/remove`,
+      { method: 'POST', body: { reason }, idempotencyKey },
+    ),
   submitCounting: (gsId: string, idempotencyKey: string) =>
     apiRequest<ItemizationState>(`${gs(gsId)}/counting/submit`, {
       method: 'POST',
@@ -359,16 +412,6 @@ export const itemizationApi = {
       `${gs(gsId)}/items/${encodeURIComponent(itemId)}/categorisation`,
       { method: 'PUT', body, idempotencyKey },
     ),
-  submitCategorisation: (
-    gsId: string,
-    body: { category_code?: string; remarks?: string | null },
-    idempotencyKey: string,
-  ) =>
-    apiRequest<{ goods_slip_id: string; status: string }>(`${gs(gsId)}/categorisation/submit`, {
-      method: 'POST',
-      body,
-      idempotencyKey,
-    }),
 };
 
 // --- Item categorisation (AMD-09 buckets, AMD-11 counts, G-19) ---------------------------------

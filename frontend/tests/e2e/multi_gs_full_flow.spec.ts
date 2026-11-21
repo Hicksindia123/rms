@@ -279,6 +279,8 @@ async function accountsAlertDispatch(gsId: string, acSlipId: string, tag: string
 
 // --- the run ------------------------------------------------------------------------------------
 test.describe('Multi-GS full flow on the thermometer catalogue (DEC-51)', () => {
+  // DEC-64 (P4): categorisation is locked, not submitted to RM review; the path to the Intermediate Store is the P5 transfer slip. Rebuild this flow in P5.
+  test.fixme(true, 'DEC-64 (P4): flow retired; rebuild in P5 / P12');
   test.describe.configure({ mode: 'serial', timeout: 300_000 });
 
   test.beforeEach(async ({ browserName }, testInfo) => {

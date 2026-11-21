@@ -13,12 +13,8 @@ from app.core.idempotency import IdempotencyKeyDep
 from app.core.permissions import EffectivePermissionsDep, require
 from app.core.security import CurrentUser
 from app.modules.rm_review.schemas import (
-    RmAddLineIn,
     RmApproveIn,
     RmApproveOut,
-    RmChangeProductIn,
-    RmEditItemIn,
-    RmRemoveLineIn,
     RmReviewDataOut,
     RmSendBackIn,
 )
@@ -49,61 +45,10 @@ def get_rm_review_data(
     return service.get_review_data(user, perms, gs_id)
 
 
-@router.put("/gs/{gs_id}/items/{item_id}/rm-edit")
-def rm_edit_item(
-    gs_id: UUID,
-    item_id: UUID,
-    payload: RmEditItemIn,
-    user: ApproveUser,
-    perms: EffectivePermissionsDep,
-    idem: IdempotencyKeyDep,
-    service: ServiceDep,
-) -> JSONResponse:
-    """AMD-12: RM edits item quantities or bucket quantities
-    (audit + revision kept, G-19 enforced).
-    """
-    return service.edit_item(user, perms, gs_id, item_id, payload, idem).to_response()
-
-
-@router.post("/gs/{gs_id}/rm-add-line")
-def rm_add_line(
-    gs_id: UUID,
-    payload: RmAddLineIn,
-    user: ApproveUser,
-    perms: EffectivePermissionsDep,
-    idem: IdempotencyKeyDep,
-    service: ServiceDep,
-) -> JSONResponse:
-    """DEC-54: RM adds an item line during review with a mandatory reason."""
-    return service.add_line(user, perms, gs_id, payload, idem).to_response()
-
-
-@router.post("/gs/{gs_id}/items/{item_id}/rm-remove-line")
-def rm_remove_line(
-    gs_id: UUID,
-    item_id: UUID,
-    payload: RmRemoveLineIn,
-    user: ApproveUser,
-    perms: EffectivePermissionsDep,
-    idem: IdempotencyKeyDep,
-    service: ServiceDep,
-) -> JSONResponse:
-    """DEC-54: RM removes an item line during review with a mandatory reason."""
-    return service.remove_line(user, perms, gs_id, item_id, payload, idem).to_response()
-
-
-@router.post("/gs/{gs_id}/items/{item_id}/rm-change-product")
-def rm_change_product(
-    gs_id: UUID,
-    item_id: UUID,
-    payload: RmChangeProductIn,
-    user: ApproveUser,
-    perms: EffectivePermissionsDep,
-    idem: IdempotencyKeyDep,
-    service: ServiceDep,
-) -> JSONResponse:
-    """DEC-54: RM changes the product of an item line during review with a mandatory reason."""
-    return service.change_product(user, perms, gs_id, item_id, payload, idem).to_response()
+# DEC-64 (e), Q9: the RM's edits in review (DEC-54: edit qty / split, add / remove line, change
+# product) are retired. GSs still in RM_REVIEW (legacy) keep the read view, send back and approve.
+# Changes after the categorisation lock are made by Super Admin / Management
+# (itemization router, /gs/{id}/locked/items).
 
 
 @router.post("/gs/{gs_id}/rm-send-back")

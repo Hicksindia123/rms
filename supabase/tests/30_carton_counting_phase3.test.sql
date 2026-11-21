@@ -8,7 +8,7 @@ select set_eq(
   $$select oi.code from public.option_items oi join public.option_sets os on os.id = oi.option_set_id
      where os.code = 'GS_STATUS'$$,
   $$values ('GATE_CREATED'),('UNBOXING'),('ITEMIZATION'),('CATEGORISATION'),('CSR_APPROVAL_PENDING'),
-           ('INSPECTION'),('RM_REVIEW'),('HELD_AT_INTERMEDIATE_STORE'),('IN_PROCESS'),('COMMERCIAL_RESOLUTION'),
+           ('INSPECTION'),('RM_REVIEW'),('PENDING_TRANSFER_SLIP'),('SALES_RETURN_HOLD'),('HELD_AT_INTERMEDIATE_STORE'),('IN_PROCESS'),('COMMERCIAL_RESOLUTION'),
            ('AWAITING_NOTIFICATION'),('CLOSED'),('CANCELLED')$$,
   'GS_STATUS labels cover exactly the goods_slips status codes');
 select is((select oi.label from public.option_items oi join public.option_sets os on os.id = oi.option_set_id
@@ -42,11 +42,14 @@ select throws_like(
 select lives_ok(
   $$update public.goods_slips set status = 'CATEGORISATION' where gs_no = 'PGTAP-PH3-1'$$,
   'AMD-08: counting with a line is submitted to CATEGORISATION');
-select throws_like(
+-- DEC-64 (P4): lines stay editable in CATEGORISATION until the categorisation lock.
+select lives_ok(
   $$insert into public.gs_items (gs_id, line_no, product_id, category_id, documented_qty, received_qty)
     select g.id, 2, p.id, p.category_id, 0, 1
       from public.goods_slips g, public.products p where g.gs_no = 'PGTAP-PH3-1' and p.code = 'PGTAP-PH3-P'$$,
-  '%cannot be added or removed%', 'lines are frozen once the count is submitted');
+  'DEC-64: a line can still be added in CATEGORISATION (before the lock)');
+delete from public.gs_items where line_no = 2
+   and gs_id = (select id from public.goods_slips where gs_no = 'PGTAP-PH3-1');
 select throws_like(
   $$update public.goods_slips set status = 'INSPECTION' where gs_no = 'PGTAP-PH3-1'$$,
   'G-03:%without a category%', 'G-03: categorisation needs a category');

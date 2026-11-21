@@ -4,6 +4,10 @@ begin;
 create extension if not exists pgtap with schema extensions;
 select plan(11);
 
+insert into auth.users (id, email, raw_app_meta_data, raw_user_meta_data)
+values ('aaaaaaaa-0000-4000-8000-0000000000c3', 'pgtap-p3-re@example.test',
+        '{"rms_activate": true}'::jsonb, '{"full_name": "pgTAP P3 RE"}'::jsonb);
+
 create temporary table _wv as
 select v.id from public.workflow_versions v
   join public.workflow_definitions d on d.id = v.workflow_definition_id
@@ -26,7 +30,7 @@ select lives_ok(
 -- Q27 (user 2026-11-20): the carton document clears the gate's "no document" tag (stamp checked).
 select throws_like(
   $$update public.goods_slips set missing_documentation = false, missing_documentation_cleared_at = now(),
-           missing_documentation_cleared_by = (select id from public.profiles limit 1)
+           missing_documentation_cleared_by = 'aaaaaaaa-0000-4000-8000-0000000000c3'::uuid
      where gs_no = 'PGTAP-P3-2'$$,
   'Q27:%carton%', 'Q27: the tag is cleared only by a document found in a carton');
 select throws_ok(
@@ -35,7 +39,7 @@ select throws_ok(
   '23514', null, 'Q27: the flag and the cleared stamp never coexist');
 select lives_ok(
   $$update public.goods_slips set missing_documentation = false, missing_documentation_cleared_at = now(),
-           missing_documentation_cleared_by = (select id from public.profiles limit 1)
+           missing_documentation_cleared_by = 'aaaaaaaa-0000-4000-8000-0000000000c3'::uuid
      where gs_no = 'PGTAP-P3-1'$$,
   'Q27: with its carton document the GS may have the tag cleared');
 select throws_ok(

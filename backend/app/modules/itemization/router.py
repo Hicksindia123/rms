@@ -24,16 +24,20 @@ from app.modules.itemization.schemas import (
     CsrDecisionIn,
     ItemFieldsOut,
     ItemIn,
+    ItemizationCommandOut,
     ItemizationStateOut,
     ItemOut,
     ItemPatchIn,
+    LockedAddLineIn,
+    LockedLineIn,
+    LockedRemoveIn,
+    LockIn,
     PackagingCheckIn,
     PackagingCheckOut,
     ProductLookup,
     ReopenIn,
+    ReturnChoiceIn,
     SaveItemCategorisationIn,
-    SubmitCategorisationIn,
-    SubmitItemizationIn,
 )
 from app.modules.itemization.service import ItemizationService
 
@@ -49,6 +53,8 @@ ViewUser = Annotated[CurrentUser, Depends(require("itemization", "view"))]
 CreateUser = Annotated[CurrentUser, Depends(require("itemization", "create"))]
 EditUser = Annotated[CurrentUser, Depends(require("itemization", "edit"))]
 ApproveUser = Annotated[CurrentUser, Depends(require("itemization", "approve"))]
+# DEC-64 d: edits after the categorisation lock (Super Admin, MANAGEMENT; seed.sql grants).
+ConfigureUser = Annotated[CurrentUser, Depends(require("itemization", "configure"))]
 GsViewUser = Annotated[CurrentUser, Depends(require("goods_slips", "view"))]
 StoreUser = Annotated[CurrentUser, Depends(require("inventory", "edit"))]
 
@@ -88,20 +94,85 @@ def lookup_product_fields(product_id: UUID, user: ViewUser, service: ServiceDep)
 
 
 @router.post(
-    "/gs/{gs_id}/itemization/submit",
-    responses={409: {"description": "Not at Counting & Categorisation / idempotency conflict"}},
+    "/gs/{gs_id}/itemization/return-choice",
+    response_model=ItemizationCommandOut,
+    responses={409: {"description": "Already chosen / not before the lock / idempotency"}},
 )
-def submit_itemization(
+def choose_return(
     gs_id: UUID,
-    payload: SubmitItemizationIn,
+    payload: ReturnChoiceIn,
     user: CreateUser,
     perms: EffectivePermissionsDep,
     idem: IdempotencyKeyDep,
     service: ServiceDep,
 ) -> JSONResponse:
-    """DEC-53: Counting & Categorisation -> RM_REVIEW in one transaction (G-01, G-19,
-    Idempotency-Key G-16)."""
-    return service.submit_itemization(user, perms, gs_id, payload, idem).to_response()
+    """DEC-64 (a, b): the popup after the item lines. RO (Replacement) → categorisation; CSR
+    (Complete Sales Return) → SALES_RETURN_HOLD (Q11). Final; Idempotency-Key (G-16)."""
+    return service.choose_return(user, perms, gs_id, payload, idem).to_response()
+
+
+@router.post(
+    "/gs/{gs_id}/categorisation/lock",
+    response_model=ItemizationCommandOut,
+    responses={409: {"description": "Not in categorisation / not Replacement / idempotency"}},
+)
+def lock_categorisation(
+    gs_id: UUID,
+    payload: LockIn,
+    user: CreateUser,
+    perms: EffectivePermissionsDep,
+    idem: IdempotencyKeyDep,
+    service: ServiceDep,
+) -> JSONResponse:
+    """DEC-64 (c), Q12: G-19 per line, inward stock into INWARD_STAGING (once), lock stamp,
+    PENDING_TRANSFER_SLIP, RM notified; one transaction, Idempotency-Key (G-16)."""
+    return service.lock(user, perms, gs_id, payload, idem).to_response()
+
+
+@router.patch("/gs/{gs_id}/locked/items/{item_id}", response_model=ItemizationCommandOut)
+def locked_update_line(
+    gs_id: UUID,
+    item_id: UUID,
+    payload: LockedLineIn,
+    user: ConfigureUser,
+    perms: EffectivePermissionsDep,
+    idem: IdempotencyKeyDep,
+    service: ServiceDep,
+) -> JSONResponse:
+    """DEC-64 d: Super Admin / Management change qty, product or split after the lock (reason,
+    revision, stock corrected in the same transaction), until the first routing."""
+    return service.locked_update_line(user, perms, gs_id, item_id, payload, idem).to_response()
+
+
+@router.post(
+    "/gs/{gs_id}/locked/items",
+    response_model=ItemizationCommandOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def locked_add_line(
+    gs_id: UUID,
+    payload: LockedAddLineIn,
+    user: ConfigureUser,
+    perms: EffectivePermissionsDep,
+    idem: IdempotencyKeyDep,
+    service: ServiceDep,
+) -> JSONResponse:
+    """DEC-64 d: add a line after the lock (split required, stock booked)."""
+    return service.locked_add_line(user, perms, gs_id, payload, idem).to_response()
+
+
+@router.post("/gs/{gs_id}/locked/items/{item_id}/remove", response_model=ItemizationCommandOut)
+def locked_remove_line(
+    gs_id: UUID,
+    item_id: UUID,
+    payload: LockedRemoveIn,
+    user: ConfigureUser,
+    perms: EffectivePermissionsDep,
+    idem: IdempotencyKeyDep,
+    service: ServiceDep,
+) -> JSONResponse:
+    """DEC-64 d: remove a line after the lock (stocked lines stay as history with qty 0)."""
+    return service.locked_remove_line(user, perms, gs_id, item_id, payload, idem).to_response()
 
 
 @router.post(
@@ -194,21 +265,6 @@ def save_item_categorisation(
     return service.save_item_categorisation(
         user, perms, gs_id, item_id, payload, idem
     ).to_response()
-
-
-@router.post("/gs/{gs_id}/categorisation/submit")
-def submit_categorisation(
-    gs_id: UUID,
-    payload: SubmitCategorisationIn,
-    user: CreateUser,
-    perms: EffectivePermissionsDep,
-    idem: IdempotencyKeyDep,
-    service: ServiceDep,
-) -> JSONResponse:
-    """AMD-11 / G-19: Submit item categorisation;
-    enforces sum(bucket) = received_qty -> RM_REVIEW.
-    """
-    return service.submit_categorisation(user, perms, gs_id, payload, idem).to_response()
 
 
 @router.post("/gs/{gs_id}/csr-decision", response_model=ItemizationStateOut)

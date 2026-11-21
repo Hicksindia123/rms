@@ -13,7 +13,7 @@ _ITEM_COLUMNS = """
   i.id, i.gs_id, i.line_no, i.product_id, i.category_id, i.product_code_snapshot,
   i.product_name_snapshot, i.category_code_snapshot, pc.name as category_name,
   i.documented_qty, i.received_qty, i.short_qty, i.excess_qty, i.remarks,
-  i.created_at, i.updated_at
+  i.removed_at, i.removal_reason, i.created_at, i.updated_at
 """
 _ITEM_FROM = """
   from public.gs_items i
@@ -763,3 +763,114 @@ def complete_open_tasks(session: Session, gs_id: UUID) -> int:
         {"gs_id": gs_id},
     )
     return int(getattr(res, "rowcount", 0))
+
+
+# --- DEC-64 (P4): popup choices, lock stamp, revisions, edit window -----------------------------
+def return_choices(session: Session) -> list[dict[str, Any]]:
+    """Active RETURN_CATEGORY options (codes RO / CSR; labels and order from configuration)."""
+    rows = session.execute(
+        text(
+            """
+            select oi.code, oi.label, oi.allowed_status, oi.rule_text, oi.next_action_text,
+                   oi.remarks
+              from public.option_items oi
+              join public.option_sets os on os.id = oi.option_set_id
+             where os.code = 'RETURN_CATEGORY' and oi.is_active
+             order by oi.sort_order, oi.code
+            """
+        )
+    ).mappings()
+    return [dict(r) for r in rows]
+
+
+def set_categorisation_lock(session: Session, gs_id: UUID, *, by: UUID) -> None:
+    session.execute(
+        text(
+            """
+            update public.goods_slips
+               set categorisation_locked_at = now(), categorisation_locked_by = :by,
+                   updated_at = now()
+             where id = :gs_id
+            """
+        ),
+        {"gs_id": gs_id, "by": by},
+    )
+
+
+def insert_revision(
+    session: Session,
+    *,
+    gs_id: UUID,
+    action: str,
+    items_snapshot: list[dict[str, Any]],
+    remarks: str | None,
+    by: UUID,
+) -> int:
+    """A row of rm_review_revisions (lock, edits after the lock); returns its revision number."""
+    rev_no = int(
+        session.execute(
+            text(
+                "select coalesce(max(revision_no), 0) + 1 "
+                "from public.rm_review_revisions where gs_id = :gs_id"
+            ),
+            {"gs_id": gs_id},
+        ).scalar_one()
+    )
+    session.execute(
+        text(
+            """
+            insert into public.rm_review_revisions
+                   (gs_id, revision_no, action, items_snapshot, remarks, created_by)
+            values (:gs_id, :rev_no, :action, cast(:snapshot as jsonb), :remarks, :by)
+            """
+        ),
+        {
+            "gs_id": gs_id,
+            "rev_no": rev_no,
+            "action": action,
+            "snapshot": json.dumps(items_snapshot, default=str),
+            "remarks": remarks,
+            "by": by,
+        },
+    )
+    return rev_no
+
+
+def routing_started(session: Session, gs_id: UUID) -> bool:
+    """DEC-64 d: the same predicate as the DB guard (rms_private.gs_routing_started)."""
+    return bool(
+        session.execute(
+            text("select rms_private.gs_routing_started(:g)"), {"g": gs_id}
+        ).scalar_one()
+    )
+
+
+def mark_item_removed(session: Session, item_id: UUID, *, by: UUID, reason: str) -> None:
+    """DEC-64 d: a stocked line removed after the lock stays as history with qty 0 / 0."""
+    session.execute(
+        text(
+            """
+            update public.gs_items
+               set documented_qty = 0, received_qty = 0, removed_at = now(), removed_by = :by,
+                   removal_reason = :reason, updated_at = now()
+             where id = :id
+            """
+        ),
+        {"id": item_id, "by": by, "reason": reason},
+    )
+
+
+def has_stock_movements(session: Session, gs_item_id: UUID) -> bool:
+    """A line whose lot has ledger movements cannot be deleted (the ledger is append-only)."""
+    return bool(
+        session.execute(
+            text(
+                """
+                select exists (select 1 from public.stock_movements m
+                                 join public.stock_lots l on l.id = m.lot_id
+                                where l.gs_item_id = :i)
+                """
+            ),
+            {"i": gs_item_id},
+        ).scalar_one()
+    )

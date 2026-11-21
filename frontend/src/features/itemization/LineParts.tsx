@@ -121,7 +121,12 @@ export function ItemLineCard({ item, actions }: { item: ItemLine; actions?: Reac
           <dd>{item.received_qty}</dd>
         </div>
         <div className="item-line__badges">
-          {item.short_qty === 0 && item.excess_qty === 0 ? (
+          {item.removed_at ? (
+            <Badge variant="danger" data-testid="line-removed">
+              Removed{item.removal_reason ? `: ${item.removal_reason}` : ''}
+            </Badge>
+          ) : null}
+          {item.short_qty === 0 && item.excess_qty === 0 && !item.removed_at ? (
             <Badge variant="success">Matches document</Badge>
           ) : null}
           {item.short_qty > 0 ? (
@@ -175,18 +180,29 @@ type QtyMap = Record<string, number>;
 
 const sumOf = (m: QtyMap) => Object.values(m).reduce((a, b) => a + b, 0);
 
+/** Edits after the categorisation lock (DEC-64 d): the save goes to the caller with a reason. */
+export interface LockedSave {
+  onSubmit: (body: LineInput, reason: string) => Promise<void>;
+}
+
 /** Add / edit a line: product search, two big steppers, live badges, the condition split
- * (DEC-53: Counting & Categorisation in one step; split total = physical qty, G-19), remarks. */
+ * (split total = physical qty, G-19), remarks. DEC-64: the item screen edits quantities only
+ * (`withSplit={false}`); the categorisation screen adds the split; after the lock Super Admin /
+ * Management edit with a reason (`locked`). */
 export function LineEditor({
   gsId,
   initial,
   onSaved,
   onCancel,
+  withSplit = true,
+  locked,
 }: {
   gsId: string;
   initial?: ItemLine | undefined;
   onSaved: () => void;
   onCancel?: (() => void) | undefined;
+  withSplit?: boolean;
+  locked?: LockedSave | undefined;
 }) {
   const known = useRef(new Map<string, ProductLookup>());
   const [productId, setProductId] = useState(initial?.product_id ?? '');
@@ -194,6 +210,7 @@ export function LineEditor({
   const [documented, setDocumented] = useState(initial?.documented_qty ?? 0);
   const [received, setReceived] = useState(initial?.received_qty ?? 0);
   const [remarks, setRemarks] = useState(initial?.remarks ?? '');
+  const [reason, setReason] = useState('');
   // DEC-53: the product's resolved buckets / counts and the quantities entered for them.
   const [fieldsState, setFieldsState] = useState<{
     productId: string;
@@ -234,7 +251,7 @@ export function LineEditor({
   // what the user is typing.
   const [seed] = useState(initial);
   useEffect(() => {
-    if (!productId) return;
+    if (!productId || !withSplit) return;
     let live = true;
     itemizationApi
       .productFields(productId)
@@ -266,7 +283,7 @@ export function LineEditor({
     return () => {
       live = false;
     };
-  }, [productId, fieldsReload, seed]);
+  }, [productId, fieldsReload, seed, withSplit]);
   // Only a response for the current product (and retry) counts; anything else is "loading".
   const current =
     fieldsState?.productId === productId && fieldsState.reload === fieldsReload
@@ -278,7 +295,9 @@ export function LineEditor({
   const splitTotal = sumOf(split);
   const needsSplit = received > 0;
   const noBuckets = fields !== null && fields.allowed_buckets.length === 0;
-  const splitOk = !needsSplit || (fields !== null && !noBuckets && splitTotal === received);
+  const splitOk =
+    !withSplit || !needsSplit || (fields !== null && !noBuckets && splitTotal === received);
+  const reasonOk = !locked || reason.trim().length >= 3;
 
   const loadOptions = useCallback(
     async (q: string): Promise<ComboboxOption[]> => {
@@ -301,14 +320,19 @@ export function LineEditor({
       documented_qty: documented,
       received_qty: received,
       remarks: remarks.trim() || null,
-      buckets: Object.entries(split).map(([field_code, qty]) => ({ field_code, qty })),
-      counts: Object.entries(counts).map(([count_type, count_value]) => ({
-        count_type,
-        count_value,
-      })),
+      ...(withSplit
+        ? {
+            buckets: Object.entries(split).map(([field_code, qty]) => ({ field_code, qty })),
+            counts: Object.entries(counts).map(([count_type, count_value]) => ({
+              count_type,
+              count_value,
+            })),
+          }
+        : {}),
     };
     try {
-      if (initial) await itemizationApi.updateItem(gsId, initial.id, body);
+      if (locked) await locked.onSubmit(body, reason.trim());
+      else if (initial) await itemizationApi.updateItem(gsId, initial.id, body);
       else await itemizationApi.addItem(gsId, body);
       if (!initial) {
         setProductId('');
@@ -318,6 +342,7 @@ export function LineEditor({
         setRemarks('');
         setSplit({});
         setCounts({});
+        setReason('');
       }
       onSaved();
     } catch (err) {
@@ -392,7 +417,7 @@ export function LineEditor({
       <div aria-live="polite" style={{ margin: '0.5rem 0' }}>
         <QtyBadges documented={documented} received={received} />
       </div>
-      {productId ? (
+      {productId && withSplit ? (
         <fieldset className="line-split" data-testid="line-split-editor">
           <legend className="line-split__legend">Condition split</legend>
           {fieldsError ? (
@@ -461,17 +486,36 @@ export function LineEditor({
           )}
         </fieldset>
       ) : null}
-      <label className="form-label" htmlFor={`${idPrefix}-remarks`}>
-        Remarks (optional)
-      </label>
-      <Textarea
-        id={`${idPrefix}-remarks`}
-        rows={2}
-        value={remarks}
-        onChange={(e) => {
-          setRemarks(e.target.value);
-        }}
-      />
+      {locked ? (
+        <>
+          <label className="form-label" htmlFor={`${idPrefix}-reason`}>
+            Reason for the change (required)
+          </label>
+          <Textarea
+            id={`${idPrefix}-reason`}
+            rows={2}
+            maxLength={500}
+            value={reason}
+            onChange={(e) => {
+              setReason(e.target.value);
+            }}
+          />
+        </>
+      ) : (
+        <>
+          <label className="form-label" htmlFor={`${idPrefix}-remarks`}>
+            Remarks (optional)
+          </label>
+          <Textarea
+            id={`${idPrefix}-remarks`}
+            rows={2}
+            value={remarks}
+            onChange={(e) => {
+              setRemarks(e.target.value);
+            }}
+          />
+        </>
+      )}
       {error ? (
         <p role="alert" className="form-control__error">
           {error.message}
@@ -488,7 +532,7 @@ export function LineEditor({
           type="button"
           variant="primary"
           isLoading={busy}
-          disabled={!productId || (documented === 0 && received === 0) || !splitOk}
+          disabled={!productId || (documented === 0 && received === 0) || !splitOk || !reasonOk}
           onClick={() => {
             void save();
           }}

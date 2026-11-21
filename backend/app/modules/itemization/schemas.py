@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.attachments.schemas import AttachmentOut
 
@@ -130,6 +130,9 @@ class ItemOut(BaseModel):
     counts: list[ItemCountOut] = Field(default_factory=list)
     bucket_total: int = 0
     is_balanced: bool = False  # G-19: bucket_total == received_qty
+    # DEC-64 d: removed by Super Admin / Management after the lock (kept as history, qty 0).
+    removed_at: datetime | None = None
+    removal_reason: str | None = None
 
 
 class CategoryOption(BaseModel):
@@ -281,6 +284,8 @@ class ItemizationGs(BaseModel):
     csr_commercial_path: bool
     categorized_at: datetime | None
     counted_by: UUID | None = None
+    # DEC-64: categorisation lock (inward stock booked); edits afterwards by Management only.
+    categorisation_locked_at: datetime | None = None
 
 
 class ItemCategorisationDetail(BaseModel):
@@ -353,6 +358,11 @@ class ItemizationPermissions(BaseModel):
     can_request_correction: bool
     can_decide_correction: bool
     can_check_packaging: bool
+    # DEC-64 (P4): popup Replacement / Complete Sales Return, lock, edits after the lock.
+    can_choose_return: bool = False
+    can_lock: bool = False
+    can_edit_locked: bool = False
+    edit_window_closed: bool = False  # routing has started (DEC-64 d)
 
 
 class ItemizationStateOut(BaseModel):
@@ -369,6 +379,8 @@ class ItemizationStateOut(BaseModel):
     corrections: list[CorrectionOut]
     evidence: list[AttachmentOut]
     permissions: ItemizationPermissions
+    # DEC-64: the popup choices = active RETURN_CATEGORY options (labels from config).
+    return_choices: list[CategoryOption] = Field(default_factory=list)
 
 
 class CategorizeOut(BaseModel):
@@ -391,3 +403,54 @@ class CsrApprovalCard(BaseModel):
 
 def option_out(raw: dict[str, Any]) -> CategoryOption:
     return CategoryOption.model_validate({k: raw.get(k) for k in CategoryOption.model_fields})
+
+
+# --- DEC-64 (P4): popup, lock, edits after the lock ----------------------------------------------
+class ReturnChoiceIn(BaseModel):
+    """The popup after the item lines: Replacement (RO) or Complete Sales Return (CSR)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    category_code: str = Field(min_length=1, max_length=40, description="RETURN_CATEGORY code")
+
+
+class LockIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    remarks: str | None = Field(default=None, max_length=1000)
+
+
+class LockedLineIn(BaseModel):
+    """DEC-64 d: Super Admin / Management change a locked line (reason required). When the
+    physical qty or the product changes, the whole split is sent again (G-19)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    product_id: UUID | None = None
+    documented_qty: int | None = Field(default=None, ge=0, le=1_000_000)
+    received_qty: int | None = Field(default=None, ge=0, le=1_000_000)
+    buckets: list[ItemBucketIn] | None = None
+    counts: list[ItemCountIn] | None = None
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class LockedAddLineIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    product_id: UUID
+    documented_qty: int = Field(default=0, ge=0, le=1_000_000)
+    received_qty: int = Field(ge=0, le=1_000_000)
+    buckets: list[ItemBucketIn] = Field(default_factory=list)
+    counts: list[ItemCountIn] | None = None
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class LockedRemoveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class ItemizationCommandOut(BaseModel):
+    state: ItemizationStateOut
+    revision_no: int | None = None

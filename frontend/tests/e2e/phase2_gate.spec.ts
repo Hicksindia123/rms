@@ -367,44 +367,38 @@ test.describe('Phase 2 gate scenarios (P2-08)', () => {
   });
 
   // --- E2E-05 -----------------------------------------------------------------------------------
-  test('E2E-05 short quantity GS: shortage recorded, only received pieces processed', async ({
+  test('E2E-05 short quantity GS: shortage recorded, only received pieces stocked at the lock (DEC-64)', async ({
     browser,
   }) => {
     test.setTimeout(150_000);
     const gs = await createGs('E2E05');
     await unboxed(gs);
+    const product = await productId('DMT');
+    const fields = await api<{ allowed_buckets: Array<{ field_code: string }> }>(
+      USERS.aman,
+      'GET',
+      `/itemization/lookups/products/${product}/fields`,
+    );
+    const bucket = fields.allowed_buckets[0]?.field_code ?? '';
+    const itemId = await addItem(gs.id, product, 10, 8);
 
     const aman = await open(browser, USERS.aman, `/gs/${gs.id}/itemization`);
-    const editor = aman.getByTestId('line-editor').last();
-    await editor.getByRole('combobox').or(editor.locator('input').first()).first().fill('Demo DMT');
-    await aman
-      .getByRole('option', { name: /Demo DMT/ })
-      .first()
-      .click();
-    await editor.getByRole('spinbutton', { name: 'As per document' }).fill('10');
-    await editor.getByRole('spinbutton', { name: 'Physically received' }).fill('8');
-    await editor.getByRole('button', { name: 'Add line' }).click();
     await expect(aman.getByTestId('item-line')).toHaveCount(1);
     await expect(aman.getByTestId('item-line').first()).toContainText('Short 2');
-    await aman.locator('.category-option', { hasText: 'Replacement Only' }).click();
-    await aman.getByRole('button', { name: 'Categorise GS' }).click();
-    await expect.poll(() => gsStatus(gs.id)).toBe('INSPECTION');
+    // Popup: Replacement → categorisation; the split is the physically received 8.
+    await aman.getByTestId('items-next').click();
+    await aman.getByRole('dialog').getByLabel('Replacement', { exact: true }).check();
+    await aman.getByTestId('return-choice-confirm').click();
+    await expect.poll(() => gsStatus(gs.id)).toBe('CATEGORISATION');
+    await api(USERS.aman, 'PATCH', `/gs/${gs.id}/items/${itemId}`, {
+      buckets: [{ field_code: bucket, qty: 8 }],
+    });
+    await aman.reload();
+    await aman.getByTestId('lock-categorisation').click();
+    await aman.getByTestId('lock-confirm').click();
+    await expect.poll(() => gsStatus(gs.id)).toBe('PENDING_TRANSFER_SLIP');
     await expect(aman.getByTestId('lot-row').first()).toContainText('Inward Staging: 8');
     await expectNoHorizontalOverflow(aman);
-
-    await aman.goto(`/#/gs/${gs.id}/inspection`);
-    const card = lineCard(aman, 1);
-    await expect(card).toContainText('Short: 2');
-    const state = await api<InspectionState>(USERS.aman, 'GET', `/gs/${gs.id}/inspection`);
-    expect(state.lines[0]?.short_qty).toBe(2);
-    await gradeInUi(
-      aman,
-      1,
-      state.lines[0]?.condition_options ?? [],
-      { DMT_OK_PACKED: 8, DMT_SHORT_QTY: 2 },
-      { received: 8 },
-    );
-    await expect.poll(() => gsStatus(gs.id)).toBe('RM_REVIEW');
     await shot(aman, 'e2e05-short-qty');
   });
 

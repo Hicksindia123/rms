@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { ArrowLeft, FileText, Pencil, Trash2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, FileText, Lock, Pencil, Plus, Trash2 } from 'lucide-react';
 
 import { Badge, Button, ErrorState, LoadingState, Modal, Textarea } from '@/components/ui';
 import { StatusChip } from '@/features/goods-slips/display';
@@ -17,8 +17,19 @@ import {
   type StepOption,
 } from './api';
 import { CsrDecisionCard } from './DecisionCards';
-import { ItemCategorisationSection } from './ItemCategorisationSection';
-import { DocumentPanel, ItemLineCard, LineEditor, QtyBadges, QtyStepper } from './LineParts';
+import {
+  DocumentPanel,
+  ItemLineCard,
+  LineEditor,
+  QtyBadges,
+  QtyStepper,
+  type LockedSave,
+} from './LineParts';
+
+/** DEC-64: statuses of the new flow (codes; labels come from GS_STATUS). */
+const LOCKED = 'PENDING_TRANSFER_SLIP';
+const HOLD = 'SALES_RETURN_HOLD';
+const CATEGORISATION = 'CATEGORISATION';
 
 interface Props {
   gsId: string;
@@ -42,10 +53,10 @@ function ActionError({ error }: { error: ApiError | null }) {
   );
 }
 
-/** Step-3 (Aman): Counting & Categorisation in one step (DEC-53): each line is recorded with its
- * condition split (status ITEMIZATION), then one submit sends the GS to RM Review. After an RM
- * send-back (status CATEGORISATION) only the split is edited. P2-04 + change plan Phase 3/5.
- * Page titles come from the GS_STATUS labels. */
+/** Steps 2b / 2c (Replacement Executive, DEC-64): item lines of all cartons (doc qty + physical
+ * qty) → "Next" → popup Replacement / Complete Sales Return → categorisation (condition split per
+ * line, G-19) → Lock. After the lock only Super Admin / Management edit (reason, until routing).
+ * Legacy statuses (CSR approval, inspection, RM review) keep their sections. Labels: GS_STATUS. */
 export function ItemizationPage({ gsId, onBack }: Props) {
   const fetcher = useCallback(() => itemizationApi.state(gsId), [gsId]);
   const query = useApiQuery<ItemizationState>(fetcher);
@@ -121,27 +132,48 @@ export function ItemizationPage({ gsId, onBack }: Props) {
               Submitted to {statusLabel('RM_REVIEW')}. The Replacement Manager has been notified.
             </div>
           ) : null}
-          <LinesSection state={state} onChanged={query.reload} />
-          {p.can_edit_lines ? <SubmitToRmSection state={state} onDone={query.reload} /> : null}
-          {p.can_categorize ? (
-            <>
-              <ItemCategorisationSection
-                gsId={gs.id}
-                onDone={() => {
-                  query.reload();
-                }}
-              />
-              {state.category_options.length > 0 ? (
-                <CategorizeSection
-                  state={state}
-                  onDone={(next) => {
-                    query.setData(next);
-                  }}
-                />
-              ) : null}
-            </>
+          {gs.status === HOLD ? (
+            <div className="banner banner--warning" role="status" data-testid="sales-return-hold">
+              {state.category_label ?? statusLabel(HOLD)} recorded: {statusLabel(HOLD)}. There are
+              no further steps for now.
+            </div>
           ) : null}
-          {gs.category_code ? <DecisionSection state={state} onChanged={query.reload} /> : null}
+          {gs.status === LOCKED ? (
+            <div
+              className="banner banner--success"
+              role="status"
+              data-testid="categorisation-locked"
+            >
+              <Lock size={16} aria-hidden="true" /> Categorisation locked
+              {gs.categorisation_locked_at
+                ? ` on ${formatDateTime(gs.categorisation_locked_at)}`
+                : ''}
+              ; the goods are booked into Inward Staging. Waiting for the transfer slip.
+              {p.edit_window_closed
+                ? ' Department routing has started, so the lines can no longer change.'
+                : ''}
+            </div>
+          ) : null}
+          <LinesSection state={state} onChanged={query.reload} />
+          {p.can_choose_return ? (
+            <ReturnChoiceSection
+              state={state}
+              onDone={(next) => {
+                query.setData(next);
+              }}
+            />
+          ) : null}
+          {gs.status === CATEGORISATION && gs.category_code === 'RO' && p.can_categorize ? (
+            <LockSection
+              state={state}
+              onDone={(next) => {
+                query.setData(next);
+              }}
+            />
+          ) : null}
+          {gs.category_code && ![CATEGORISATION, LOCKED, HOLD].includes(gs.status) ? (
+            <DecisionSection state={state} onChanged={query.reload} />
+          ) : null}
           {state.lots.length > 0 ? <StockSection state={state} onChanged={query.reload} /> : null}
           {state.corrections.length > 0 ? <CorrectionsHistory state={state} /> : null}
         </div>
@@ -160,10 +192,48 @@ export function ItemizationPage({ gsId, onBack }: Props) {
 function LinesSection({ state, onChanged }: { state: ItemizationState; onChanged: () => void }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [correcting, setCorrecting] = useState<ItemLine | null>(null);
+  const [removing, setRemoving] = useState<ItemLine | null>(null);
+  const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const gs = state.goods_slip;
   const p = state.permissions;
+  // DEC-64: the item screen records quantities only; the split is entered at categorisation.
+  const withSplit = gs.status !== 'ITEMIZATION';
+  const lockedEdit = p.can_edit_locked === true;
+  const lockedSave = (item: ItemLine | null): LockedSave => ({
+    onSubmit: async (body, reason) => {
+      const key = newIdempotencyKey();
+      if (item) {
+        await itemizationApi.lockedUpdateLine(
+          gs.id,
+          item.id,
+          {
+            ...(body.product_id !== item.product_id ? { product_id: body.product_id } : {}),
+            documented_qty: body.documented_qty,
+            received_qty: body.received_qty,
+            buckets: body.buckets ?? [],
+            counts: body.counts ?? [],
+            reason,
+          },
+          key,
+        );
+      } else {
+        await itemizationApi.lockedAddLine(
+          gs.id,
+          {
+            product_id: body.product_id,
+            documented_qty: body.documented_qty,
+            received_qty: body.received_qty,
+            buckets: body.buckets ?? [],
+            counts: body.counts ?? [],
+            reason,
+          },
+          key,
+        );
+      }
+    },
+  });
   // Excess only where a document qty was entered (it is optional at counting, Phase 3).
   const documentedExcess = state.items
     .filter((i) => i.documented_qty > 0)
@@ -188,8 +258,17 @@ function LinesSection({ state, onChanged }: { state: ItemizationState; onChanged
   return (
     <section className="card unboxing__section" aria-labelledby="lines-h">
       <h2 id="lines-h" className="unboxing__h2">
-        Counted items
+        {gs.status === 'ITEMIZATION'
+          ? 'Items (all cartons)'
+          : gs.status === CATEGORISATION
+            ? 'Categorise each line'
+            : 'Counted items'}
       </h2>
+      {gs.status === CATEGORISATION ? (
+        <p className="page__subtitle" style={{ margin: 0 }}>
+          Split each line&apos;s physically received quantity into the conditions of its product.
+        </p>
+      ) : null}
       <p className="page__subtitle" style={{ margin: 0 }}>
         {state.totals.lines} line(s) · received {state.totals.received_qty}
         {state.totals.documented_qty > 0
@@ -210,6 +289,8 @@ function LinesSection({ state, onChanged }: { state: ItemizationState; onChanged
                 <LineEditor
                   gsId={gs.id}
                   initial={item}
+                  withSplit={withSplit}
+                  locked={lockedEdit ? lockedSave(item) : undefined}
                   onSaved={() => {
                     setEditing(null);
                     onChanged();
@@ -224,7 +305,31 @@ function LinesSection({ state, onChanged }: { state: ItemizationState; onChanged
                 key={item.id}
                 item={item}
                 actions={
-                  p.can_edit_lines ? (
+                  lockedEdit && item.removed_at ? null : lockedEdit ? (
+                    <span className="item-line__actions">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        aria-label={`Change line ${String(item.line_no)} (after the lock)`}
+                        onClick={() => {
+                          setEditing(item.id);
+                        }}
+                      >
+                        <Pencil size={16} aria-hidden="true" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        aria-label={`Remove line ${String(item.line_no)} (after the lock)`}
+                        disabled={state.items.length <= 1}
+                        onClick={() => {
+                          setRemoving(item);
+                        }}
+                      >
+                        <Trash2 size={16} aria-hidden="true" />
+                      </Button>
+                    </span>
+                  ) : p.can_edit_lines ? (
                     <span className="item-line__actions">
                       <Button
                         type="button"
@@ -272,8 +377,49 @@ function LinesSection({ state, onChanged }: { state: ItemizationState; onChanged
       {p.can_edit_lines && editing === null ? (
         <div className="itemize__add">
           <h3 className="itemize__h3">Add item</h3>
-          <LineEditor gsId={gs.id} onSaved={onChanged} />
+          <LineEditor gsId={gs.id} withSplit={withSplit} onSaved={onChanged} />
         </div>
+      ) : null}
+      {lockedEdit && editing === null ? (
+        adding ? (
+          <div className="itemize__add">
+            <h3 className="itemize__h3">Add a line (after the lock)</h3>
+            <LineEditor
+              gsId={gs.id}
+              locked={lockedSave(null)}
+              onSaved={() => {
+                setAdding(false);
+                onChanged();
+              }}
+              onCancel={() => {
+                setAdding(false);
+              }}
+            />
+          </div>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setAdding(true);
+            }}
+          >
+            <Plus size={16} aria-hidden="true" /> Add a line
+          </Button>
+        )
+      ) : null}
+      {removing ? (
+        <LockedRemoveDialog
+          gsId={gs.id}
+          item={removing}
+          onClose={() => {
+            setRemoving(null);
+          }}
+          onDone={() => {
+            setRemoving(null);
+            onChanged();
+          }}
+        />
       ) : null}
       {correcting ? (
         <CorrectionDialog
@@ -292,121 +438,30 @@ function LinesSection({ state, onChanged }: { state: ItemizationState; onChanged
   );
 }
 
-/** DEC-53: Counting & Categorisation are one step. Lines are saved with their condition split as
- * a draft; one submit locks them, stocks the received qty into Inward Staging and sends the GS to
- * RM Review (later changes: RM edit in review, or an RM send-back for the split). */
-function SubmitToRmSection({ state, onDone }: { state: ItemizationState; onDone: () => void }) {
-  const [confirming, setConfirming] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<ApiError | null>(null);
-  const key = useRef<string | null>(null);
-  const statusLabel = useStatusLabels();
-  const unbalanced = state.items.filter((i) => i.is_balanced === false);
-  const canSubmit = state.permissions.can_submit_to_rm === true;
-
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    key.current ??= newIdempotencyKey();
-    try {
-      await itemizationApi.submitItemization(state.goods_slip.id, null, key.current);
-      onDone();
-    } catch (err) {
-      const apiError = toApiError(err);
-      if (apiError.status >= 400 && apiError.status < 500) key.current = null;
-      setError(apiError);
-    } finally {
-      setBusy(false);
-      setConfirming(false);
-    }
-  };
-
-  return (
-    <section className="card unboxing__section" aria-labelledby="submit-rm-h">
-      <h2 id="submit-rm-h" className="unboxing__h2">
-        Submit to {statusLabel('RM_REVIEW')}
-      </h2>
-      <p className="page__subtitle" style={{ margin: 0 }}>
-        Each line is saved with its condition split as you add it (draft). Submit when every carton
-        is counted; the lines are then locked and the Replacement Manager reviews them.
-      </p>
-      {unbalanced.length > 0 ? (
-        <p role="alert" className="form-control__error">
-          Condition split does not match the physical quantity on line(s){' '}
-          {unbalanced.map((i) => `#${String(i.line_no)}`).join(', ')}. Edit those lines first.
-        </p>
-      ) : null}
-      <ActionError error={error} />
-      {confirming ? (
-        <div className="line-editor__actions">
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={busy}
-            onClick={() => {
-              setConfirming(false);
-            }}
-          >
-            Keep counting
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            isLoading={busy}
-            onClick={() => {
-              void submit();
-            }}
-          >
-            Confirm submit ({state.totals.lines} line(s), {state.totals.received_qty} pcs)
-          </Button>
-        </div>
-      ) : (
-        <Button
-          type="button"
-          variant="primary"
-          disabled={!canSubmit}
-          onClick={() => {
-            setConfirming(true);
-          }}
-        >
-          Submit to {statusLabel('RM_REVIEW')}
-        </Button>
-      )}
-      {state.items.length === 0 ? (
-        <p className="page__subtitle" style={{ margin: 0 }}>
-          Add at least one item to submit.
-        </p>
-      ) : null}
-    </section>
-  );
-}
-
-export function CategorizeSection({
+/** DEC-64 (a, b): "Next" → popup Replacement / Complete Sales Return (choices and labels from
+ * RETURN_CATEGORY). The choice is final: Replacement → categorisation; Complete Sales Return →
+ * on hold (Q11). */
+function ReturnChoiceSection({
   state,
   onDone,
 }: {
   state: ItemizationState;
   onDone: (next: ItemizationState) => void;
 }) {
-  const [category, setCategory] = useState('');
-  const [remarks, setRemarks] = useState('');
+  const [open, setOpen] = useState(false);
+  const [choice, setChoice] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
-  const key = useRef<{ category: string; key: string } | null>(null);
+  const key = useRef<{ choice: string; key: string } | null>(null);
+  const choices = state.return_choices ?? [];
 
-  const submit = async () => {
+  const confirm = async () => {
     setBusy(true);
     setError(null);
-    if (key.current?.category !== category) {
-      key.current = { category, key: newIdempotencyKey() };
-    }
+    if (key.current?.choice !== choice) key.current = { choice, key: newIdempotencyKey() };
     try {
-      const res = await itemizationApi.categorize(
-        state.goods_slip.id,
-        category,
-        remarks.trim(),
-        key.current.key,
-      );
+      const res = await itemizationApi.chooseReturn(state.goods_slip.id, choice, key.current.key);
+      setOpen(false);
       onDone(res.state);
     } catch (err) {
       const apiError = toApiError(err);
@@ -418,66 +473,251 @@ export function CategorizeSection({
   };
 
   return (
-    <section className="card unboxing__section" aria-labelledby="category-h">
-      <h2 id="category-h" className="unboxing__h2">
-        Return categorisation (whole GS)
-      </h2>
-      <div role="radiogroup" aria-labelledby="category-h" className="category-options">
-        {state.category_options.map((o) => (
-          <label
-            key={o.code}
-            className={`category-option${category === o.code ? ' category-option--selected' : ''}`}
-          >
-            <input
-              type="radio"
-              name="return-category"
-              value={o.code}
-              checked={category === o.code}
-              onChange={() => {
-                setCategory(o.code);
-              }}
-            />
-            <span className="category-option__body">
-              <span className="category-option__title">
-                {o.label} <AllowedStatusBadge option={o} />
-              </span>
-              {o.rule_text ? <span className="category-option__rule">{o.rule_text}</span> : null}
-              {o.next_action_text ? (
-                <span className="category-option__next">→ {o.next_action_text}</span>
-              ) : null}
-            </span>
-          </label>
-        ))}
-      </div>
-      <label className="form-label" htmlFor="category-remarks">
-        Remarks (optional)
-      </label>
-      <Textarea
-        id="category-remarks"
-        rows={2}
-        value={remarks}
-        onChange={(e) => {
-          setRemarks(e.target.value);
+    <div className="sticky-submit unboxing__complete">
+      <Button
+        type="button"
+        variant="primary"
+        size="lg"
+        data-testid="items-next"
+        onClick={() => {
+          setOpen(true);
         }}
-      />
+      >
+        Next <ArrowRight size={18} aria-hidden="true" />
+      </Button>
+      <span className="page__subtitle" style={{ margin: 0 }}>
+        {state.totals.lines} line(s) · {state.totals.received_qty} pcs received
+      </span>
+      {open ? (
+        <Modal
+          isOpen
+          onClose={() => {
+            setOpen(false);
+          }}
+          title="What is this return?"
+          footer={
+            <>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => {
+                  setOpen(false);
+                }}
+              >
+                Back to items
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                isLoading={busy}
+                disabled={!choice}
+                data-testid="return-choice-confirm"
+                onClick={() => {
+                  void confirm();
+                }}
+              >
+                Confirm
+              </Button>
+            </>
+          }
+        >
+          <div role="radiogroup" aria-label="Return type" className="category-options">
+            {choices.map((o) => (
+              <label
+                key={o.code}
+                className={`category-option${choice === o.code ? ' category-option--selected' : ''}`}
+              >
+                <input
+                  type="radio"
+                  name="return-choice"
+                  value={o.code}
+                  checked={choice === o.code}
+                  onChange={() => {
+                    setChoice(o.code);
+                  }}
+                />
+                <span className="category-option__body">
+                  <span className="category-option__title">{o.label}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="page__subtitle">This choice cannot be changed later.</p>
+          <ActionError error={error} />
+        </Modal>
+      ) : null}
+    </div>
+  );
+}
+
+/** DEC-64 (c): lock the categorisation. One transaction books the physical quantities into
+ * Inward Staging (Q12); afterwards only Super Admin / Management can change the lines. */
+function LockSection({
+  state,
+  onDone,
+}: {
+  state: ItemizationState;
+  onDone: (next: ItemizationState) => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const key = useRef<string | null>(null);
+  const unbalanced = state.items.filter((i) => i.is_balanced === false);
+
+  const lock = async () => {
+    setBusy(true);
+    setError(null);
+    key.current ??= newIdempotencyKey();
+    try {
+      const res = await itemizationApi.lockCategorisation(state.goods_slip.id, null, key.current);
+      onDone(res.state);
+    } catch (err) {
+      const apiError = toApiError(err);
+      if (apiError.status >= 400 && apiError.status < 500) key.current = null;
+      setError(apiError);
+    } finally {
+      setBusy(false);
+      setConfirming(false);
+    }
+  };
+
+  return (
+    <section className="card unboxing__section" aria-labelledby="lock-h">
+      <h2 id="lock-h" className="unboxing__h2">
+        <Lock size={18} aria-hidden="true" /> Lock Categorisation
+      </h2>
+      {unbalanced.length > 0 ? (
+        <p role="alert" className="form-control__error" data-testid="unbalanced-lines">
+          The condition split does not match the physical quantity on line(s){' '}
+          {unbalanced.map((i) => `#${String(i.line_no)}`).join(', ')}.
+        </p>
+      ) : null}
       <ActionError error={error} />
-      <div className="unboxing__complete">
+      {confirming ? (
+        <>
+          <p className="page__subtitle" style={{ margin: 0 }}>
+            Locking books {state.totals.received_qty} piece(s) into Inward Staging. Afterwards only
+            Super Admin or Management can change the lines.
+          </p>
+          <div className="line-editor__actions">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => {
+                setConfirming(false);
+              }}
+            >
+              Keep editing
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              isLoading={busy}
+              data-testid="lock-confirm"
+              onClick={() => {
+                void lock();
+              }}
+            >
+              Confirm lock
+            </Button>
+          </div>
+        </>
+      ) : (
         <Button
           type="button"
           variant="primary"
-          isLoading={busy}
-          disabled={!category}
+          size="lg"
+          disabled={state.permissions.can_lock !== true}
+          data-testid="lock-categorisation"
           onClick={() => {
-            void submit();
+            setConfirming(true);
           }}
         >
-          Categorise GS
+          <Lock size={16} aria-hidden="true" /> Lock Categorisation
         </Button>
-        <span className="page__subtitle" style={{ margin: 0 }}>
-          Stocks {state.totals.received_qty} received piece(s) into Inward Staging.
-        </span>
-      </div>
+      )}
     </section>
+  );
+}
+
+/** DEC-64 d: remove a line after the lock (reason required; a stocked line stays with qty 0). */
+function LockedRemoveDialog({
+  gsId,
+  item,
+  onClose,
+  onDone,
+}: {
+  gsId: string;
+  item: ItemLine;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const key = useRef<string | null>(null);
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    key.current ??= newIdempotencyKey();
+    try {
+      await itemizationApi.lockedRemoveLine(gsId, item.id, reason.trim(), key.current);
+      onDone();
+    } catch (err) {
+      const apiError = toApiError(err);
+      if (apiError.status >= 400 && apiError.status < 500) key.current = null;
+      setError(apiError);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      isOpen
+      onClose={onClose}
+      title={`Remove line ${String(item.line_no)}`}
+      footer={
+        <>
+          <Button type="button" variant="secondary" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            isLoading={busy}
+            disabled={reason.trim().length < 3}
+            onClick={() => {
+              void submit();
+            }}
+          >
+            Remove line
+          </Button>
+        </>
+      }
+    >
+      <p className="page__subtitle">
+        {item.product_name}: its stock is taken out of Inward Staging. The line stays in the history
+        with quantity 0.
+      </p>
+      <label className="form-label" htmlFor="locked-remove-reason">
+        Reason (required)
+      </label>
+      <Textarea
+        id="locked-remove-reason"
+        rows={3}
+        maxLength={500}
+        value={reason}
+        onChange={(e) => {
+          setReason(e.target.value);
+        }}
+      />
+      <ActionError error={error} />
+    </Modal>
   );
 }
 

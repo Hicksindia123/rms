@@ -7,7 +7,9 @@ import type { ItemizationState, ItemLine, StepOption } from '@/features/itemizat
 const stateFn = vi.fn<() => Promise<ItemizationState>>();
 const decideFn = vi.fn<(...args: unknown[]) => Promise<ItemizationState>>();
 const updateItemFn = vi.fn<(...args: unknown[]) => Promise<unknown>>();
-const submitItemizationFn = vi.fn<(...args: unknown[]) => Promise<unknown>>();
+const chooseReturnFn = vi.fn<(...args: unknown[]) => Promise<unknown>>();
+const lockFn = vi.fn<(...args: unknown[]) => Promise<unknown>>();
+const lockedUpdateFn = vi.fn<(...args: unknown[]) => Promise<unknown>>();
 vi.mock('@/features/itemization/api', () => ({
   itemizationApi: {
     state: () => stateFn(),
@@ -15,7 +17,9 @@ vi.mock('@/features/itemization/api', () => ({
     categories: () => Promise.resolve([]),
     decide: (...args: unknown[]) => decideFn(...args),
     updateItem: (...args: unknown[]) => updateItemFn(...args),
-    submitItemization: (...args: unknown[]) => submitItemizationFn(...args),
+    chooseReturn: (...args: unknown[]) => chooseReturnFn(...args),
+    lockCategorisation: (...args: unknown[]) => lockFn(...args),
+    lockedUpdateLine: (...args: unknown[]) => lockedUpdateFn(...args),
     // DEC-53: the product's resolved buckets / counts (backend ItemFieldsOut shape).
     productFields: (productId: string) =>
       Promise.resolve({
@@ -147,6 +151,11 @@ function state(over: Partial<ItemizationState> = {}): ItemizationState {
     transfers: [],
     corrections: [],
     evidence: [],
+    // DEC-64: the popup choices (RETURN_CATEGORY, labels from configuration).
+    return_choices: [
+      { ...CATEGORY[1], label: 'Replacement' } as StepOption,
+      CATEGORY[0] as StepOption,
+    ],
     permissions: {
       can_edit_lines: true,
       can_submit_counting: true,
@@ -156,6 +165,7 @@ function state(over: Partial<ItemizationState> = {}): ItemizationState {
       can_request_correction: false,
       can_decide_correction: false,
       can_check_packaging: false,
+      can_choose_return: true,
     },
     ...over,
   };
@@ -171,7 +181,9 @@ afterEach(() => {
   stateFn.mockReset();
   decideFn.mockReset();
   updateItemFn.mockReset();
-  submitItemizationFn.mockReset();
+  chooseReturnFn.mockReset();
+  lockFn.mockReset();
+  lockedUpdateFn.mockReset();
 });
 
 describe('Itemisation (P2-04)', () => {
@@ -184,26 +196,59 @@ describe('Itemisation (P2-04)', () => {
     expect(screen.getByText('Matches document')).toBeInTheDocument();
   });
 
-  it('renders category explanations from the option set and "Requires approval" for CONDITIONAL', async () => {
+  it('DEC-64: the item screen records quantities only; Next opens the popup (final choice)', async () => {
     stateFn.mockResolvedValue(state());
+    chooseReturnFn.mockResolvedValue({
+      state: state({
+        goods_slip: { ...state().goods_slip, status: 'CATEGORISATION', category_code: 'RO' },
+        permissions: { ...state().permissions, can_choose_return: false },
+      }),
+      revision_no: null,
+    });
     render(<ItemizationPage gsId="gs-1" onBack={() => undefined} />);
-    expect(await screen.findByText('Rule text from the option set (CSR)')).toBeInTheDocument();
-    expect(screen.getByText('Rule text from the option set (RO)')).toBeInTheDocument();
-    expect(screen.getByText(/Next action from the option set \(CSR\)/)).toBeInTheDocument();
-    expect(screen.getAllByText('Requires approval')).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'Categorise GS' })).toBeDisabled();
-    fireEvent.click(screen.getByLabelText(/Replacement Only/));
-    expect(screen.getByRole('button', { name: 'Categorise GS' })).toBeEnabled();
-    // The counted line with its shortage, and the line editor with the two big steppers.
-    expect(screen.getByText('Demo DMT Product (DEMO)')).toBeInTheDocument();
+    // The counted line with its shortage, and the line editor with the two big steppers only.
+    expect(await screen.findByText('Demo DMT Product (DEMO)')).toBeInTheDocument();
     expect(screen.getAllByText('Short 2').length).toBeGreaterThan(0);
     expect(screen.getByLabelText('As per document (optional)')).toBeInTheDocument();
     expect(screen.getByLabelText('Physically received')).toBeInTheDocument();
-    // AMD-08: counting is a draft until submitted; search filters by category / sub-category.
-    // DEC-53: one submit to RM Review; disabled until every line's split balances.
-    expect(screen.getByRole('button', { name: /^Submit to / })).toBeDisabled();
+    expect(screen.queryByTestId('line-split-editor')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Categorise GS' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Submit to / })).toBeNull();
     expect(screen.getByLabelText('Filter by category')).toBeInTheDocument();
-    expect(screen.getByLabelText('Filter by sub-category')).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId('items-next'));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Replacement');
+    expect(dialog).toHaveTextContent('Complete Sales Return');
+    expect(dialog).toHaveTextContent('cannot be changed later');
+    const confirm = screen.getByTestId('return-choice-confirm');
+    expect(confirm).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('Replacement'));
+    fireEvent.click(confirm);
+    await waitFor(() => {
+      expect(chooseReturnFn).toHaveBeenCalledWith('gs-1', 'RO', 'web-test-key');
+    });
+  });
+
+  it('DEC-64: Complete Sales Return on hold shows a banner and no further actions', async () => {
+    stateFn.mockResolvedValue(
+      state({
+        goods_slip: { ...state().goods_slip, status: 'SALES_RETURN_HOLD', category_code: 'CSR' },
+        category_label: 'Complete Sales Return',
+        permissions: {
+          ...state().permissions,
+          can_edit_lines: false,
+          can_categorize: false,
+          can_choose_return: false,
+        },
+      }),
+    );
+    render(<ItemizationPage gsId="gs-1" onBack={() => undefined} />);
+    expect(await screen.findByTestId('sales-return-hold')).toHaveTextContent(
+      'Complete Sales Return',
+    );
+    expect(screen.queryByTestId('items-next')).toBeNull();
+    expect(screen.queryByTestId('lock-categorisation')).toBeNull();
   });
 
   it('hides editing and categorisation without permission and shows the RM wait banner', async () => {
@@ -262,7 +307,7 @@ describe('Itemisation (P2-04)', () => {
     expect(decideFn).toHaveBeenCalledWith('gs-1', 'CSR_APPROVED', 'Damaged pieces', 'web-test-key');
   });
 
-  it('DEC-53: a line is saved with its condition split; Save waits until split = physical qty', async () => {
+  it('categorisation: a line is saved with its condition split; Save waits until split = physical qty', async () => {
     updateItemFn.mockResolvedValue({});
     const onSaved = vi.fn();
     render(<LineEditor gsId="gs-1" initial={firstLine()} onSaved={onSaved} />);
@@ -296,26 +341,66 @@ describe('Itemisation (P2-04)', () => {
     );
   });
 
-  it('DEC-53: one submit sends a balanced GS to RM Review; unbalanced lines are named', async () => {
+  it('DEC-64: Lock Categorisation asks for confirmation, then locks once', async () => {
     const balanced = state({
-      category_options: [],
+      goods_slip: { ...state().goods_slip, status: 'CATEGORISATION', category_code: 'RO' },
       items: [firstLine({ is_balanced: true, bucket_total: 8, buckets: [] })],
-      permissions: { ...state().permissions, can_categorize: false, can_submit_to_rm: true },
+      permissions: { ...state().permissions, can_choose_return: false, can_lock: true },
     });
     stateFn.mockResolvedValue(balanced);
-    submitItemizationFn.mockResolvedValue({ goods_slip_id: 'gs-1', status: 'RM_REVIEW' });
+    lockFn.mockResolvedValue({ state: balanced, revision_no: 1 });
     render(<ItemizationPage gsId="gs-1" onBack={() => undefined} />);
-    const submit = await screen.findByRole('button', { name: /^Submit to / });
-    expect(submit).toBeEnabled();
-    expect(screen.queryByRole('button', { name: 'Submit count' })).toBeNull();
-    fireEvent.click(submit);
-    fireEvent.click(await screen.findByRole('button', { name: /Confirm submit/ }));
+    const lock = await screen.findByTestId('lock-categorisation');
+    expect(lock).toBeEnabled();
+    expect(screen.queryByTestId('items-next')).toBeNull();
+    fireEvent.click(lock);
+    expect(screen.getByText(/books 8 piece\(s\) into Inward Staging/)).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('lock-confirm'));
     await waitFor(() => {
-      expect(submitItemizationFn).toHaveBeenCalledWith('gs-1', null, 'web-test-key');
+      expect(lockFn).toHaveBeenCalledWith('gs-1', null, 'web-test-key');
     });
   });
 
-  it('DEC-53: an unbalanced line blocks the submit and is listed', async () => {
+  it('DEC-64: after the lock Management edits with a reason; removed lines are marked', async () => {
+    stateFn.mockResolvedValue(
+      state({
+        goods_slip: {
+          ...state().goods_slip,
+          status: 'PENDING_TRANSFER_SLIP',
+          category_code: 'RO',
+          categorisation_locked_at: '2026-11-20T10:00:00Z',
+        },
+        items: [
+          firstLine({ is_balanced: true, bucket_total: 8 }),
+          firstLine({
+            id: 'it-2',
+            line_no: 2,
+            documented_qty: 0,
+            received_qty: 0,
+            removed_at: '2026-11-20T11:00:00Z',
+            removal_reason: 'wrong party',
+          }),
+        ],
+        permissions: {
+          ...state().permissions,
+          can_edit_lines: false,
+          can_categorize: false,
+          can_choose_return: false,
+          can_edit_locked: true,
+        },
+      }),
+    );
+    render(<ItemizationPage gsId="gs-1" onBack={() => undefined} />);
+    expect(await screen.findByTestId('categorisation-locked')).toHaveTextContent('Inward Staging');
+    expect(screen.getByTestId('line-removed')).toHaveTextContent('Removed: wrong party');
+    expect(screen.queryByRole('button', { name: /Change line 2/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Change line 1/ }));
+    expect(await screen.findByLabelText('Reason for the change (required)')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Remarks (optional)')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Save line' })).toBeDisabled();
+  });
+
+  it('DEC-64: an unbalanced line blocks the lock and is listed', async () => {
     stateFn.mockResolvedValue(
       state({
         category_options: [],
@@ -334,14 +419,15 @@ describe('Itemisation (P2-04)', () => {
             ],
           }),
         ],
-        permissions: { ...state().permissions, can_categorize: false, can_submit_to_rm: false },
+        goods_slip: { ...state().goods_slip, status: 'CATEGORISATION', category_code: 'RO' },
+        permissions: { ...state().permissions, can_choose_return: false, can_lock: false },
       }),
     );
     render(<ItemizationPage gsId="gs-1" onBack={() => undefined} />);
     expect(
       await screen.findByText(/does not match the physical quantity on line.s. #1/),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Submit to / })).toBeDisabled();
+    expect(screen.getByTestId('lock-categorisation')).toBeDisabled();
     expect(screen.getByText('Split 5 ≠ physical 8')).toBeInTheDocument();
   });
 });

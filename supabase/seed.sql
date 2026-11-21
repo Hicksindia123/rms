@@ -223,7 +223,7 @@ insert into _seed_role_matrix values
   ('MANAGEMENT',                 'goods_slips',     array['view']),
   ('MANAGEMENT',                 'unboxing',        array['view']),
   ('MANAGEMENT',                 'attachments',     array['view']),
-  ('MANAGEMENT',                 'itemization',     array['view']),
+  ('MANAGEMENT',                 'itemization',     array['view','configure']),  -- DEC-64 d: edits after the lock
   ('MANAGEMENT',                 'inspection',      array['view']),
   ('MANAGEMENT',                 'container_audit', array['view']),
   ('MANAGEMENT',                 'custody',         array['view']),
@@ -308,7 +308,7 @@ select r.id, s.id, m.ord
     ('INWARD_VERIFIER',            'GS_LIST',        110),
     ('INWARD_VERIFIER',            'REPORTS',        120),
 
-    ('REPLACEMENT_MANAGER',        'RM_REVIEW',       10),
+    -- DEC-64 (Q9): no RM_REVIEW entry; legacy RM_REVIEW GSs are opened from the goods slip.
     ('REPLACEMENT_MANAGER',        'DEPT_ROUTING',    20),
     ('REPLACEMENT_MANAGER',        'FINAL_ACTIONS',   30),
     ('REPLACEMENT_MANAGER',        'APPROVALS',      100),
@@ -603,6 +603,8 @@ from (values
   ('CSR_APPROVAL_PENDING', 'CSR Approval Pending', 50, '§6.5'),
   ('INSPECTION', 'Inspection', 60, '§6.5'),
   ('RM_REVIEW', 'RM Review', 70, '§6.5'),
+  ('PENDING_TRANSFER_SLIP', 'Pending Transfer Slip', 72, 'DEC-64'),
+  ('SALES_RETURN_HOLD', 'Sales Return – On Hold', 74, 'DEC-64'),
   ('HELD_AT_INTERMEDIATE_STORE', 'Held at Intermediate Store', 75, 'AMD-13'),
   ('IN_PROCESS', 'In Process', 80, '§6.5'),
   ('COMMERCIAL_RESOLUTION', 'Commercial Resolution', 90, '§6.5'),
@@ -612,6 +614,18 @@ from (values
 ) as v(code, label, sort_order, source_ref)
 join public.option_sets os on os.code = 'GS_STATUS'
 on conflict (option_set_id, code) do nothing;
+
+-- DEC-64 (P4): the Replacement / Complete Sales Return popup reads RETURN_CATEGORY (codes RO / CSR
+-- unchanged, G-18). RO is relabelled "Replacement" and listed first. The RM Review menu step is
+-- retired (Q9). Same block in supabase/snippets/release_20261120_p4_categorisation_lock.sql.
+update public.option_items oi
+   set label = v.label, sort_order = v.sort_order
+  from public.option_sets os,
+       (values ('RO', 'Replacement', 10), ('CSR', 'Complete Sales Return', 20)) as v(code, label, sort_order)
+ where os.code = 'RETURN_CATEGORY' and oi.option_set_id = os.id and oi.code = v.code
+   and (oi.label, oi.sort_order) is distinct from (v.label, v.sort_order);
+update public.journey_steps set is_active = false where code = 'RM_REVIEW' and is_active;
+
 
 -- -----------------------------------------------------------------------------
 -- Product categories (§8.2; DEC-15, DEC-18, BR-14, G-05/G-06)
@@ -3680,6 +3694,18 @@ begin
       ('NOTIFICATION_PENDING',            'Party notification performers',                      true,  false, '{}', array['IN_APP'], false);
   end if;
 end $$;
+
+-- DEC-64 (P4): categorisation lock, Complete Sales Return on hold, edits after the lock (catalogue
+-- entries in migration 20261120000500). Recipients are these rules (admin-editable), not code.
+insert into public.notification_rules
+  (event_type, name, include_context_recipients, recipient_role_codes, channels, priority, is_active)
+select v.event_type, v.name, true, v.roles, array['IN_APP'], v.priority, true
+  from (values
+    ('CATEGORISATION_LOCKED', 'RM: goods slip ready for its transfer slip', array['REPLACEMENT_MANAGER'], 'NORMAL'),
+    ('SALES_RETURN_HOLD', 'RM & Management: Complete Sales Return on hold', array['REPLACEMENT_MANAGER', 'MANAGEMENT'], 'NORMAL'),
+    ('LOCKED_GS_EDITED', 'RM & locker: goods slip edited after the lock', array['REPLACEMENT_MANAGER'], 'HIGH')
+  ) as v(event_type, name, roles, priority)
+ where not exists (select 1 from public.notification_rules r where r.event_type = v.event_type);
 
 -- RM action revision alert (pre-P4-03 recipients; catalogue entry added by 20261106000400).
 insert into public.notification_rules (event_type, name, include_context_recipients, channels, is_active)

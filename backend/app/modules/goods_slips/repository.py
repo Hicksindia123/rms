@@ -303,7 +303,7 @@ _GS_VIEW_SELECT = """
            g.return_type_code, rt.label as return_type_label, g.gate_entry_date, g.gate_entry_no,
            g.gate_document_code, gd.label as gate_document_label,
            g.gate_doc_no, g.gate_doc_date, g.gate_doc_remarks, g.missing_documentation,
-           g.missing_documentation_cleared_at,
+           g.missing_documentation_cleared_at, g.categorisation_locked_at,
            g.category_code, g.original_category_code, g.csr_commercial_path,
            g.categorized_at, g.has_open_pendency, g.has_discrepancy, g.has_hazard,
            g.has_rejections, g.cancelled_at, g.cancel_reason,

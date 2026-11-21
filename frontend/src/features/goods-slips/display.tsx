@@ -15,6 +15,9 @@ const STATUS_VARIANT: Record<string, BadgeVariant> = {
   CSR_APPROVAL_PENDING: 'warning',
   RM_REVIEW: 'warning',
   CATEGORISATION: 'info',
+  // DEC-64: locked and waiting for the RM's transfer slip; Complete Sales Return parked (Q11).
+  PENDING_TRANSFER_SLIP: 'warning',
+  SALES_RETURN_HOLD: 'warning',
   HELD_AT_INTERMEDIATE_STORE: 'success',
   COMMERCIAL_RESOLUTION: 'warning',
   AWAITING_NOTIFICATION: 'warning',

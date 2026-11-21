@@ -1,6 +1,6 @@
 -- DEC-53 pgTAP: Counting & Categorisation merged. Buckets / item counts may be written while the
 -- GS is ITEMIZATION; the G-18 guards still refuse them in any other earlier / later status and the
--- G-19 conservation check still gates CATEGORISATION -> RM_REVIEW.
+-- G-19 conservation check still gates leaving CATEGORISATION (DEC-64: the lock).
 begin;
 create extension if not exists pgtap with schema extensions;
 select plan(8);
@@ -89,15 +89,16 @@ select throws_like(
   'G-18: buckets still frozen in UNBOXING'
 );
 
--- 7. G-19 still gates CATEGORISATION -> RM_REVIEW (split 3 of 3 conserved here; make it 2).
+-- 7. G-19 still gates leaving CATEGORISATION: the lock (DEC-64; split 3 of 3 here, make it 2).
 set session_replication_role = replica;
-update public.goods_slips set status = 'CATEGORISATION' where id = (select id from _m_gs);
+update public.goods_slips set status = 'CATEGORISATION', category_code = 'RO', original_category_code = 'RO'
+ where id = (select id from _m_gs);
 update public.gs_item_buckets set qty = 2 where gs_item_id = (select id from _m_item);
 set session_replication_role = origin;
 select throws_like(
-  $$update public.goods_slips set status = 'RM_REVIEW' where id = (select id from _m_gs)$$,
+  $$update public.goods_slips set status = 'PENDING_TRANSFER_SLIP' where id = (select id from _m_gs)$$,
   '%G-19%',
-  'G-19: unbalanced split still blocks CATEGORISATION -> RM_REVIEW'
+  'G-19: unbalanced split still blocks the categorisation lock (DEC-64)'
 );
 
 -- 8. Still refused after the GS left review (HELD_AT_INTERMEDIATE_STORE).

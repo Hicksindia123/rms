@@ -27,7 +27,7 @@ from app.core.db import get_session_factory
 from app.core.middleware import limiter
 from app.shared.storage import get_storage
 from tests.conftest import JwtFactory
-from tests.integration.conftest import UserFactory, as_admin, build_test_app
+from tests.integration.conftest import UserFactory, as_admin, build_test_app, force_gs_status
 from tests.integration.test_gate_inward import Masters, _auth
 from tests.integration.test_itemization import (
     Actors,
@@ -39,8 +39,18 @@ from tests.integration.test_itemization import (
     submit_counting,
 )
 
-
 # --- fixtures ------------------------------------------------------------------------------------
+
+
+async def replacement(client: AsyncClient, token: str, gs_id: str) -> Response:
+    """DEC-64: the popup after the item lines, choice "Replacement" (RO)."""
+    return await client.post(
+        f"/api/v1/gs/{gs_id}/itemization/return-choice",
+        json={"category_code": "RO"},
+        headers=_auth(token, key()),
+    )
+
+
 @pytest.fixture
 def storage() -> FakeStorage:
     return FakeStorage()
@@ -141,17 +151,17 @@ async def test_categorisation_any_verifier_and_g19_conservation(
     """AMD-08 / AMD-11 / G-19:
     - DEC-51: any eligible verifier may categorise (not only the one who counted).
     - G-19: sum(bucket qty) must equal received_qty; mismatch returns G-19 violation.
-    - Conserved submit transitions GS to RM_REVIEW and creates revision 1 (SUBMITTED).
+    - DEC-64: the conserved lock moves the GS to PENDING_TRANSFER_SLIP.
     """
     gs_id = await itemizing_gs(client, storage, actors, masters)
     add_res = await add_line(client, actors.aman, gs_id, products.dmt, doc=10, recv=10)
     assert add_res.status_code == 201, add_res.text
     item_id = add_res.json()["id"]
 
-    # Submit counting -> moves to CATEGORISATION, records counted_by = Aman
-    count_sub = await submit_counting(client, actors.aman, gs_id)
+    # DEC-64: popup "Replacement" -> CATEGORISATION
+    count_sub = await replacement(client, actors.aman, gs_id)
     assert count_sub.status_code == 200, count_sub.text
-    assert count_sub.json()["goods_slip"]["status"] == "CATEGORISATION"
+    assert count_sub.json()["state"]["goods_slip"]["status"] == "CATEGORISATION"
 
     # Get categorisation state
     cat_state_res = await client.get(
@@ -193,11 +203,7 @@ async def test_categorisation_any_verifier_and_g19_conservation(
     assert save_res.status_code == 200, save_res.text
 
     # Aman attempts to submit categorisation with mismatch (5 != 10) -> G-19 violation
-    sub_mismatch = await client.post(
-        f"/api/v1/gs/{gs_id}/categorisation/submit",
-        json={"category_code": "REGULAR_RETURN"},
-        headers=_auth(actors.aman, key()),
-    )
+    sub_mismatch = await _submit(client, actors.aman, gs_id)
     assert sub_mismatch.status_code in (409, 422), sub_mismatch.text
     err_body = sub_mismatch.json()
     assert "G-19" in str(err_body)
@@ -214,164 +220,97 @@ async def test_categorisation_any_verifier_and_g19_conservation(
     assert save_fixed.status_code == 200, save_fixed.text
 
     # DEC-51: the other verifier submits the GS Aman counted -> SUCCESS, moves to RM_REVIEW
-    sub_ok = await client.post(
-        f"/api/v1/gs/{gs_id}/categorisation/submit",
-        json={"category_code": "REGULAR_RETURN", "remarks": "Counted by Aman, sorted by Other"},
-        headers=_auth(other_verifier, key()),
-    )
+    sub_ok = await _submit(client, other_verifier, gs_id)
     assert sub_ok.status_code == 200, sub_ok.text
-    assert sub_ok.json()["status"] == "RM_REVIEW"
+    assert sub_ok.json()["state"]["goods_slip"]["status"] == "PENDING_TRANSFER_SLIP"
 
 
 @pytest.mark.asyncio
-async def test_rm_review_one_screen_edit_send_back_and_approval_flow(
+async def test_legacy_rm_review_send_back_and_approval_flow(
     client: AsyncClient,
     storage: FakeStorage,
     actors: Actors,
     sahil: str,
     masters: Masters,
     products: Products,
+    db_conn: Connection,
 ) -> None:
-    """AMD-12 / AMD-13:
-    1. RM Review one-screen GET returns GS at a glance
-       (header, docs, carton videos, items with buckets).
-    2. RM can edit item quantities/buckets (enforcing G-19, records RM_EDIT revision).
-    3. RM can send back to CATEGORISATION with a remark (records RM_SENT_BACK revision).
-    4. Resubmitted by inward verifier -> back to RM_REVIEW.
-    5. RM approves: auto-generates Transfer Slip (TRF/...) handing goods to INTERMEDIATE_STORE.
-    6. Intermediate Store Manager accepts transfer
-       -> GS status becomes "HELD_AT_INTERMEDIATE_STORE".
-    """
-    gs_id = await itemizing_gs(client, storage, actors, masters)
-    add_res = await add_line(client, actors.aman, gs_id, products.dmt, doc=8, recv=8)
-    assert add_res.status_code == 201, add_res.text
-    item_id = add_res.json()["id"]
+    """DEC-64 (e), Q9: a GS that reached RM_REVIEW before P4 keeps the read view, send back and
+    approve; the RM's edits are retired. A sent-back GS finishes with the popup + lock."""
 
-    await submit_counting(client, actors.aman, gs_id)
+    async def legacy_review_gs(qty: int) -> tuple[str, str, str]:
+        gs_id = await itemizing_gs(client, storage, actors, masters)
+        res = await add_line(client, actors.aman, gs_id, products.dmt, doc=qty, recv=qty)
+        assert res.status_code == 201, res.text
+        item_id = res.json()["id"]
+        assert (await submit_counting(client, actors.aman, gs_id)).status_code == 200
+        cat = await client.get(f"/api/v1/gs/{gs_id}/categorisation", headers=_auth(actors.aman))
+        code = cat.json()["items"][0]["allowed_buckets"][0]["field_code"]
+        saved = await client.put(
+            f"/api/v1/gs/{gs_id}/items/{item_id}/categorisation",
+            json={"buckets": [{"field_code": code, "qty": qty}], "counts": []},
+            headers=_auth(actors.aman, key()),
+        )
+        assert saved.status_code == 200, saved.text
+        force_gs_status(db_conn, gs_id, "RM_REVIEW")  # setup: the pre-P4 submit
+        return gs_id, item_id, code
 
-    cat_state = (
-        await client.get(f"/api/v1/gs/{gs_id}/categorisation", headers=_auth(actors.aman))
-    ).json()
-    bucket_code = cat_state["items"][0]["allowed_buckets"][0]["field_code"]
-
-    # Save 8 to bucket
-    await client.put(
-        f"/api/v1/gs/{gs_id}/items/{item_id}/categorisation",
-        json={"buckets": [{"field_code": bucket_code, "qty": 8}], "counts": []},
-        headers=_auth(actors.aman, key()),
-    )
-
-    # Submit categorisation -> RM_REVIEW
-    sub_init = await client.post(
-        f"/api/v1/gs/{gs_id}/categorisation/submit",
-        json={"category_code": "REGULAR_RETURN", "remarks": "Initial submission"},
-        headers=_auth(actors.aman, key()),
-    )
-    assert sub_init.status_code == 200, sub_init.text
-
-    # 1. RM views one-screen GS at a glance
-    rm_view = await client.get(
-        f"/api/v1/gs/{gs_id}/rm-review",
-        headers=_auth(actors.rm),
-    )
+    gs_id, item_id, code = await legacy_review_gs(8)
+    rm_view = await client.get(f"/api/v1/gs/{gs_id}/rm-review", headers=_auth(actors.rm))
     assert rm_view.status_code == 200, rm_view.text
-    data = rm_view.json()
-    assert data["goods_slip"]["status"] == "RM_REVIEW"
-    assert len(data["items"]) == 1
-    assert data["items"][0]["received_qty"] == 8
-    assert data["items"][0]["is_conserved"] is True
-    assert len(data["revisions"]) >= 1
-    assert data["revisions"][0]["action"] == "SUBMITTED"
+    assert rm_view.json()["goods_slip"]["status"] == "RM_REVIEW"
+    assert rm_view.json()["items"][0]["is_conserved"] is True
 
-    # 2. RM edits item line: sets received_qty = 6, bucket = 6
-    edit_res = await client.put(
+    # The RM's edit endpoints are gone (DEC-64 e).
+    gone = await client.put(
         f"/api/v1/gs/{gs_id}/items/{item_id}/rm-edit",
-        json={
-            "documented_qty": 8,
-            "received_qty": 6,
-            "buckets": [{"field_code": bucket_code, "qty": 6}],
-            "remarks": "RM adjusted count from 8 to 6 due to 2 items belonging to another batch",
-        },
+        json={"received_qty": 6, "buckets": [{"field_code": code, "qty": 6}]},
         headers=_auth(actors.rm, key()),
     )
-    assert edit_res.status_code == 200, edit_res.text
+    assert gone.status_code in (404, 405)
 
-    # Verify revision was recorded
-    rm_view_after_edit = (
-        await client.get(f"/api/v1/gs/{gs_id}/rm-review", headers=_auth(actors.rm))
-    ).json()
-    assert rm_view_after_edit["items"][0]["received_qty"] == 6
-    assert rm_view_after_edit["items"][0]["total_bucket_qty"] == 6
-    assert any(r["action"] == "RM_EDIT" for r in rm_view_after_edit["revisions"])
-
-    # 3. RM sends back with remark
-    send_back_res = await client.post(
+    # Send back -> CATEGORISATION; the RE chooses Replacement and locks (no RM_REVIEW again).
+    back = await client.post(
         f"/api/v1/gs/{gs_id}/rm-send-back",
         json={"remarks": "Please verify packaging condition for remaining pieces"},
         headers=_auth(actors.rm, key()),
     )
-    assert send_back_res.status_code == 200, send_back_res.text
-    assert send_back_res.json()["status"] == "CATEGORISATION"
+    assert back.status_code == 200, back.text
+    assert back.json()["status"] == "CATEGORISATION"
+    chosen = await replacement(client, actors.aman, gs_id)
+    assert chosen.status_code == 200, chosen.text
+    assert chosen.json()["state"]["goods_slip"]["status"] == "CATEGORISATION"
+    locked = await _submit(client, actors.aman, gs_id)
+    assert locked.status_code == 200, locked.text
+    assert locked.json()["state"]["goods_slip"]["status"] == "PENDING_TRANSFER_SLIP"
 
-    # Inward verifier verifies status is CATEGORISATION
-    gs_detail = (await client.get(f"/api/v1/gs/{gs_id}", headers=_auth(actors.aman))).json()
-    assert gs_detail["goods_slip"]["status"] == "CATEGORISATION"
-
-    # 4. Inward verifier resubmits categorisation -> moves back to RM_REVIEW
-    resub_res = await client.post(
-        f"/api/v1/gs/{gs_id}/categorisation/submit",
-        json={"category_code": "REGULAR_RETURN", "remarks": "Packaging verified and approved"},
-        headers=_auth(actors.aman, key()),
-    )
-    assert resub_res.status_code == 200, resub_res.text
-    assert resub_res.json()["status"] == "RM_REVIEW"
-
-    # 5. RM approves goods slip -> auto-generates custody transfer slip to INTERMEDIATE_STORE
+    # Another legacy GS: approve -> transfer slip -> store acceptance -> HELD.
+    gs2, _item2, _code2 = await legacy_review_gs(6)
     approve_res = await client.post(
-        f"/api/v1/gs/{gs_id}/rm-approve",
+        f"/api/v1/gs/{gs2}/rm-approve",
         json={"remarks": "All pieces verified. Approved for Intermediate Store handover."},
         headers=_auth(actors.rm, key()),
     )
     assert approve_res.status_code == 200, approve_res.text
-    app_data = approve_res.json()
-    assert "transfer_id" in app_data
-    assert "transfer_no" in app_data
-    transfer_id = app_data["transfer_id"]
-    transfer_no = app_data["transfer_no"]
-    assert transfer_no.startswith("TRF/")
-
-    # Check Transfer slip summary in RM Review
-    rm_view_after_app = (
-        await client.get(f"/api/v1/gs/{gs_id}/rm-review", headers=_auth(actors.rm))
-    ).json()
-    assert rm_view_after_app["transfer_slip"] is not None
-    assert rm_view_after_app["transfer_slip"]["transfer_no"] == transfer_no
-    assert rm_view_after_app["transfer_slip"]["to_location_code"] == "INTERMEDIATE_STORE"
-    assert rm_view_after_app["transfer_slip"]["total_qty"] == 6
-
-    # 6. Intermediate Store Manager accepts transfer
-    # First get transfer lines to know the lot_id
+    transfer_id = approve_res.json()["transfer_id"]
+    assert approve_res.json()["transfer_no"].startswith("TRF/")
     transfer_detail = (
         await client.get(f"/api/v1/custody/transfers/{transfer_id}", headers=_auth(sahil))
     ).json()
-    lines_to_count = [
-        {"lot_id": ln["lot_id"], "qty_counted": ln["qty_sent"]} for ln in transfer_detail["lines"]
-    ]
-
     accept_res = await client.post(
         f"/api/v1/custody/transfers/{transfer_id}/accept",
         json={
-            "lines": lines_to_count,
+            "lines": [
+                {"lot_id": ln["lot_id"], "qty_counted": ln["qty_sent"]}
+                for ln in transfer_detail["lines"]
+            ],
             "acceptance_code": "ACCEPTED_VERIFIED",
             "notes": "Count verified at intermediate store",
         },
         headers=_auth(sahil, key()),
     )
     assert accept_res.status_code == 200, accept_res.text
-    assert accept_res.json()["status"] == "ACCEPTED"
-
-    # Verify GS status is now "HELD_AT_INTERMEDIATE_STORE" (AMD-13)
-    final_gs = (await client.get(f"/api/v1/gs/{gs_id}", headers=_auth(actors.rm))).json()
+    final_gs = (await client.get(f"/api/v1/gs/{gs2}", headers=_auth(actors.rm))).json()
     assert final_gs["goods_slip"]["status"] == "HELD_AT_INTERMEDIATE_STORE"
 
 
@@ -461,8 +400,9 @@ async def _save(
 
 
 async def _submit(client: AsyncClient, token: str, gs_id: str) -> Response:
+    """DEC-64: the categorisation is locked (it is no longer submitted to RM review)."""
     return await client.post(
-        f"/api/v1/gs/{gs_id}/categorisation/submit",
+        f"/api/v1/gs/{gs_id}/categorisation/lock",
         json={"remarks": "categorised"},
         headers=_auth(token, key()),
     )
@@ -483,7 +423,7 @@ async def test_categorisation_contract_exact_match_6_of_6(
     add = await add_line(client, actors.aman, gs_id, eo_product["id"], doc=6, recv=6)
     assert add.status_code == 201, add.text
     item_id = add.json()["id"]
-    assert (await submit_counting(client, actors.aman, gs_id)).status_code == 200
+    assert (await replacement(client, actors.aman, gs_id)).status_code == 200
 
     data = await _cat_state(client, actors.aman, gs_id)
     assert data["status"] == "CATEGORISATION"
@@ -525,7 +465,7 @@ async def test_categorisation_contract_exact_match_6_of_6(
 
     sub = await _submit(client, actors.aman, gs_id)
     assert sub.status_code == 200, sub.text
-    assert sub.json()["status"] == "RM_REVIEW"
+    assert sub.json()["state"]["goods_slip"]["status"] == "PENDING_TRANSFER_SLIP"
 
     # RM review (next step) carries the same contract and real product names.
     rm = await client.get(f"/api/v1/gs/{gs_id}/rm-review", headers=_auth(actors.rm))
@@ -554,7 +494,7 @@ async def test_categorisation_partial_and_excess_conserve_the_received_qty(
     add = await add_line(client, actors.aman, gs_id, eo_product["id"], documented, received)
     assert add.status_code == 201, add.text
     item_id = add.json()["id"]
-    assert (await submit_counting(client, actors.aman, gs_id)).status_code == 200
+    assert (await replacement(client, actors.aman, gs_id)).status_code == 200
 
     it = (await _cat_state(client, actors.aman, gs_id))["items"][0]
     _assert_item_contract(it)
@@ -571,7 +511,7 @@ async def test_categorisation_partial_and_excess_conserve_the_received_qty(
     assert (await _save(client, actors.aman, gs_id, item_id, {code: received})).status_code == 200
     ok = await _submit(client, actors.aman, gs_id)
     assert ok.status_code == 200, ok.text
-    assert ok.json()["status"] == "RM_REVIEW"
+    assert ok.json()["state"]["goods_slip"]["status"] == "PENDING_TRANSFER_SLIP"
 
 
 @pytest.mark.asyncio
@@ -593,7 +533,7 @@ async def test_categorisation_multi_product_gets_per_product_fields(
         res = await add_line(client, actors.aman, gs_id, pid, d, r)
         assert res.status_code == 201, res.text
         ids.append(res.json()["id"])
-    assert (await submit_counting(client, actors.aman, gs_id)).status_code == 200
+    assert (await replacement(client, actors.aman, gs_id)).status_code == 200
 
     items = (await _cat_state(client, actors.aman, gs_id))["items"]
     assert [i["item_id"] for i in items] == ids

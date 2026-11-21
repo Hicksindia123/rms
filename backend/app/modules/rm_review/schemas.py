@@ -6,12 +6,10 @@ from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from app.modules.itemization.schemas import (
-    ItemBucketIn,
     ItemBucketOut,
-    ItemCountIn,
     ItemCountOut,
     ResolvedBucketField,
 )
@@ -100,60 +98,6 @@ class RmReviewDataOut(BaseModel):
     transfer_slip: TransferSlipSummaryOut | None = None
     all_conserved: bool
     can_review: bool
-
-
-class RmEditItemIn(BaseModel):
-    documented_qty: int | None = None
-    received_qty: int | None = None
-    buckets: list[ItemBucketIn]
-    counts: list[ItemCountIn] = Field(default_factory=list)
-    remarks: str | None = None
-
-
-class RmAddLineIn(BaseModel):
-    product_id: UUID
-    documented_qty: int = Field(default=0, ge=0)
-    received_qty: int = Field(default=0, ge=0)
-    buckets: list[ItemBucketIn]
-    counts: list[ItemCountIn] = Field(default_factory=list)
-    reason: str = Field(min_length=1, max_length=2000)
-
-    @field_validator("reason")
-    @classmethod
-    def check_reason(cls, v: str) -> str:
-        s = v.strip()
-        if not s:
-            raise ValueError("Reason cannot be empty or whitespace only")
-        return s
-
-
-class RmRemoveLineIn(BaseModel):
-    reason: str = Field(min_length=1, max_length=2000)
-
-    @field_validator("reason")
-    @classmethod
-    def check_reason(cls, v: str) -> str:
-        s = v.strip()
-        if not s:
-            raise ValueError("Reason cannot be empty or whitespace only")
-        return s
-
-
-class RmChangeProductIn(BaseModel):
-    product_id: UUID
-    documented_qty: int | None = Field(default=None, ge=0)
-    received_qty: int | None = Field(default=None, ge=0)
-    buckets: list[ItemBucketIn]
-    counts: list[ItemCountIn] = Field(default_factory=list)
-    reason: str = Field(min_length=1, max_length=2000)
-
-    @field_validator("reason")
-    @classmethod
-    def check_reason(cls, v: str) -> str:
-        s = v.strip()
-        if not s:
-            raise ValueError("Reason cannot be empty or whitespace only")
-        return s
 
 
 class RmSendBackIn(BaseModel):

@@ -2,7 +2,7 @@
 -- (AMD-09, AMD-11, AMD-12, AMD-13; G-03, G-16, G-18, G-19; DEC-40).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(19);
+select plan(18);
 
 -- 1. Table existence & columns
 select has_table('public', 'gs_item_buckets', 'gs_item_buckets exists');
@@ -69,11 +69,20 @@ select is(
   'label_snapshot populated from item_field_library on insert'
 );
 
--- 5. G-19 Conservation Guard: Mismatch (7 != 10) blocks transition to RM_REVIEW
+-- P4 (DEC-64): CATEGORISATION leaves through the lock (PENDING_TRANSFER_SLIP), not RM_REVIEW.
+insert into auth.users (id, email, raw_app_meta_data, raw_user_meta_data)
+values ('aaaaaaaa-0000-4000-8000-0000000000d4', 'pgtap-p4-re@example.test',
+        '{"rms_activate": true}'::jsonb, '{"full_name": "pgTAP RE"}'::jsonb);
+update public.goods_slips
+   set category_code = 'RO', original_category_code = 'RO',
+       categorisation_locked_at = now(), categorisation_locked_by = 'aaaaaaaa-0000-4000-8000-0000000000d4'
+ where id = (select id from _fix_gs);
+
+-- 5. G-19 Conservation Guard: Mismatch (7 != 10) blocks the lock
 select throws_like(
-  $$update public.goods_slips set status = 'RM_REVIEW' where id = (select id from _fix_gs)$$,
+  $$update public.goods_slips set status = 'PENDING_TRANSFER_SLIP' where id = (select id from _fix_gs)$$,
   '%G-19%sum of bucket quantities (7) must equal counted quantity (10)%',
-  'G-19: sum of bucket quantities != counted qty rejects transition to RM_REVIEW'
+  'G-19: sum of bucket quantities != counted qty rejects the categorisation lock'
 );
 
 -- 6. Add remaining quantity so sum = 10
@@ -82,10 +91,10 @@ select lives_ok(
   'can update bucket quantity to match counted qty'
 );
 
--- 7. Now transition to RM_REVIEW succeeds
+-- 7. Now the lock succeeds
 select lives_ok(
-  $$update public.goods_slips set status = 'RM_REVIEW' where id = (select id from _fix_gs)$$,
-  'transition from CATEGORISATION to RM_REVIEW succeeds when G-19 is satisfied'
+  $$update public.goods_slips set status = 'PENDING_TRANSFER_SLIP' where id = (select id from _fix_gs)$$,
+  'transition from CATEGORISATION to PENDING_TRANSFER_SLIP succeeds when G-19 is satisfied'
 );
 
 -- 8. GS profile version is stamped when leaving CATEGORISATION
@@ -95,33 +104,21 @@ select isnt(
   'item_field_profile_version_id is stamped when leaving CATEGORISATION'
 );
 
--- 9. In RM_REVIEW, bucket edit that breaks conservation is rejected on approval/check
-select lives_ok(
-  $$update public.gs_item_buckets set qty = 5 where gs_item_id = (select id from _fix_item)$$,
-  'can update bucket in RM_REVIEW'
-);
-select throws_like(
-  $$update public.goods_slips set status = 'HELD_AT_INTERMEDIATE_STORE' where id = (select id from _fix_gs)$$,
-  '%G-19%',
-  'transition out of RM_REVIEW rejects if buckets not conserved'
-);
-
--- 10. Restore conservation and transition to HELD_AT_INTERMEDIATE_STORE succeeds
-update public.gs_item_buckets set qty = 10 where gs_item_id = (select id from _fix_item);
-
-select lives_ok(
-  $$update public.goods_slips set status = 'HELD_AT_INTERMEDIATE_STORE' where id = (select id from _fix_gs)$$,
-  'transition from RM_REVIEW to HELD_AT_INTERMEDIATE_STORE succeeds when conserved'
-);
-
--- 11. Frozen outside CATEGORISATION / RM_REVIEW
+-- 9. After the lock, a user without itemization.configure cannot change the split (DEC-64 d)
 select throws_like(
   $$update public.gs_item_buckets set qty = 9 where gs_item_id = (select id from _fix_item)$$,
-  '%G-18: item buckets%while the GS is in ITEMIZATION%CATEGORISATION or RM_REVIEW%',
-  'G-18: buckets frozen outside ITEMIZATION / CATEGORISATION / RM_REVIEW (DEC-53)'
+  'DEC-64:%Super Admin or Management%',
+  'DEC-64: buckets of a locked GS change only for Super Admin / Management'
 );
 
--- 12. RM send back to CATEGORISATION
+-- 10. A locked GS leaves only through its transfer slips (P5)
+select throws_like(
+  $$update public.goods_slips set status = 'HELD_AT_INTERMEDIATE_STORE' where id = (select id from _fix_gs)$$,
+  'G-03:%transfer slips%',
+  'G-03: PENDING_TRANSFER_SLIP is left only through the transfer slip flow'
+);
+
+-- 11-12. Legacy GS in RM_REVIEW: no RM edits any more (Q9), send back still works
 create temp table _fix_gs2 (id uuid);
 with ins as (
   insert into public.goods_slips (gs_no, workflow_version_id, delivery_mode_code, courier_name, docket_no, carton_count, status)
@@ -145,19 +142,22 @@ with ins as (
 )
 insert into _fix_item2 (id, product_id) select id, product_id from ins;
 
-update public.goods_slips set status = 'CATEGORISATION' where id = (select id from _fix_gs2);
-
-insert into public.gs_item_buckets (gs_item_id, field_id, qty)
-select (select id from _fix_item2),
-       (select r.field_id from rms_private.resolve_item_field_profile((select product_id from _fix_item2)) r where r.field_group = 'CATEGORISATION' limit 1),
-       5;
-
+-- Setup only: a GS that reached RM_REVIEW before DEC-64 (the route is closed now).
+set local session_replication_role = replica;
 update public.goods_slips set status = 'RM_REVIEW' where id = (select id from _fix_gs2);
+set local session_replication_role = origin;
 
 select is(
   (select status from public.goods_slips where id = (select id from _fix_gs2)),
   'RM_REVIEW',
   'GS is in RM_REVIEW'
+);
+select throws_like(
+  $$insert into public.gs_items (gs_id, line_no, product_id, category_id, documented_qty, received_qty)
+    select (select id from _fix_gs2), 2, product_id, (select category_id from public.products where id = product_id), 1, 1
+      from _fix_item2$$,
+  '%cannot be added or removed%',
+  'DEC-64 (Q9): the RM no longer adds lines in RM_REVIEW'
 );
 
 -- Send back to CATEGORISATION

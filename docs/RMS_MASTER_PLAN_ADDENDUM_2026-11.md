@@ -96,6 +96,7 @@ The full diagram is in `docs/RMS_CHANGE_PLAN_2026-11-12.md` §1.
 |---|---|---|
 | G-02 | "video per box" becomes "video per carton". Still mandatory and non-bypassable. | AMD-03 |
 | **G-02 (2026-11-20)** | **DEC-63 (user Q8 + Q25), P3:** G-02 = "a GS cannot leave UNBOXING until every carton 1..N has a confirmed unboxing video", **nothing else**, for all GSs. Dropped: (b) ≥ 1 classified document photo and every document photo classified; (c) the RM Missing Document Exception (DEC-03), also for a GS flagged "No Documents From Party". Still enforced in the DB (trigger `goods_slips_g02_guard`, migration `20261120000300`) and the service (`shared/guards.py`), not configurable, not bypassable by Super Admin. The `missing_doc_exceptions` table is read-only history. | DEC-63 |
+| **G-19 (2026-11-20)** | **DEC-64, P4:** unchanged rule; it now gates the categorisation lock (CATEGORISATION → PENDING_TRANSFER_SLIP) and is re-checked at commit after a Super Admin / Management edit of a locked GS. No guard is weakened. | DEC-64 |
 | G-07 | Unchanged for existing inspection. A new per-item bucket conservation guard is added alongside it. | AMD-09 |
 | G-09, G-16 | Reused by the Transfer Slip and department routing. | AMD-13, AMD-14 |
 | G-10, G-11 | Unchanged. The UI and write endpoints of their modules are on hold (AMD-21), but the DB checks remain. | AMD-21 |

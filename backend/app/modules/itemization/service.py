@@ -32,14 +32,12 @@ DEC-27, DEC-28).
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.db import UnitOfWork
@@ -77,21 +75,25 @@ from app.modules.itemization.schemas import (
     ItemCountOut,
     ItemFieldsOut,
     ItemIn,
+    ItemizationCommandOut,
     ItemizationGs,
     ItemizationPermissions,
     ItemizationStateOut,
     ItemizationTotals,
     ItemOut,
     ItemPatchIn,
+    LockedAddLineIn,
+    LockedLineIn,
+    LockedRemoveIn,
+    LockIn,
     LotOut,
     PackagingCheckIn,
     PackagingCheckOut,
     ProductLookup,
     ReopenIn,
     ResolvedBucketField,
+    ReturnChoiceIn,
     SaveItemCategorisationIn,
-    SubmitCategorisationIn,
-    SubmitItemizationIn,
     TransferOut,
     option_out,
 )
@@ -118,6 +120,8 @@ CSR_TRANSFER_PURPOSE = "CSR_WITH_PACKAGING"
 ENTITY_TYPE = "goods_slip"
 # §6.5 system statuses entered by each workflow step (labels are configurable, statuses are not).
 CATEGORISATION = "CATEGORISATION"  # AMD-08: counting submitted, category not yet chosen
+LOCKED_STATUS = "PENDING_TRANSFER_SLIP"  # DEC-64: categorisation locked, stock booked
+HOLD_STATUS = "SALES_RETURN_HOLD"  # DEC-64 / Q11: Complete Sales Return parked
 STATUS_FOR_STEP = {
     "S1_CSR_APPROVAL": "CSR_APPROVAL_PENDING",
     "S1_INSPECT": "INSPECTION",
@@ -516,6 +520,12 @@ class ItemizationService:
         gs = self._lock_itemization(
             session, user, perms, gs_id, conflict_code="COUNTING_ALREADY_SUBMITTED"
         )
+        if gs["status"] != "ITEMIZATION":
+            raise Conflict(
+                "The count was already submitted",
+                code="COUNTING_ALREADY_SUBMITTED",
+                details={"status": gs["status"]},
+            )
         if not repo.list_items(session, gs_id):
             raise ValidationFailed(
                 "Add at least one item before submitting the count (BR-07)",
@@ -536,49 +546,239 @@ class ItemizationService:
         view = gs_service.get_visible_goods_slip(session, user, perms, gs_id)
         return self._state(session, user, perms, view)
 
-    # ------------------------------------- DEC-53: Counting & Categorisation -> RM Review ------
-    def submit_itemization(
+    # ------------------------------ DEC-64 (P4): popup Replacement / Complete Sales Return ----
+    def choose_return(
         self,
         user: CurrentUser,
         perms: EffectivePermissions,
         gs_id: UUID,
-        payload: SubmitItemizationIn,
+        payload: ReturnChoiceIn,
         idem: IdempotencyKey,
     ) -> IdempotentResult:
-        """DEC-53: one submit, one transaction (G-16 Idempotency-Key). From ITEMIZATION it runs
-        the counting submit (-> CATEGORISATION, G-01 / BR-07) and then the categorisation submit
-        (G-19 per line, inward into INWARD_STAGING, revision, -> RM_REVIEW, RM notified); after
-        an RM send-back (CATEGORISATION) only the latter. Any failure rolls back both."""
+        """DEC-64 (a, b): "Next" on the item screen → popup. Replacement (RO) → categorisation;
+        Complete Sales Return (CSR) → SALES_RETURN_HOLD, no further steps (Q11). The choice is
+        stored in goods_slips.category_code (+ original_category_code, BR-08) and is final."""
         with self._uow.transaction(user.id) as session:
             return run_idempotent(
                 session,
                 idem,
                 user.id,
-                lambda: (200, self._submit_itemization(session, user, perms, gs_id, payload)),
+                lambda: (200, self._choose_return(session, user, perms, gs_id, payload)),
             )
 
-    def _submit_itemization(
+    def _choose_return(
         self,
         session: Session,
         user: CurrentUser,
         perms: EffectivePermissions,
         gs_id: UUID,
-        payload: SubmitItemizationIn,
+        payload: ReturnChoiceIn,
     ) -> dict[str, Any]:
-        gs = gs_service.lock_goods_slip(session, gs_id)
-        if gs["status"] == "ITEMIZATION":
-            self._submit_counting(session, user, perms, gs_id)
-        elif gs["status"] == CATEGORISATION:
-            self._lock_categorisation(session, user, perms, gs_id)
-        else:
+        gs = self._lock_itemization(session, user, perms, gs_id)
+        if gs.get("category_code"):
             raise Conflict(
-                "This goods slip is not at Counting & Categorisation",
-                code="GS_NOT_ITEMIZATION",
-                details={"status": gs["status"]},
+                "Replacement / Complete Sales Return was already chosen for this goods slip",
+                code="RETURN_ALREADY_CHOSEN",
+                details={"category_code": gs["category_code"]},
             )
-        return self._submit_categorisation(
-            session, user, perms, gs_id, SubmitCategorisationIn(remarks=payload.remarks)
+        option = next(
+            (o for o in repo.return_choices(session) if o["code"] == payload.category_code), None
         )
+        if option is None:
+            raise ValidationFailed(
+                "Choose Replacement or Complete Sales Return",
+                code="FORM_VALIDATION_FAILED",
+                details={
+                    "category_code": [f"Unknown or inactive choice {payload.category_code!r}"]
+                },
+            )
+        items = repo.list_items(session, gs_id)
+        if not items:
+            raise ValidationFailed(
+                "Add at least one item line first (BR-07)",
+                code="ITEMS_REQUIRED",
+                details={"items": ["At least one line is required"]},
+            )
+        form = self._form(session, ITEMIZE_FORM)
+        if gs["status"] == "ITEMIZATION":
+            repo.set_counted_by(session, gs_id, user.id)  # the count ends with the popup
+        gs_service.set_category(
+            session,
+            gs_id,
+            category_code=option["code"],
+            by=user.id,
+            form_version_id=form["id"],
+            labels_snapshot={
+                CATEGORY_FIELD: {
+                    "label": field_label(form["snapshot"], CATEGORY_FIELD),
+                    "value": option["code"],
+                    "value_label": option["label"],
+                }
+            },
+        )
+        if option["code"] == CSR:
+            gs_service.change_status_within_step(
+                session,
+                gs_id=gs_id,
+                from_status=gs["status"],
+                to_status=HOLD_STATUS,
+                step_code=ITEMIZE_STEP,
+                reason=f"{option['label']}: on hold until that journey exists (DEC-64, Q11)",
+                by=user.id,
+            )
+            repo.complete_open_tasks(session, gs_id)
+            notifications.publish(
+                session,
+                "SALES_RETURN_HOLD",
+                title=f"{gs['gs_no']}: {option['label']} on hold",
+                body="Recorded by the Replacement Executive; no further steps for now (Q11).",
+                entity_type=ENTITY_TYPE,
+                entity_id=gs_id,
+                gs_id=gs_id,
+            )
+        elif gs["status"] == "ITEMIZATION":
+            gs_service.change_status_within_step(
+                session,
+                gs_id=gs_id,
+                from_status="ITEMIZATION",
+                to_status=CATEGORISATION,
+                step_code=ITEMIZE_STEP,
+                reason=f"{option['label']}: categorise the item lines (DEC-64)",
+                by=user.id,
+            )
+        log.info("gs_return_chosen", gs_id=str(gs_id), category=option["code"])
+        view = gs_service.get_visible_goods_slip(session, user, perms, gs_id)
+        return ItemizationCommandOut(state=self._state(session, user, perms, view)).model_dump(
+            mode="json"
+        )
+
+    # ------------------------------------------------ DEC-64 (P4): lock the categorisation -----
+    def lock(
+        self,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        gs_id: UUID,
+        payload: LockIn,
+        idem: IdempotencyKey,
+    ) -> IdempotentResult:
+        """DEC-64 (c), Q12: one transaction: G-19 per line, inward stock booked into
+        INWARD_STAGING once per line (deterministic keys, G-16), lock stamp, status
+        PENDING_TRANSFER_SLIP, revision, RM notified. A replayed key returns the first result."""
+        with self._uow.transaction(user.id) as session:
+            return run_idempotent(
+                session,
+                idem,
+                user.id,
+                lambda: (200, self._lock(session, user, perms, gs_id, payload)),
+            )
+
+    def _lock(
+        self,
+        session: Session,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        gs_id: UUID,
+        payload: LockIn,
+    ) -> dict[str, Any]:
+        gs = self._lock_categorisation(session, user, perms, gs_id)
+        if gs.get("category_code") != RO:
+            raise Conflict(
+                "Choose Replacement before locking the categorisation",
+                code="RETURN_NOT_CHOSEN",
+                details={"category_code": gs.get("category_code")},
+            )
+        items = repo.list_items(session, gs_id)
+        if not items:
+            raise ValidationFailed(
+                "At least one item line is required (BR-07)", code="ITEMS_REQUIRED"
+            )
+        self._assert_g19(session, items)
+        inward = self._location(session, INWARD_LOCATION)
+        for item in items:
+            if int(item["received_qty"]) > 0:
+                self._inward_line(session, gs_id, item, inward["id"], user.id)
+        repo.set_categorisation_lock(session, gs_id, by=user.id)
+        remarks = _clean(payload.remarks)
+        gs_service.change_status_within_step(
+            session,
+            gs_id=gs_id,
+            from_status=CATEGORISATION,
+            to_status=LOCKED_STATUS,
+            step_code=ITEMIZE_STEP,
+            reason="Categorisation locked; inward stock booked (DEC-64)"
+            + (f": {remarks}" if remarks else ""),
+            by=user.id,
+        )
+        rev_no = repo.insert_revision(
+            session,
+            gs_id=gs_id,
+            action="CATEGORISATION_LOCKED",
+            items_snapshot=self._items_snapshot(session, gs_id),
+            remarks=remarks,
+            by=user.id,
+        )
+        repo.complete_open_tasks(session, gs_id)
+        notifications.publish(
+            session,
+            "CATEGORISATION_LOCKED",
+            title=f"{gs['gs_no']}: ready for its transfer slip",
+            body="The categorisation is locked and the goods are booked into Inward Staging.",
+            entity_type=ENTITY_TYPE,
+            entity_id=gs_id,
+            gs_id=gs_id,
+        )
+        log.info("categorisation_locked", gs_id=str(gs_id), lines=len(items), revision_no=rev_no)
+        view = gs_service.get_visible_goods_slip(session, user, perms, gs_id)
+        return ItemizationCommandOut(
+            state=self._state(session, user, perms, view), revision_no=rev_no
+        ).model_dump(mode="json")
+
+    def _assert_g19(self, session: Session, items: list[dict[str, Any]]) -> None:
+        """G-19: per line, the condition split equals the physical qty."""
+        buckets = repo.get_buckets_for_items(session, [i["id"] for i in items])
+        totals: dict[UUID, int] = {}
+        for b in buckets:
+            totals[b["gs_item_id"]] = totals.get(b["gs_item_id"], 0) + int(b["qty"])
+        unbalanced = [i for i in items if totals.get(i["id"], 0) != int(i["received_qty"])]
+        if unbalanced:
+            first = unbalanced[0]
+            raise SystemGuardViolation(
+                "G-19",
+                f"Line {first['line_no']} ({item_display(first)[0]}): the condition split "
+                f"({totals.get(first['id'], 0)}) must equal the physical quantity "
+                f"({first['received_qty']}) (G-19)",
+                details={
+                    "lines": [
+                        {
+                            "item_id": str(i["id"]),
+                            "line_no": i["line_no"],
+                            "received_qty": i["received_qty"],
+                            "bucket_total": totals.get(i["id"], 0),
+                        }
+                        for i in unbalanced
+                    ]
+                },
+            )
+
+    def _items_snapshot(self, session: Session, gs_id: UUID) -> list[dict[str, Any]]:
+        items = repo.list_items(session, gs_id)
+        buckets = repo.get_buckets_for_items(session, [i["id"] for i in items])
+        return [
+            {
+                "item_id": str(i["id"]),
+                "line_no": i["line_no"],
+                "sku_code": item_display(i)[0],
+                "sku_name": item_display(i)[1],
+                "documented_qty": i["documented_qty"],
+                "received_qty": i["received_qty"],
+                "buckets": [
+                    {"code": b["field_code"], "label": b["label_snapshot"], "qty": b["qty"]}
+                    for b in buckets
+                    if b["gs_item_id"] == i["id"]
+                ],
+            }
+            for i in items
+        ]
 
     # ---------------------------------------------------------------- categorise -------------
     def categorize(
@@ -858,12 +1058,14 @@ class ItemizationService:
 
         return {"item_id": str(item_id), "status": "SAVED"}
 
-    def submit_categorisation(
+    # ------------------------------ DEC-64 d (P4): Super Admin / Management after the lock ----
+    def locked_update_line(
         self,
         user: CurrentUser,
         perms: EffectivePermissions,
         gs_id: UUID,
-        payload: SubmitCategorisationIn,
+        item_id: UUID,
+        payload: LockedLineIn,
         idem: IdempotencyKey,
     ) -> IdempotentResult:
         with self._uow.transaction(user.id) as session:
@@ -871,131 +1073,302 @@ class ItemizationService:
                 session,
                 idem,
                 user.id,
-                lambda: (200, self._submit_categorisation(session, user, perms, gs_id, payload)),
+                lambda: (
+                    200,
+                    self._locked_update_line(session, user, perms, gs_id, item_id, payload),
+                ),
             )
 
-    def _submit_categorisation(
+    def _locked_update_line(
         self,
         session: Session,
         user: CurrentUser,
         perms: EffectivePermissions,
         gs_id: UUID,
-        payload: SubmitCategorisationIn,
+        item_id: UUID,
+        payload: LockedLineIn,
     ) -> dict[str, Any]:
-        gs = gs_service.lock_goods_slip(session, gs_id)
-        if gs["status"] != CATEGORISATION:
-            raise Conflict("Goods slip must be in CATEGORISATION to submit", code="INVALID_STATUS")
-
-        # DEC-51: any eligible user (itemization.create, router) may submit, whoever counted.
-
-        items = repo.list_items(session, gs_id)
-        if not items:
-            raise ValidationFailed("At least one item is required (BR-07)", code="ITEMS_REQUIRED")
-
-        item_ids = [i["id"] for i in items]
-        buckets = repo.get_buckets_for_items(session, item_ids)
-        b_sum_by_item: dict[UUID, int] = {iid: 0 for iid in item_ids}
-        for b in buckets:
-            b_sum_by_item[b["gs_item_id"]] = b_sum_by_item.get(b["gs_item_id"], 0) + b["qty"]
-
-        # Enforce G-19: sum(bucket qty) = received_qty for every item
-        for item in items:
-            recv = item["received_qty"]
-            b_sum = b_sum_by_item.get(item["id"], 0)
-            if b_sum != recv:
-                raise SystemGuardViolation(
-                    "G-19",
-                    f"Line {item['line_no']} ({item_display(item)[0]}) bucket total ({b_sum}) "
-                    f"does not match counted quantity ({recv}) (G-19)",
-                    details={
-                        "item_id": str(item["id"]),
-                        "received_qty": recv,
-                        "bucket_total": b_sum,
-                    },
-                )
-
-        # DEC-54 (Q1): inward stock booking moved from categorisation submit to RM approval.
-        # Nothing is booked into INWARD_STAGING during review.
-
-        # Record revision (SUBMITTED) in rm_review_revisions
-        items_snapshot = [
-            {
-                "item_id": str(i["id"]),
-                "sku_code": item_display(i)[0],
-                "sku_name": item_display(i)[1],
-                "documented_qty": i["documented_qty"],
-                "received_qty": i["received_qty"],
-                "buckets": [
-                    {"code": b["field_code"], "label": b["label_snapshot"], "qty": b["qty"]}
-                    for b in buckets
-                    if b["gs_item_id"] == i["id"]
-                ],
-            }
-            for i in items
-        ]
-        next_rev = int(
-            session.execute(
-                text(
-                    "select coalesce(max(revision_no), 0) + 1 "
-                    "from public.rm_review_revisions where gs_id = :gs_id"
-                ),
-                {"gs_id": gs_id},
-            ).scalar_one()
+        gs = self._lock_locked_edit(session, user, perms, gs_id)
+        item = self._own_item(session, gs_id, item_id)
+        if item.get("removed_at") is not None:
+            raise Conflict("This line was removed after the lock", code="LINE_ALREADY_REMOVED")
+        fields: dict[str, Any] = {}
+        product_changed = (
+            payload.product_id is not None and payload.product_id != item["product_id"]
         )
-        session.execute(
-            text(
-                """
-                insert into public.rm_review_revisions (
-                    gs_id, revision_no, action, items_snapshot, remarks, created_by
-                ) values (:gs_id, :rev_no, 'SUBMITTED', cast(:snapshot as jsonb), :remarks, :by)
-                """
-            ),
-            {
-                "gs_id": gs_id,
-                "rev_no": next_rev,
-                "snapshot": json.dumps(items_snapshot),
-                "remarks": payload.remarks,
-                "by": user.id,
-            },
+        if product_changed:
+            product = self._product(session, payload.product_id)  # type: ignore[arg-type]
+            fields.update(
+                product_id=product["id"],
+                category_id=product["category_id"],
+                product_code_snapshot=product["code"],
+                product_name_snapshot=product["name"],
+                category_code_snapshot=product["category_code"],
+            )
+        if payload.documented_qty is not None:
+            fields["documented_qty"] = payload.documented_qty
+        if payload.received_qty is not None:
+            fields["received_qty"] = payload.received_qty
+        recv_changed = int(fields.get("received_qty", item["received_qty"])) != int(
+            item["received_qty"]
         )
+        if (product_changed or recv_changed) and payload.buckets is None:
+            raise ValidationFailed(
+                "Send the condition split again when the product or the physical qty changes "
+                "(G-19)",
+                code="SPLIT_REQUIRED",
+                details={"buckets": ["Required"]},
+            )
+        if not fields and payload.buckets is None and payload.counts is None:
+            raise ValidationFailed("Nothing to change", code="NOTHING_TO_CHANGE")
+        _require_quantity(
+            int(fields.get("documented_qty", item["documented_qty"])),
+            int(fields.get("received_qty", item["received_qty"])),
+        )
+        if fields:
+            repo.update_item(session, item_id, fields)
+        if product_changed:
+            repo.delete_item_buckets(session, item_id)
+            repo.delete_item_counts(session, item_id)
+        after = self._own_item(session, gs_id, item_id)
+        self._write_line_split(session, gs_id, after, payload.buckets, payload.counts, user.id)
+        action = "LOCKED_CHANGE_PRODUCT" if product_changed else "LOCKED_EDIT"
+        rev_no = self._after_locked_edit(session, user, gs, action, payload.reason)
+        self._sync_line_stock(session, gs_id, item, after, rev_no, user.id, payload.reason)
+        return self._locked_out(session, user, perms, gs_id, rev_no)
 
-        rem_suffix = f": {payload.remarks}" if payload.remarks else ""
-        # Transition GS to RM_REVIEW
-        gs_service.change_status_within_step(
+    def locked_add_line(
+        self,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        gs_id: UUID,
+        payload: LockedAddLineIn,
+        idem: IdempotencyKey,
+    ) -> IdempotentResult:
+        with self._uow.transaction(user.id) as session:
+            return run_idempotent(
+                session,
+                idem,
+                user.id,
+                lambda: (201, self._locked_add_line(session, user, perms, gs_id, payload)),
+            )
+
+    def _locked_add_line(
+        self,
+        session: Session,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        gs_id: UUID,
+        payload: LockedAddLineIn,
+    ) -> dict[str, Any]:
+        gs = self._lock_locked_edit(session, user, perms, gs_id)
+        product = self._product(session, payload.product_id)
+        _require_quantity(payload.documented_qty, payload.received_qty)
+        item_id = repo.insert_item(
             session,
             gs_id=gs_id,
-            from_status=gs["status"],
-            to_status="RM_REVIEW",
-            step_code=ITEMIZE_STEP,
-            reason=f"Categorisation submitted for RM Review (AMD-11){rem_suffix}",
+            product=product,
+            documented_qty=payload.documented_qty,
+            received_qty=payload.received_qty,
+            remarks=None,
             by=user.id,
         )
+        item = self._own_item(session, gs_id, item_id)
+        self._write_line_split(session, gs_id, item, payload.buckets, payload.counts, user.id)
+        rev_no = self._after_locked_edit(session, user, gs, "LOCKED_ADD_LINE", payload.reason)
+        if int(item["received_qty"]) > 0:
+            self._inward_line(
+                session, gs_id, item, self._location(session, INWARD_LOCATION)["id"], user.id
+            )
+        return self._locked_out(session, user, perms, gs_id, rev_no)
 
-        # Close open itemize tasks
-        repo.complete_open_tasks(session, gs_id)
+    def locked_remove_line(
+        self,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        gs_id: UUID,
+        item_id: UUID,
+        payload: LockedRemoveIn,
+        idem: IdempotencyKey,
+    ) -> IdempotentResult:
+        with self._uow.transaction(user.id) as session:
+            return run_idempotent(
+                session,
+                idem,
+                user.id,
+                lambda: (
+                    200,
+                    self._locked_remove_line(session, user, perms, gs_id, item_id, payload),
+                ),
+            )
 
-        # Notify RM
+    def _locked_remove_line(
+        self,
+        session: Session,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        gs_id: UUID,
+        item_id: UUID,
+        payload: LockedRemoveIn,
+    ) -> dict[str, Any]:
+        """A line whose stock is on the ledger stays as history with qty 0 (its stock is
+        adjusted out); a line without stock movements is deleted."""
+        gs = self._lock_locked_edit(session, user, perms, gs_id)
+        item = self._own_item(session, gs_id, item_id)
+        if item.get("removed_at") is not None:
+            raise Conflict("This line was already removed", code="LINE_ALREADY_REMOVED")
+        live = [i for i in repo.list_items(session, gs_id) if i.get("removed_at") is None]
+        if len(live) <= 1:
+            raise Conflict(
+                "A goods slip keeps at least one line; change this line instead",
+                code="LAST_LINE",
+            )
+        rev_no = self._after_locked_edit(session, user, gs, "LOCKED_REMOVE_LINE", payload.reason)
+        repo.delete_item_buckets(session, item_id)
+        repo.delete_item_counts(session, item_id)
+        if repo.has_stock_movements(session, item_id):
+            repo.mark_item_removed(session, item_id, by=user.id, reason=payload.reason.strip())
+            after = self._own_item(session, gs_id, item_id)
+            self._sync_line_stock(session, gs_id, item, after, rev_no, user.id, payload.reason)
+        else:
+            repo.delete_item(session, item_id)
+        return self._locked_out(session, user, perms, gs_id, rev_no)
+
+    def _lock_locked_edit(
+        self, session: Session, user: CurrentUser, perms: EffectivePermissions, gs_id: UUID
+    ) -> dict[str, Any]:
+        gs = gs_service.lock_goods_slip(session, gs_id)
+        gs_service.get_visible_goods_slip(session, user, perms, gs_id)
+        if not perms.allows("itemization", "configure"):
+            raise PermissionDenied(
+                "After the categorisation lock only Super Admin or Management may edit (DEC-64)"
+            )
+        if gs["status"] != LOCKED_STATUS:
+            raise Conflict(
+                "Only a goods slip whose categorisation is locked is edited here",
+                code="GS_NOT_LOCKED",
+                details={"status": gs["status"]},
+            )
+        if repo.routing_started(session, gs_id):
+            raise Conflict(
+                "Department routing has started; the goods slip can no longer be edited (DEC-64)",
+                code="EDIT_WINDOW_CLOSED",
+            )
+        return gs
+
+    def _after_locked_edit(
+        self, session: Session, user: CurrentUser, gs: dict[str, Any], action: str, reason: str
+    ) -> int:
+        rev_no = repo.insert_revision(
+            session,
+            gs_id=gs["id"],
+            action=action,
+            items_snapshot=self._items_snapshot(session, gs["id"]),
+            remarks=reason.strip(),
+            by=user.id,
+        )
         notifications.publish(
             session,
-            "RM_REVIEW_REQUIRED",
-            role_codes=["REPLACEMENT_MANAGER"],
-            notification_type="RM_REVIEW_REQUIRED",
-            title=f"{gs['gs_no']}: Categorisation submitted for RM Review",
-            body=(
-                f"Goods slip {gs['gs_no']} categorisation was completed "
-                "and is ready for your review."
-            ),
-            entity_type="goods_slips",
-            entity_id=gs_id,
-            gs_id=gs_id,
-            priority="HIGH",
+            "LOCKED_GS_EDITED",
+            user_ids=[gs.get("categorisation_locked_by")],
+            title=f"{gs['gs_no']}: changed after the categorisation lock",
+            body=f"{user.full_name}: {reason.strip()}",
+            entity_type=ENTITY_TYPE,
+            entity_id=gs["id"],
+            gs_id=gs["id"],
         )
+        return rev_no
 
-        return {
-            "goods_slip_id": str(gs_id),
-            "status": "RM_REVIEW",
-            "message": "Categorisation submitted for RM Review",
-        }
+    def _sync_line_stock(
+        self,
+        session: Session,
+        gs_id: UUID,
+        before: dict[str, Any],
+        after: dict[str, Any],
+        rev_no: int,
+        by: UUID,
+        reason: str,
+    ) -> None:
+        """DEC-64 d: the inward stock follows a corrected line in the same transaction
+        (rms_move_stock, ADJUST). A product change empties the old lot and books a new one."""
+        inward = self._location(session, INWARD_LOCATION)["id"]
+        item_id = after["id"]
+        lot_id = ledger_service.find_inward_lot(session, item_id)
+        target = int(after["received_qty"])
+        why = f"Changed after the categorisation lock (rev {rev_no}): {reason.strip()}"
+        if lot_id is not None and before["product_id"] != after["product_id"]:
+            bal = ledger_service.get_balance(session, lot_id, inward)
+            if bal > 0:
+                ledger_service.move_stock(
+                    session,
+                    lot_id=lot_id,
+                    from_location_id=inward,
+                    to_location_id=None,
+                    qty=bal,
+                    movement_type="ADJUST",
+                    reference_type="gs_item",
+                    reference_id=item_id,
+                    idempotency_key=f"{item_id}:locked:{rev_no}:out",
+                    actor_id=by,
+                    reason=why,
+                )
+            lot_id = None
+            if target > 0:
+                stock_item = ledger_service.finished_good_item(session, after["product_id"], by)
+                new_lot = ledger_service.create_stock_lot(
+                    session,
+                    stock_item_id=stock_item,
+                    gs_id=gs_id,
+                    gs_item_id=item_id,
+                    condition_class="AS_RECEIVED",
+                    created_by=by,
+                )
+                ledger_service.move_stock(
+                    session,
+                    lot_id=new_lot,
+                    from_location_id=None,
+                    to_location_id=inward,
+                    qty=target,
+                    movement_type="INWARD",
+                    reference_type="gs_item",
+                    reference_id=item_id,
+                    idempotency_key=f"{item_id}:locked:{rev_no}:in",
+                    actor_id=by,
+                    reason=why,
+                )
+            return
+        if lot_id is None:
+            if target > 0:
+                self._inward_line(session, gs_id, after, inward, by)
+            return
+        delta = target - ledger_service.get_balance(session, lot_id, inward)
+        if delta != 0:
+            ledger_service.move_stock(
+                session,
+                lot_id=lot_id,
+                from_location_id=None if delta > 0 else inward,
+                to_location_id=inward if delta > 0 else None,
+                qty=abs(delta),
+                movement_type="ADJUST",
+                reference_type="gs_item",
+                reference_id=item_id,
+                idempotency_key=f"{item_id}:locked:{rev_no}:adj",
+                actor_id=by,
+                reason=why,
+            )
+
+    def _locked_out(
+        self,
+        session: Session,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        gs_id: UUID,
+        rev_no: int,
+    ) -> dict[str, Any]:
+        view = gs_service.get_visible_goods_slip(session, user, perms, gs_id)
+        return ItemizationCommandOut(
+            state=self._state(session, user, perms, view), revision_no=rev_no
+        ).model_dump(mode="json")
 
     def _inward_line(
         self, session: Session, gs_id: UUID, item: dict[str, Any], inward_id: UUID, by: UUID
@@ -1512,10 +1885,9 @@ class ItemizationService:
         gs = gs_service.lock_goods_slip(session, gs_id)
         gs_service.get_visible_goods_slip(session, user, perms, gs_id)
         assert_step_actor(session, user, ITEMIZE_STEP, "PERFORM")
-        if gs["status"] != "ITEMIZATION":
+        if gs["status"] not in ("ITEMIZATION", CATEGORISATION):
             raise Conflict(
-                "Item lines can only be changed while the GS is at itemisation; "
-                "use a line correction after categorisation",
+                "Item lines can only be changed before the categorisation lock (DEC-64)",
                 code=conflict_code,
                 details={"status": gs["status"], "category_code": gs.get("category_code")},
             )
@@ -1655,7 +2027,9 @@ class ItemizationService:
         perform = ITEMIZE_STEP in step_codes_for(session, user, "PERFORM")
         approve = CSR_STEP in step_codes_for(session, user, "APPROVE")
         may_perform = perform and perms.allows("itemization", "create")
-        edit_lines = status == "ITEMIZATION" and may_perform
+        edit_lines = status in ("ITEMIZATION", CATEGORISATION) and may_perform
+        locked_editor = status == LOCKED_STATUS and perms.allows("itemization", "configure")
+        window_closed = status == LOCKED_STATUS and repo.routing_started(session, gs_id)
         info = repo.categorization_info(session, gs_id) or {}
         return ItemizationStateOut(
             goods_slip=_gs_out(gs),
@@ -1672,14 +2046,24 @@ class ItemizationService:
             ],
             corrections=[_correction_out(c) for c in repo.list_corrections(session, gs_id)],
             evidence=self._evidence(session, gs_id),
+            return_choices=[CategoryOption(**o) for o in repo.return_choices(session)],
             permissions=ItemizationPermissions(
                 can_edit_lines=edit_lines,
                 can_submit_counting=edit_lines and bool(items),
                 can_categorize=status == CATEGORISATION and may_perform,
-                can_submit_to_rm=status in ("ITEMIZATION", CATEGORISATION)
+                # DEC-64: the DEC-53 "Submit to RM Review" is retired.
+                can_submit_to_rm=False,
+                can_choose_return=may_perform
+                and bool(items)
+                and not gs.get("category_code")
+                and status in ("ITEMIZATION", CATEGORISATION),
+                can_lock=status == CATEGORISATION
                 and may_perform
+                and gs.get("category_code") == RO
                 and bool(items)
                 and all(i.is_balanced for i in items),
+                can_edit_locked=locked_editor and not window_closed,
+                edit_window_closed=window_closed,
                 can_decide=status == "CSR_APPROVAL_PENDING"
                 and current is None
                 and approve
@@ -1794,6 +2178,8 @@ def _item_out(
         counts=c_list,
         bucket_total=bucket_total,
         is_balanced=bucket_total == int(row["received_qty"]),
+        removed_at=row.get("removed_at"),
+        removal_reason=row.get("removal_reason"),
     )
 
 

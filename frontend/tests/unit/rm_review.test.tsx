@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { RmApproveResult, RmReviewData, RmReviewItem } from '@/features/rm-review/types';
+import type { RmApproveResult, RmReviewData } from '@/features/rm-review/types';
 
 const mockData: RmReviewData = {
   goods_slip: {
@@ -60,13 +60,25 @@ const mockData: RmReviewData = {
         { field_id: 'fc-1', field_code: 'PACKAGING', field_label: 'Packaging', sort_order: 10 },
       ],
       buckets: [
-        { id: 'b-1', item_id: 'item-10', field_code: 'OK_PACKED', field_label: 'OK and Packed', qty: 8 },
+        {
+          id: 'b-1',
+          item_id: 'item-10',
+          field_code: 'OK_PACKED',
+          field_label: 'OK and Packed',
+          qty: 8,
+        },
         { id: 'b-2', item_id: 'item-10', field_code: 'DAMAGED', field_label: 'Damaged', qty: 0 },
       ],
       total_bucket_qty: 8,
       is_conserved: true,
       counts: [
-        { id: 'c-1', item_id: 'item-10', count_type: 'PACKAGING', field_label: 'Packaging', count_value: 8 },
+        {
+          id: 'c-1',
+          item_id: 'item-10',
+          count_type: 'PACKAGING',
+          field_label: 'Packaging',
+          count_value: 8,
+        },
       ],
     },
   ],
@@ -88,20 +100,13 @@ const mockData: RmReviewData = {
 };
 
 const getReviewDataFn = vi.fn<() => Promise<RmReviewData>>();
-const editItemFn = vi.fn<(...args: unknown[]) => Promise<RmReviewItem>>();
-const addLineFn = vi.fn<(...args: unknown[]) => Promise<RmReviewItem>>();
-const removeLineFn = vi.fn<(...args: unknown[]) => Promise<{ goods_slip_id: string; item_id: string; status: string }>>();
-const changeProductFn = vi.fn<(...args: unknown[]) => Promise<RmReviewItem>>();
-const sendBackFn = vi.fn<(...args: unknown[]) => Promise<{ gs_id: string; status: string; remarks: string }>>();
+const sendBackFn =
+  vi.fn<(...args: unknown[]) => Promise<{ gs_id: string; status: string; remarks: string }>>();
 const approveFn = vi.fn<(...args: unknown[]) => Promise<RmApproveResult>>();
 
 vi.mock('@/features/rm-review/api', () => ({
   rmReviewApi: {
     getReviewData: () => getReviewDataFn(),
-    editItem: (...args: unknown[]) => editItemFn(...args),
-    addLine: (...args: unknown[]) => addLineFn(...args),
-    removeLine: (...args: unknown[]) => removeLineFn(...args),
-    changeProduct: (...args: unknown[]) => changeProductFn(...args),
     sendBack: (...args: unknown[]) => sendBackFn(...args),
     approve: (...args: unknown[]) => approveFn(...args),
   },
@@ -134,7 +139,12 @@ vi.mock('@/features/itemization/api', () => ({
       Promise.resolve({
         product_id: productId,
         allowed_buckets: [
-          { field_id: 'f-1', field_code: 'OK_PACKED', field_label: 'OK and Packed', sort_order: 10 },
+          {
+            field_id: 'f-1',
+            field_code: 'OK_PACKED',
+            field_label: 'OK and Packed',
+            sort_order: 10,
+          },
           { field_id: 'f-2', field_code: 'DAMAGED', field_label: 'Damaged', sort_order: 20 },
         ],
         allowed_counts: [
@@ -172,49 +182,13 @@ describe('RmReviewPage (AMD-12, AMD-13, G-19)', () => {
     expect(screen.getByText(/Packaging:/)).toBeInTheDocument();
   });
 
-  it('allows RM to open Edit modal and adjusts quantity with G-19 conservation', async () => {
-    editItemFn.mockResolvedValue({
-      ...mockData.items[0]!,
-      received_qty: 6,
-      total_bucket_qty: 6,
-    });
-
+  it('DEC-64 (Q9): the RM no longer edits, adds, replaces or removes lines', async () => {
     render(<RmReviewPage gsId="gs-222" onBack={vi.fn()} />);
-
-    expect(await screen.findByText(/Electric Iron 1000W/i)).toBeInTheDocument();
-
-    const editBtn = screen.getByRole('button', { name: /Edit Qty\/Buckets/i });
-    fireEvent.click(editBtn);
-
-    expect(screen.getByText(/Edit Item: Electric Iron 1000W/i)).toBeInTheDocument();
-
-    const recvInput = screen.getByLabelText(/Received \(Counted\) Qty/i);
-    fireEvent.change(recvInput, { target: { value: '6' } });
-
-    // In modal, adjusting recv to 6 causes mismatch until bucket is changed
-    const bucketInput = screen.getAllByRole('spinbutton')[2]!; // first bucket input
-    fireEvent.change(bucketInput, { target: { value: '6' } });
-
-    const remarksInput = screen.getByLabelText(/Reason for Adjustment/i);
-    fireEvent.change(remarksInput, { target: { value: 'RM adjusted count from 8 to 6' } });
-
-    const saveBtn = screen.getByRole('button', { name: /Save Adjustment \(G-19\)/i });
-    expect(saveBtn).not.toBeDisabled();
-    fireEvent.click(saveBtn);
-
-    await waitFor(() => {
-      expect(editItemFn).toHaveBeenCalledWith(
-        'gs-222',
-        'item-10',
-        expect.objectContaining({
-          received_qty: 6,
-          remarks: 'RM adjusted count from 8 to 6',
-          // RmEditItemIn.counts is keyed by count_type (the backend rejects field_code).
-          counts: [{ count_type: 'PACKAGING', count_value: 8 }],
-        }),
-        expect.any(String),
-      );
-    });
+    expect(await screen.findByText(/RM Review: GS\/2026\/042/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Edit Qty/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Add line/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Change product/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Remove line/ })).toBeNull();
   });
 
   it('allows RM to send back to categorisation with remarks', async () => {
@@ -280,7 +254,9 @@ describe('RmReviewPage (AMD-12, AMD-13, G-19)', () => {
     });
 
     // Verification banner should be rendered
-    expect(await screen.findByText(/Transfer Slip Auto-Generated: TRF\/2026\/0001/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Transfer Slip Auto-Generated: TRF\/2026\/0001/i),
+    ).toBeInTheDocument();
     const printBtn = screen.getByRole('button', { name: /Print Transfer Note/i });
     fireEvent.click(printBtn);
     expect(onOpenTransfer).toHaveBeenCalledWith('trf-777');
@@ -296,195 +272,6 @@ describe('RmReviewPage (AMD-12, AMD-13, G-19)', () => {
 
     expect(screen.getByText(/Revision #1/i)).toBeInTheDocument();
     expect(screen.getByText(/"Initial submission by Aman"/i)).toBeInTheDocument();
-  });
-
-  it('allows RM to open Add Line modal, choose product, enter split & reason, and submit (DEC-54)', async () => {
-    addLineFn.mockResolvedValue({
-      item_id: 'item-20',
-      product_id: 'prod-20',
-      sku_code: 'SKU-STEAM-01',
-      sku_name: 'Steam Iron 2000W',
-      documented_qty: 5,
-      received_qty: 5,
-      short_qty: 0,
-      excess_qty: 0,
-      allowed_buckets: [
-        { field_id: 'f-1', field_code: 'OK_PACKED', field_label: 'OK and Packed', sort_order: 10 },
-      ],
-      allowed_counts: [],
-      buckets: [
-        { id: 'b-20', item_id: 'item-20', field_code: 'OK_PACKED', field_label: 'OK and Packed', qty: 5 },
-      ],
-      total_bucket_qty: 5,
-      is_conserved: true,
-      counts: [],
-    });
-
-    render(<RmReviewPage gsId="gs-222" onBack={vi.fn()} />);
-
-    expect(await screen.findByText(/RM Review: GS\/2026\/042/i)).toBeInTheDocument();
-
-    const addLineBtn = screen.getByRole('button', { name: /Add line/i });
-    fireEvent.click(addLineBtn);
-
-    expect(screen.getByText(/Add Line in RM Review \(DEC-54\)/i)).toBeInTheDocument();
-
-    // Select product from combobox
-    const productInput = screen.getByPlaceholderText(/Search product name, code…/i);
-    fireEvent.change(productInput, { target: { value: 'Steam' } });
-
-    const option = await screen.findByText('Steam Iron 2000W');
-    fireEvent.click(option);
-
-    // Enter Documented and Received quantities using element IDs
-    const docInput = document.getElementById('add-line-doc') as HTMLInputElement;
-    fireEvent.change(docInput, { target: { value: '5' } });
-
-    const recvInput = document.getElementById('add-line-recv') as HTMLInputElement;
-    fireEvent.change(recvInput, { target: { value: '5' } });
-
-    // Enter Condition Split (OK and Packed = 5)
-    await waitFor(() => {
-      expect(document.getElementById('add-line-bucket-OK_PACKED')).toBeInTheDocument();
-    });
-    const bucketInput = document.getElementById('add-line-bucket-OK_PACKED') as HTMLInputElement;
-    fireEvent.change(bucketInput, { target: { value: '5' } });
-
-    // Reason is mandatory
-    const reasonInput = document.getElementById('add-line-reason') as HTMLTextAreaElement;
-    fireEvent.change(reasonInput, { target: { value: 'Found extra carton with goods' } });
-
-    const submitBtn = screen.getByRole('button', { name: /Add Line \(RM_ADD_LINE\)/i });
-    expect(submitBtn).not.toBeDisabled();
-    fireEvent.click(submitBtn);
-
-    await waitFor(() => {
-      expect(addLineFn).toHaveBeenCalledWith(
-        'gs-222',
-        expect.objectContaining({
-          product_id: 'prod-20',
-          documented_qty: 5,
-          received_qty: 5,
-          buckets: expect.arrayContaining([{ field_code: 'OK_PACKED', qty: 5 }]),
-          reason: 'Found extra carton with goods',
-        }),
-        expect.any(String),
-      );
-    });
-  });
-
-  it('allows RM to open Change Product modal on a line, pick new product, enter split & reason, and submit (DEC-54)', async () => {
-    changeProductFn.mockResolvedValue({
-      ...mockData.items[0]!,
-      product_id: 'prod-20',
-      sku_code: 'SKU-STEAM-01',
-      sku_name: 'Steam Iron 2000W',
-    });
-
-    render(<RmReviewPage gsId="gs-222" onBack={vi.fn()} />);
-
-    expect(await screen.findByText(/Electric Iron 1000W/i)).toBeInTheDocument();
-
-    const changeBtn = screen.getByRole('button', { name: /Change product/i });
-    fireEvent.click(changeBtn);
-
-    expect(screen.getByText(/Change Product: Electric Iron 1000W/i)).toBeInTheDocument();
-
-    // Select new product
-    const prodSearchWrapper = document.getElementById('change-prod-search')!;
-    const productInput = prodSearchWrapper.querySelector('input')!;
-    fireEvent.change(productInput, { target: { value: 'Steam' } });
-
-    const option = await screen.findByText('Steam Iron 2000W');
-    fireEvent.click(option);
-
-    // Existing received_qty is 8, so set OK and Packed to 8 for G-19 conservation
-    await waitFor(() => {
-      expect(document.getElementById('change-prod-bucket-OK_PACKED')).toBeInTheDocument();
-    });
-    const bucketInput = document.getElementById('change-prod-bucket-OK_PACKED') as HTMLInputElement;
-    fireEvent.change(bucketInput, { target: { value: '8' } });
-
-    const reasonInput = document.getElementById('change-prod-reason') as HTMLTextAreaElement;
-    fireEvent.change(reasonInput, { target: { value: 'Carton marked Steam Iron 2000W not 1000W' } });
-
-    const submitBtn = screen.getByRole('button', { name: /Change Product \(RM_CHANGE_PRODUCT\)/i });
-    expect(submitBtn).not.toBeDisabled();
-    fireEvent.click(submitBtn);
-
-    await waitFor(() => {
-      expect(changeProductFn).toHaveBeenCalledWith(
-        'gs-222',
-        'item-10',
-        expect.objectContaining({
-          product_id: 'prod-20',
-          buckets: expect.arrayContaining([{ field_code: 'OK_PACKED', qty: 8 }]),
-          reason: 'Carton marked Steam Iron 2000W not 1000W',
-        }),
-        expect.any(String),
-      );
-    });
-  });
-
-  it('allows RM to open Remove Line modal on a line, enter mandatory reason, and submit (DEC-54)', async () => {
-    // Provide 2 items so that remaining count > 1 (BR-07)
-    getReviewDataFn.mockResolvedValue({
-      ...mockData,
-      items: [
-        mockData.items[0]!,
-        {
-          item_id: 'item-20',
-          product_id: 'prod-20',
-          sku_code: 'SKU-STEAM-01',
-          sku_name: 'Steam Iron 2000W',
-          documented_qty: 4,
-          received_qty: 4,
-          short_qty: 0,
-          excess_qty: 0,
-          allowed_buckets: [
-            { field_id: 'f-1', field_code: 'OK_PACKED', field_label: 'OK and Packed', sort_order: 10 },
-          ],
-          allowed_counts: [],
-          buckets: [
-            { id: 'b-20', item_id: 'item-20', field_code: 'OK_PACKED', field_label: 'OK and Packed', qty: 4 },
-          ],
-          total_bucket_qty: 4,
-          is_conserved: true,
-          counts: [],
-        },
-      ],
-    });
-
-    removeLineFn.mockResolvedValue({
-      goods_slip_id: 'gs-222',
-      item_id: 'item-10',
-      status: 'REMOVED',
-    });
-
-    render(<RmReviewPage gsId="gs-222" onBack={vi.fn()} />);
-
-    expect(await screen.findByText(/Electric Iron 1000W/i)).toBeInTheDocument();
-
-    const removeBtns = screen.getAllByRole('button', { name: /Remove line/i });
-    fireEvent.click(removeBtns[0]!);
-
-    expect(screen.getByText(/Remove Item Line \(DEC-54\)/i)).toBeInTheDocument();
-
-    const reasonInput = document.getElementById('remove-line-reason') as HTMLTextAreaElement;
-    fireEvent.change(reasonInput, { target: { value: 'Item belongs to another party shipment' } });
-
-    const confirmBtn = screen.getByRole('button', { name: /Remove Line \(RM_REMOVE_LINE\)/i });
-    expect(confirmBtn).not.toBeDisabled();
-    fireEvent.click(confirmBtn);
-
-    await waitFor(() => {
-      expect(removeLineFn).toHaveBeenCalledWith(
-        'gs-222',
-        'item-10',
-        { reason: 'Item belongs to another party shipment' },
-        expect.any(String),
-      );
-    });
   });
 
   it('disables / hides all review edit, add, remove, send-back, and approve actions when transfer slip is present (DEC-54 T2)', async () => {
@@ -504,7 +291,9 @@ describe('RmReviewPage (AMD-12, AMD-13, G-19)', () => {
 
     render(<RmReviewPage gsId="gs-222" onBack={vi.fn()} />);
 
-    expect(await screen.findByText(/Transfer Slip Auto-Generated: TRF\/2026\/0001/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Transfer Slip Auto-Generated: TRF\/2026\/0001/i),
+    ).toBeInTheDocument();
 
     // Review modification and workflow action buttons must be completely absent (strictly read-only)
     expect(screen.queryByRole('button', { name: /Add line/i })).not.toBeInTheDocument();

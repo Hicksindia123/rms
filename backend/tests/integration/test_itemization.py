@@ -318,7 +318,7 @@ async def test_categorize_ro_inwards_received_qty_idempotently(
     assert out["state"]["goods_slip"]["status"] == "INSPECTION"
     assert out["state"]["goods_slip"]["category_code"] == "RO"
     assert out["state"]["goods_slip"]["original_category_code"] == "RO"
-    assert out["state"]["category_label"] == "Replacement Only"
+    assert out["state"]["category_label"] == "Replacement"  # DEC-64 relabel (code RO)
     assert out["notified_user_count"] == 0
     assert open_tasks(db_conn, gs_id) == [
         {"step_code": "S1_INSPECT", "role_code": "INWARD_VERIFIER"}
