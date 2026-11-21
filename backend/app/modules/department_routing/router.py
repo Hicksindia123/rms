@@ -83,6 +83,20 @@ def get_store_routing_gs(
         return department_routing_service.store_gs(session, user, gs_id)
 
 
+@router.post("/store/plan-lines/{plan_line_id}/undo", response_model=StoreRoutingGsOut)
+def undo_store_routing_line(
+    plan_line_id: UUID,
+    payload: CancelPlanLineIn,
+    user: StoreRouteUser,
+    uow: UowDep,
+) -> StoreRoutingGsOut:
+    """Q32: the store undoes its own "Issue to Store" line (reason required) until the piece is
+    analysed. No stock moves (the pieces never left the store). Returns the GS routing view."""
+    return department_routing_service.undo_store_line(
+        uow, actor=user, plan_line_id=plan_line_id, reason=payload.reason
+    )
+
+
 @router.post("/store/gs/{gs_id}/route", response_model=StoreRoutingResultOut)
 def route_store_goods(
     gs_id: UUID,

@@ -119,6 +119,18 @@ test.describe('P7 store department routing', () => {
       // Back returns to the routing view.
       await dt.page.getByRole('button', { name: /Back to Details/ }).click();
       await expect(dt.page.getByTestId('store-routing-gs')).toBeVisible({ timeout: 20_000 });
+
+      // Q32: undo the "no work" line (reason required); DT has goods to route again.
+      const undo = view.getByRole('button', { name: 'Undo' });
+      await expect(undo).toBeVisible({ timeout: 20_000 });
+      expect((await undo.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+      await undo.click();
+      await view.getByPlaceholder('Reason (required)').fill('Needs cleaning after all');
+      await view.getByRole('button', { name: /Confirm undo/ }).click();
+      await expect(view.getByText('DT: Routing pending (2 pcs)')).toBeVisible({ timeout: 20_000 });
+      await expect(view.getByRole('button', { name: 'Undo' })).toHaveCount(0);
+      await expectNoHorizontalOverflow(dt.page);
+      await dt.page.screenshot({ path: `test-results/p7/${vp.name}-undone.png`, fullPage: true });
       expect(dt.errors).toEqual([]);
       await dt.context.close();
     });

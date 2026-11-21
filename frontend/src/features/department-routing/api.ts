@@ -100,6 +100,13 @@ export const departmentRoutingApi = {
   getStoreGs: (gsId: string) =>
     apiRequest<StoreRoutingGs>(`/department-routing/store/gs/${encodeURIComponent(gsId)}`),
 
+  /** Q32: undo an own "Issue to Store" line (reason required); returns the GS routing view. */
+  undoStoreLine: (planLineId: string, reason: string) =>
+    apiRequest<StoreRoutingGs>(
+      `/department-routing/store/plan-lines/${encodeURIComponent(planLineId)}/undo`,
+      { method: 'POST', body: { reason } },
+    ),
+
   /** DEC-67: saving the routing is the issue (DIN, stock moves). Idempotency-Key (G-16). */
   routeStoreGoods: (gsId: string, payload: StoreRoutingIn, idempotencyKey: string) =>
     apiRequest<StoreRoutingResult>(

@@ -498,3 +498,100 @@ async def test_db_refuses_store_routing_bypass(
         )
     users.set_actor(None)
     assert items  # the GS lines exist; nothing was written above
+
+
+# --- Q32 (user 2026-11-21): undo an own "Issue to Store" line ---------------------------------
+async def test_store_undoes_its_issue_to_store_line(
+    client: AsyncClient,
+    storage: FakeStorage,
+    actors: Actors,
+    masters: Masters,
+    routing_products: dict[str, str],
+    rm: str,
+    mgmt: str,
+    stores: StoreUsers,
+    users: UserFactory,
+    db_conn: Connection,
+) -> None:
+    gs_id, items, slips = await _dt_acked(
+        client, storage, actors, masters, routing_products, rm, stores
+    )
+    dt_store = slips["DT"]["store"]["id"]
+    view = (await _view(client, stores.dt, gs_id)).json()
+    dt_item = next(i for i in view["items"] if i["store"]["code"] == "DT")
+    res = await _route(
+        client,
+        stores.dt,
+        gs_id,
+        dt_store,
+        [_line(dt_item, 0, "STORE", 2), _line(dt_item, 1, "CLEANING", 1)],
+    )
+    assert res.status_code == 200, res.text
+    assert _open_tasks(db_conn, gs_id) == []
+
+    view = (await _view(client, stores.dt, gs_id)).json()
+    dt_item = next(i for i in view["items"] if i["store"]["code"] == "DT")
+    no_work = next(ln for ln in dt_item["routed"] if ln["status"] == "NO_WORK")
+    issued = next(ln for ln in dt_item["routed"] if ln["status"] == "ISSUED")
+    assert dt_item["undoable_line_ids"] == [no_work["id"]]  # an issued line is not undoable
+
+    async def undo(token: str, line_id: str, reason: str = "Needs cleaning") -> Any:
+        return await client.post(
+            f"/api/v1/department-routing/store/plan-lines/{line_id}/undo",
+            json={"reason": reason},
+            headers=_auth(token),
+        )
+
+    assert (await undo(rm, no_work["id"])).status_code == 403
+    assert (await undo(mgmt, no_work["id"])).status_code == 403
+    other = await undo(stores.op, no_work["id"])
+    assert other.status_code == 403 and other.json()["error"]["code"] == "NOT_STORE_USER"
+    assert (await undo(stores.dt, no_work["id"], "x")).status_code == 422
+    bad = await undo(stores.dt, issued["id"])
+    assert bad.status_code == 409 and bad.json()["error"]["code"] == "LINE_NOT_UNDOABLE"
+
+    done = await undo(stores.dt, no_work["id"])
+    assert done.status_code == 200, done.text
+    body = done.json()
+    dt_progress = next(s for s in body["stores"] if s["store_code"] == "DT")
+    assert (dt_progress["status"], dt_progress["unrouted_qty"]) == ("ROUTING_PENDING", 2)
+    assert _open_tasks(db_conn, gs_id) == ["ISTORE_DT"]  # the routing task reopens
+    assert _status(db_conn, gs_id) == "STORE_PROCESSING"
+    again = await undo(stores.dt, no_work["id"])
+    assert again.status_code == 409 and again.json()["error"]["code"] == "LINE_NOT_UNDOABLE"
+
+    # The edit window stays closed (DEC-64 d) although the no-work line was undone.
+    state = (await client.get(f"/api/v1/gs/{gs_id}/itemization", headers=_auth(mgmt))).json()
+    assert state["permissions"]["edit_window_closed"] is True
+
+    # The pieces can be routed again.
+    dt_item = next(i for i in body["items"] if i["store"]["code"] == "DT")
+    again_route = await _route(
+        client, stores.dt, gs_id, dt_store, [_line(dt_item, 0, "CLEANING", 2)]
+    )
+    assert again_route.status_code == 200, again_route.text
+
+    # DB (non-bypassable): another store's user cannot undo; an issued line never is.
+    c = as_admin(db_conn)
+    fresh = await _route(client, stores.dt, gs_id, dt_store, [])
+    assert fresh.status_code == 422  # an empty routing is refused by the schema
+    users.set_actor(stores.op_id)
+    with pytest.raises(DBAPIError, match="DEC-67"), c.begin_nested():
+        c.execute(
+            text(
+                "update public.department_routing_plan_lines set status = 'CANCELLED',"
+                " cancelled_at = now(), cancel_reason = 'not mine' where id = :i"
+            ),
+            {"i": issued["id"]},
+        )
+    users.set_actor(stores.dt_id)
+    with pytest.raises(DBAPIError, match='only an "Issue to Store" line'), c.begin_nested():
+        c.execute(
+            text(
+                "update public.department_routing_plan_lines set status = 'CANCELLED',"
+                " cancelled_at = now(), cancel_reason = 'issued' where id = :i"
+            ),
+            {"i": issued["id"]},
+        )
+    users.set_actor(None)
+    assert items

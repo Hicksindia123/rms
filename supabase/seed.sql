@@ -654,6 +654,10 @@ update public.option_items oi
 update public.journey_steps set is_active = false where code = 'RM_REVIEW' and is_active;
 -- DEC-66 (P6): the store acknowledges transfer slips (ACK_TRANSFER_SLIPS); STORE_ACCEPT is hidden.
 update public.journey_steps set is_active = false where code = 'STORE_ACCEPT' and is_active;
+-- DEC-67 / Q33 (user 2026-11-21): the legacy RM routing plan and Store Manager issue menus are
+-- hidden; a fresh database has no legacy goods slip held at the old Intermediate Store.
+update public.journey_steps set is_active = false
+ where code in ('DEPT_ROUTING', 'DEPT_ISSUE') and is_active;
 
 
 -- -----------------------------------------------------------------------------

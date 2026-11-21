@@ -91,6 +91,7 @@ function gsView(extra: Record<string, unknown> = {}) {
         ],
         allowed_departments: DEPTS,
         routed: [],
+        undoable_line_ids: [],
       },
       {
         item_id: 'i-op',
@@ -106,6 +107,7 @@ function gsView(extra: Record<string, unknown> = {}) {
         conditions: [],
         allowed_departments: [],
         routed: [],
+        undoable_line_ids: [],
       },
     ],
     dins: [],
@@ -240,6 +242,54 @@ describe('StoreRoutingGsPage', () => {
     expect(screen.getByText(/req-p7/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Retry/ }));
     expect(await screen.findByText(/Digital thermometer/)).toBeInTheDocument();
+  });
+});
+
+describe('StoreRoutingGsPage undo (Q32)', () => {
+  it('undoes an own "Issue to Store" line with a reason', async () => {
+    const routedLine = {
+      id: 'pl-1',
+      gs_id: 'gs-1',
+      gs_no: 'GS/2026-27/0007',
+      gs_item_id: 'i-dt',
+      line_no: 1,
+      item_name: 'Digital thermometer',
+      source_bucket_field_id: 'c-ok',
+      source_bucket_label: 'VISUALLY OKAY SELLABLE',
+      department_field_id: 'd-store',
+      department_code: 'STORE',
+      department_label: 'Issue to Store',
+      is_no_work: true,
+      qty: 2,
+      status: 'NO_WORK',
+      planned_at: '2026-11-21T08:00:00Z',
+      store_id: 's-dt',
+      store_code: 'DT',
+    };
+    const routed = gsView();
+    const item = (routed.items as Array<Record<string, unknown>>)[0] ?? {};
+    item.routed = [routedLine];
+    item.undoable_line_ids = ['pl-1'];
+    apiRequest.mockImplementation((path, options) =>
+      Promise.resolve(options?.method === 'POST' && path.endsWith('/undo') ? gsView() : routed),
+    );
+    renderGs();
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
+    const confirm = screen.getByRole('button', { name: /Confirm undo/ });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText('Reason (required)'), {
+      target: { value: 'Needs cleaning' },
+    });
+    fireEvent.click(confirm);
+    await waitFor(() => {
+      expect(apiRequest).toHaveBeenCalledWith('/department-routing/store/plan-lines/pl-1/undo', {
+        method: 'POST',
+        body: { reason: 'Needs cleaning' },
+      });
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+    });
   });
 });
 

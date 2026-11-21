@@ -65,19 +65,85 @@ function rowsFor(it: StoreRoutingItem): Row[] {
 const card =
   'rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4 dark:border-slate-800 dark:bg-slate-900';
 
-const RoutedLines: React.FC<{ item: StoreRoutingItem }> = ({ item }) =>
+interface UndoProps {
+  undoing: { id: string; reason: string } | null;
+  busy: boolean;
+  onStart: (id: string) => void;
+  onReason: (reason: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+/** Routed lines of an item; Q32: the store may undo its own "Issue to Store" lines. */
+const RoutedLines: React.FC<{ item: StoreRoutingItem; undo: UndoProps }> = ({ item, undo }) =>
   item.routed.length === 0 ? null : (
     <ul
-      className="mt-2 list-none p-0 space-y-1 text-xs text-slate-600 dark:text-slate-300"
+      className="mt-2 list-none space-y-1 p-0 text-xs text-slate-600 dark:text-slate-300"
       aria-label="Routed"
     >
-      {item.routed.map((l) => (
-        <li key={l.id} className="break-words">
-          {l.source_bucket_label ?? 'All pieces'} → <strong>{l.department_label}</strong> · {l.qty}{' '}
-          pcs
-          {l.routing_no ? ` · ${l.routing_no}` : l.is_no_work ? ' · no work' : ''}
-        </li>
-      ))}
+      {item.routed.map((l) => {
+        const canUndo = item.undoable_line_ids.includes(l.id);
+        const open = undo.undoing?.id === l.id;
+        return (
+          <li key={l.id} className="break-words">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span>
+                {l.source_bucket_label ?? 'All pieces'} → <strong>{l.department_label}</strong> ·{' '}
+                {l.qty} pcs
+                {l.routing_no ? ` · ${l.routing_no}` : l.is_no_work ? ' · no work' : ''}
+              </span>
+              {canUndo && !open ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-[44px]"
+                  onClick={() => {
+                    undo.onStart(l.id);
+                  }}
+                >
+                  Undo
+                </Button>
+              ) : null}
+            </div>
+            {open ? (
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                <label className="sr-only" htmlFor={`undo-reason-${l.id}`}>
+                  Reason for undoing
+                </label>
+                <input
+                  id={`undo-reason-${l.id}`}
+                  type="text"
+                  value={undo.undoing?.reason ?? ''}
+                  placeholder="Reason (required)"
+                  onChange={(e) => {
+                    undo.onReason(e.target.value);
+                  }}
+                  className="min-h-[44px] flex-1 rounded-lg border border-slate-300 bg-white px-3 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                />
+                <Button
+                  type="button"
+                  variant="danger"
+                  className="min-h-[44px]"
+                  disabled={undo.busy || (undo.undoing?.reason.trim().length ?? 0) < 3}
+                  isLoading={undo.busy}
+                  onClick={undo.onConfirm}
+                >
+                  Confirm undo
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="min-h-[44px]"
+                  onClick={undo.onCancel}
+                >
+                  Keep
+                </Button>
+              </div>
+            ) : null}
+          </li>
+        );
+      })}
     </ul>
   );
 
@@ -93,6 +159,43 @@ export const StoreRoutingGsPage: React.FC<Props> = ({ gsId, onBack, onOpenGs, on
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState<ApiError | null>(null);
   const [result, setResult] = useState<StoreRoutingResult | null>(null);
+  const [undoing, setUndoing] = useState<{ id: string; reason: string } | null>(null);
+  const [undoBusy, setUndoBusy] = useState(false);
+  const [undoError, setUndoError] = useState<ApiError | null>(null);
+
+  const confirmUndo = () => {
+    if (!undoing) return;
+    setUndoBusy(true);
+    setUndoError(null);
+    departmentRoutingApi
+      .undoStoreLine(undoing.id, undoing.reason.trim())
+      .then((d) => {
+        setData(d);
+        setUndoing(null);
+        setResult(null);
+      })
+      .catch((err: unknown) => {
+        setUndoError(toApiError(err));
+      })
+      .finally(() => {
+        setUndoBusy(false);
+      });
+  };
+  const undoProps: UndoProps = {
+    undoing,
+    busy: undoBusy,
+    onStart: (id) => {
+      setUndoError(null);
+      setUndoing({ id, reason: '' });
+    },
+    onReason: (reason) => {
+      setUndoing((u) => (u ? { ...u, reason } : u));
+    },
+    onConfirm: confirmUndo,
+    onCancel: () => {
+      setUndoing(null);
+    },
+  };
   // G-16: one key per routing; a retry after a network error reuses it (never issues twice).
   const idemKey = useRef(newIdempotencyKey());
 
@@ -295,6 +398,7 @@ export const StoreRoutingGsPage: React.FC<Props> = ({ gsId, onBack, onOpenGs, on
       ) : null}
 
       {error ? <ErrorState error={error} onRetry={load} title="Could not refresh" /> : null}
+      {undoError ? <ErrorState error={undoError} title="The line was not undone" /> : null}
 
       {myStores.length > 1 ? (
         <div className="flex flex-wrap gap-2" role="group" aria-label="Route for store">
@@ -449,7 +553,7 @@ export const StoreRoutingGsPage: React.FC<Props> = ({ gsId, onBack, onOpenGs, on
                     </div>
                   )
                 ) : null}
-                <RoutedLines item={it} />
+                <RoutedLines item={it} undo={undoProps} />
               </li>
             );
           })}

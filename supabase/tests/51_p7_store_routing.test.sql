@@ -5,7 +5,7 @@
 -- STORE_PROCESSING needs a routing, and the legacy RM plan still needs a held GS.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(17);
+select plan(21);
 
 insert into auth.users (id, email, raw_app_meta_data, raw_user_meta_data) values
   ('aaaaaaaa-0000-4000-8000-0000000007e1', 'pgtap-p7-re@example.test', '{"rms_activate": true}', '{"full_name": "P7 RE"}'),
@@ -174,6 +174,25 @@ select throws_like($$ insert into public.department_routing_plan_lines
                       select g.gs_id, g.item_id, g.bucket, p.dept_store, '-', '-', 1
                         from _gs g, _p7 p where g.gs_no = 'PGTAP-P7-B' $$,
   'G-20: a routing plan needs the goods slip held at the intermediate store%', 'legacy plan path unchanged');
+
+-- 18–21. Q32: a store undoes its own "Issue to Store" line (reason required); the edit window
+-- stays closed (DEC-64 d).
+select set_config('app.user_id', 'aaaaaaaa-0000-4000-8000-0000000007e5', true);
+select throws_like($$ update public.department_routing_plan_lines
+                         set status = 'CANCELLED', cancelled_at = now(), cancel_reason = 'not mine'
+                       where gs_id = (select gs_id from _gs where gs_no = 'PGTAP-P7-A') $$,
+  'DEC-67: only a user of the Intermediate Store undoes its routing', 'another store cannot undo');
+select set_config('app.user_id', 'aaaaaaaa-0000-4000-8000-0000000007e4', true);
+select throws_like($$ update public.department_routing_plan_lines
+                         set status = 'CANCELLED', cancelled_at = now(), cancel_reason = 'x'
+                       where gs_id = (select gs_id from _gs where gs_no = 'PGTAP-P7-A') $$,
+  'DEC-67: undoing a routing line needs a reason', 'undo needs a reason');
+select lives_ok($$ update public.department_routing_plan_lines
+                      set status = 'CANCELLED', cancelled_at = now(), cancel_reason = 'Needs cleaning'
+                    where gs_id = (select gs_id from _gs where gs_no = 'PGTAP-P7-A') $$,
+  'the store undoes its no-work line');
+select ok(rms_private.gs_routing_started((select gs_id from _gs where gs_no = 'PGTAP-P7-A')),
+  'the edit window stays closed after the undo');
 
 select * from finish();
 rollback;

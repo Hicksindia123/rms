@@ -1238,6 +1238,18 @@ def list_gs_dins(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def item_has_current_action(session: Session, gs_item_id: UUID) -> bool:
+    """A current final action exists for the item (it is analysed; Q32 undo closes)."""
+    return bool(
+        session.execute(
+            text(
+                "select 1 from public.rm_item_actions where gs_item_id = :i and is_current limit 1"
+            ),
+            {"i": gs_item_id},
+        ).scalar()
+    )
+
+
 def store_routing_queue(session: Session, statuses: tuple[str, ...]) -> list[dict[str, Any]]:
     """GSs on the Intermediate Stores (P6/P7 statuses) with the time their first slip was
     acknowledged. The per-store progress is read per GS by the service."""

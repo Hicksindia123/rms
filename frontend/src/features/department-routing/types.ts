@@ -368,6 +368,8 @@ export interface StoreRoutingItem {
   conditions: StoreRoutingCondition[];
   allowed_departments: StoreRoutingDepartment[];
   routed: RoutingPlanLine[];
+  /** Q32: "Issue to Store" lines the user may undo now (until the piece is analysed). */
+  undoable_line_ids: string[];
 }
 
 export interface StoreDin {

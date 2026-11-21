@@ -771,6 +771,7 @@ class DepartmentRoutingService:
                 code="GS_NOT_AT_STORE",
             )
         routable_status = gs["status"] in STORE_ROUTING_STATUSES
+        finalised = repo.has_current_ac_slip(session, gs_id)
         lines_by_item: dict[UUID, list[RoutingPlanLineOut]] = {}
         for pl in repo.list_plan_lines(session, gs_id=gs_id):
             if pl["status"] != "CANCELLED":
@@ -791,6 +792,15 @@ class DepartmentRoutingService:
                     )
                 ]
             item_free = it["routable_qty"] if it["acknowledged"] and routable_status else 0
+            routed = lines_by_item.get(it["item_id"], [])
+            undoable = (
+                [ln.id for ln in routed if ln.status == "NO_WORK" and ln.store_id == it["store_id"]]
+                if mine
+                and routable_status
+                and not finalised
+                and not repo.item_has_current_action(session, it["item_id"])
+                else []
+            )
             conditions = [
                 StoreRoutingConditionOut.model_validate(
                     {**c, "routable_qty": max(min(c["free_qty"], item_free), 0)}
@@ -816,7 +826,8 @@ class DepartmentRoutingService:
                     at_departments_qty=it["at_departments_qty"],
                     conditions=conditions,
                     allowed_departments=depts_by_product[it["product_id"]],
-                    routed=lines_by_item.get(it["item_id"], []),
+                    routed=routed,
+                    undoable_line_ids=undoable,
                 )
             )
         return StoreRoutingGsOut(
@@ -830,6 +841,71 @@ class DepartmentRoutingService:
             dins=[StoreDinOut.model_validate(d) for d in repo.list_gs_dins(session, gs_id)],
             can_route=any(i.is_mine and i.routable_qty > 0 for i in items),
         )
+
+    def undo_store_line(
+        self, uow: UnitOfWork, *, actor: CurrentUser, plan_line_id: UUID, reason: str
+    ) -> StoreRoutingGsOut:
+        """Q32 (user 2026-11-21): a store undoes its own "Issue to Store" line until the piece is
+        analysed (P9); issued pieces come back through receiving (P8). The pieces are free to
+        route again and the store's routing task reopens. The DB checks the same rules."""
+        with uow.transaction(actor.id) as session:
+            lines = repo.list_plan_lines(session, ids=[plan_line_id])
+            if not lines:
+                raise NotFound("Routing line not found", code="PLAN_LINE_NOT_FOUND")
+            gs_id = lines[0]["gs_id"]
+            gs_service.lock_goods_slip(session, gs_id)
+            line = repo.list_plan_lines(session, ids=[plan_line_id], for_update=True)[0]
+            if line["store_id"] is None:
+                raise Conflict(
+                    "This line belongs to the Replacement Manager's routing plan",
+                    code="NOT_STORE_LINE",
+                )
+            store = repo.get_store(session, line["store_id"])
+            if not store or not repo.user_acts_for_store(session, actor.id, store["id"]):
+                raise PermissionDenied(
+                    "Only a user of the Intermediate Store undoes its routing (DEC-67)",
+                    code="NOT_STORE_USER",
+                )
+            if line["status"] != "NO_WORK":
+                raise Conflict(
+                    f'Item #{line["line_no"]}: only an "Issue to Store" line can be undone; '
+                    "pieces at a department come back through receiving",
+                    code="LINE_NOT_UNDOABLE",
+                )
+            gs = repo.get_routing_gs(session, gs_id)
+            if not gs or gs["status"] not in STORE_ROUTING_STATUSES:
+                raise Conflict(
+                    "The routing of this goods slip can no longer be undone",
+                    code="INVALID_GS_STATUS",
+                )
+            if repo.has_current_ac_slip(session, gs_id) or repo.item_has_current_action(
+                session, line["gs_item_id"]
+            ):
+                raise SystemGuardViolation(
+                    "G-21", "G-21: the item is analysed; its routing can no longer be undone"
+                )
+            repo.cancel_plan_line(
+                session, plan_line_id=plan_line_id, cancelled_by=actor.id, reason=reason.strip()
+            )
+            cache: dict[UUID, bool] = {}
+            progress = next(
+                p for p in self._progress(session, actor, gs_id, cache) if p.store_id == store["id"]
+            )
+            gs_service.sync_step_task(
+                session,
+                gs_id=gs_id,
+                step_code=ROUTING_TASK_STEP,
+                role_id=store["role_id"],
+                needed=progress.status == ROUTING_PENDING,
+            )
+            log.info(
+                "store_routing_undone",
+                gs_id=str(gs_id),
+                store=store["code"],
+                plan_line_id=str(plan_line_id),
+                qty=line["qty"],
+            )
+            return self.store_gs(session, actor, gs_id)
 
     def route_store_goods(
         self,

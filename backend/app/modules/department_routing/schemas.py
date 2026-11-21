@@ -405,6 +405,8 @@ class StoreRoutingItemOut(BaseModel):
     conditions: list[StoreRoutingConditionOut]
     allowed_departments: list[StoreRoutingDepartmentOut]
     routed: list[RoutingPlanLineOut]
+    # Q32: "Issue to Store" lines the user may undo now (until the piece is analysed, P9).
+    undoable_line_ids: list[UUID] = Field(default_factory=list)
 
 
 class StoreDinOut(BaseModel):
