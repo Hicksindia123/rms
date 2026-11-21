@@ -123,6 +123,8 @@ ENTITY_TYPE = "goods_slip"
 CATEGORISATION = "CATEGORISATION"  # AMD-08: counting submitted, category not yet chosen
 LOCKED_STATUS = "PENDING_TRANSFER_SLIP"  # DEC-64: categorisation locked, stock booked
 SLIPS_STATUS = "TRANSFER_SLIP_GENERATED"  # DEC-65: on live transfer slips (voided on edit, Q10)
+ACK_STATUS = "STORE_ACKNOWLEDGED"  # DEC-66: slips acknowledged; still editable until routing
+EDITABLE_LOCKED = (LOCKED_STATUS, SLIPS_STATUS, ACK_STATUS)
 HOLD_STATUS = "SALES_RETURN_HOLD"  # DEC-64 / Q11: Complete Sales Return parked
 STATUS_FOR_STEP = {
     "S1_CSR_APPROVAL": "CSR_APPROVAL_PENDING",
@@ -1250,7 +1252,7 @@ class ItemizationService:
             raise PermissionDenied(
                 "After the categorisation lock only Super Admin or Management may edit (DEC-64)"
             )
-        if gs["status"] not in (LOCKED_STATUS, SLIPS_STATUS):
+        if gs["status"] not in EDITABLE_LOCKED:
             raise Conflict(
                 "Only a goods slip whose categorisation is locked is edited here",
                 code="GS_NOT_LOCKED",
@@ -2038,7 +2040,7 @@ class ItemizationService:
         approve = CSR_STEP in step_codes_for(session, user, "APPROVE")
         may_perform = perform and perms.allows("itemization", "create")
         edit_lines = status in ("ITEMIZATION", CATEGORISATION) and may_perform
-        locked = status in (LOCKED_STATUS, SLIPS_STATUS)  # DEC-65: a slip edit voids it (Q10)
+        locked = status in EDITABLE_LOCKED  # DEC-65/66: an edit voids the slips first (Q10)
         locked_editor = locked and perms.allows("itemization", "configure")
         window_closed = locked and repo.routing_started(session, gs_id)
         info = repo.categorization_info(session, gs_id) or {}

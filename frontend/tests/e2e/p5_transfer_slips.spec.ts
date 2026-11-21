@@ -1,16 +1,7 @@
 import { expect, test } from '@playwright/test';
 
-import {
-  addItem,
-  api,
-  apiAvailable,
-  asUser,
-  createGs,
-  expectNoHorizontalOverflow,
-  gsStatus,
-  unboxed,
-  USERS,
-} from './support/stack';
+import { apiAvailable, asUser, expectNoHorizontalOverflow, gsStatus, USERS } from './support/stack';
+import { lockedGs, productOf } from './support/transfer_slips';
 
 /**
  * Phase P5 (docs/RMS_PHASE_PROMPTS_20-11-2026.md; DEC-65) against the REAL local stack, at 360 px
@@ -25,59 +16,6 @@ const WIDTHS = [
   { name: 'phone-360', width: 360, height: 780 },
   { name: 'desktop-1280', width: 1280, height: 900 },
 ];
-
-interface Product {
-  id: string;
-  bucket: string;
-}
-
-async function productOf(category: string): Promise<Product> {
-  const cats = await api<Array<{ id: string; code: string }>>(
-    USERS.aman,
-    'GET',
-    '/itemization/lookups/categories',
-  );
-  const cat = cats.find((c) => c.code === category);
-  if (!cat) throw new Error(`no category ${category}`);
-  const rows = await api<Array<{ id: string }>>(
-    USERS.aman,
-    'GET',
-    `/itemization/lookups/products?q=&limit=50&category_id=${cat.id}`,
-  );
-  for (const r of rows) {
-    const fields = await api<{ allowed_buckets: Array<{ field_code: string }> }>(
-      USERS.aman,
-      'GET',
-      `/itemization/lookups/products/${r.id}/fields`,
-    );
-    const first = fields.allowed_buckets[0];
-    if (first) return { id: r.id, bucket: first.field_code };
-  }
-  throw new Error(`no ${category} product with condition buckets`);
-}
-
-/** A locked Replacement GS with one line per product (API setup, P4 endpoints). */
-async function lockedGs(tag: string, lines: Array<[Product, number]>) {
-  const gs = await createGs(tag);
-  await unboxed(gs);
-  const ids: string[] = [];
-  for (const [p, qty] of lines) ids.push(await addItem(gs.id, p.id, qty, qty));
-  await api(
-    USERS.aman,
-    'POST',
-    `/gs/${gs.id}/itemization/return-choice`,
-    { category_code: 'RO' },
-    true,
-  );
-  for (const [i, [p, qty]] of lines.entries()) {
-    await api(USERS.aman, 'PATCH', `/gs/${gs.id}/items/${ids[i] ?? ''}`, {
-      buckets: [{ field_code: p.bucket, qty }],
-    });
-  }
-  await api(USERS.aman, 'POST', `/gs/${gs.id}/categorisation/lock`, {}, true);
-  expect(await gsStatus(gs.id)).toBe('PENDING_TRANSFER_SLIP');
-  return gs;
-}
 
 test.describe('P5 transfer slips (RM)', () => {
   test.beforeEach(async ({ browserName }, testInfo) => {
@@ -143,6 +81,8 @@ test.describe('P5 transfer slips (RM)', () => {
       await expect(rm.page.getByTestId('slip-relevant-qty')).toHaveText('7');
       await expect(rm.page.getByTestId('slip-grand-total')).toHaveText('9');
       await expect(detail.getByText(`Subtotal ${a.gs_no}`)).toBeVisible();
+      // DEC-66 (P6): the other stores' items sit behind a toggle.
+      await detail.getByLabel(/Show other items of these goods slips/).check();
       await expect(detail.locator('li.line-through')).toHaveCount(1);
       await expectNoHorizontalOverflow(rm.page);
       const download = rm.page.waitForEvent('download');

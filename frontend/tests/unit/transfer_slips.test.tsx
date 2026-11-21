@@ -69,6 +69,8 @@ const slipSummary = (id: string, store: typeof DT, qty: number) => ({
   generated_at: '2026-11-21T06:00:00Z',
   voided_at: null,
   void_reason: null,
+  acknowledged_at: null,
+  discrepancy_count: 0,
 });
 
 afterEach(() => {
@@ -190,7 +192,9 @@ describe('TransferSlipDetailPage (DEC-65)', () => {
       ...slipSummary('t-dt', DT, 3),
       custody_transfer_id: 'ct-1',
       acknowledged_by_name: null,
-      acknowledged_at: null,
+      acknowledge_remarks: null,
+      discrepancies: [],
+      can_acknowledge: false,
       goods_slips: [
         {
           gs_id: '1',
@@ -235,6 +239,9 @@ describe('TransferSlipDetailPage (DEC-65)', () => {
     expect(await screen.findByText('Subtotal GS/2026-27/1')).toBeTruthy();
     expect(screen.getByTestId('slip-relevant-qty').textContent).toBe('3');
     expect(screen.getByTestId('slip-grand-total').textContent).toBe('5');
+    // DEC-66: the other stores' items sit behind a toggle.
+    expect(screen.queryByText(/Oval thermometer/)).toBeNull();
+    fireEvent.click(screen.getByLabelText(/Show other items of these goods slips/));
     const greyed = screen.getByText(/Oval thermometer/).closest('li');
     expect(greyed?.className).toContain('line-through');
     expect(greyed?.textContent).toContain('Intermediate Store OP');

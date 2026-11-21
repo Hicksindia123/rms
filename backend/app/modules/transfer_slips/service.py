@@ -14,7 +14,15 @@ the request is resolved (edited, or rejected with a note). When Super Admin / Ma
 after its slips exist, the itemization service calls `void_live_slips_for_gs` first (Q10): the slips
 are voided, their stock returns to Inward Staging, and their GSs wait for a new slip.
 
-Every rule is repeated in the database (migration 20261121000100).
+Phase P6 (DEC-66; Q12 user, Q13 PROVISIONAL): a user of the Intermediate Store the slip is
+addressed to (or Super Admin) acknowledges it **in full** (optional remark), in one transaction
+with an Idempotency-Key: slip ACKNOWLEDGED, its custody transfer accepted (TRANSIT -> the store's
+location), a routing task per GS for the store (P7), and a GS whose slips are all acknowledged moves
+to STORE_ACKNOWLEDGED. "Report discrepancy" records a remark and alerts the RM + Management; the
+slip stays GENERATED. Store users see only their own store's slips. A post-lock edit (Q10) now also
+voids an ACKNOWLEDGED slip: its goods go back from the store to Inward Staging first.
+
+Every rule is repeated in the database (migrations 20261121000100, 20261121000200).
 """
 
 from __future__ import annotations
@@ -41,6 +49,9 @@ from app.modules.intermediate_stores import service as store_service
 from app.modules.notifications import service as notifications
 from app.modules.transfer_slips import repository as repo
 from app.modules.transfer_slips.schemas import (
+    AcknowledgeIn,
+    DiscrepancyIn,
+    DiscrepancyOut,
     EditRequestIn,
     EditRequestOut,
     GenerateIn,
@@ -78,6 +89,9 @@ PURPOSE = "TRANSFER_SLIP"  # custody_transfers.purpose_code
 GS_ENTITY = "goods_slips"
 SLIP_ENTITY = "transfer_slips"
 RO = "RO"
+ACKNOWLEDGED_GS = "STORE_ACKNOWLEDGED"  # DEC-66: every live slip of the GS acknowledged
+VOID_PURPOSE = "TRANSFER_SLIP_VOID"  # DEC-66: return of a voided, acknowledged slip (Q10)
+ROUTING_STEP = "STORE_ROUTING"  # DEC-66 -> P7: the store routes its goods of the GS
 
 
 def _tz(session: Session) -> ZoneInfo:
@@ -126,6 +140,8 @@ def _summary(row: dict[str, Any]) -> SlipSummaryOut:
         generated_at=row["generated_at"],
         voided_at=row.get("voided_at"),
         void_reason=row.get("void_reason"),
+        acknowledged_at=row.get("acknowledged_at"),
+        discrepancy_count=int(row.get("discrepancy_count") or 0),
     )
 
 
@@ -140,38 +156,59 @@ def void_live_slips_for_gs(
     session: Session, user: CurrentUser, gs_id: UUID, *, reason: str
 ) -> list[str]:
     """DEC-65 / Q10: before Super Admin / Management edit a locked GS, every live slip it is on is
-    voided: the slip's stock returns from TRANSIT to Inward Staging (custody void) and each GS on
-    the slip waits for a new slip (TRANSFER_SLIP_GENERATED → PENDING_TRANSFER_SLIP). Returns the
+    voided and each GS on the slip waits for a new slip (back to PENDING_TRANSFER_SLIP). A GENERATED
+    slip's stock returns from TRANSIT to Inward Staging (custody void). DEC-66: an ACKNOWLEDGED
+    slip's stock is in the store's location; it comes back to Inward Staging through a return
+    custody transfer (TRANSFER_SLIP_VOID, accepted on behalf of Inward Staging) and the store's
+    routing task closes. The DB refuses either once department routing has started. Returns the
     voided slip numbers. The caller has checked the edit authority (itemization.configure)."""
     voided: list[str] = []
     for slip_id in repo.live_slip_ids_for_gs(session, gs_id):
         slip = repo.get_slip(session, slip_id, for_update=True)
         if slip is None:  # pragma: no cover - selected for update just above
             raise NotFound("Transfer slip not found", code="TRANSFER_SLIP_NOT_FOUND")
-        if slip["status"] == "ACKNOWLEDGED":
-            # P6 extends the void to acknowledged slips (stock back from the store's location).
-            raise Conflict(
-                f"Transfer slip {slip['slip_no']} is already acknowledged by the store",
-                code="TRANSFER_SLIP_ACKNOWLEDGED",
-                details={"slip_no": slip["slip_no"]},
-            )
         why = f"Voided: goods slip changed after the lock (Q10). {reason.strip()}"
-        repo.set_voided(session, slip_id, by=user.id, reason=why)
-        custody_service.void_transfer(
-            session, user=user, transfer_id=slip["custody_transfer_id"], reason=why
-        )
+        store = repo.stores_by_ids(session, [slip["store_id"]])[0]
+        if slip["status"] == "ACKNOWLEDGED":
+            return_id = custody_service.auto_transfer(
+                session,
+                actor=user,
+                from_location_code=store["location_code"],
+                to_location_code=STAGING,
+                lines=[
+                    TransferLineIn(lot_id=ln["lot_id"], qty=int(ln["qty_sent"]))
+                    for ln in repo.custody_lines(session, slip["custody_transfer_id"])
+                ],
+                purpose_code=VOID_PURPOSE,
+                notes=f"Transfer Slip {slip['slip_no']} voided after acknowledgement (DEC-66, Q10)",
+                accepted_on_behalf_of=STAGING,
+                notify_receiver=False,
+            )
+            repo.set_voided(session, slip_id, by=user.id, reason=why, return_transfer_id=return_id)
+        else:
+            repo.set_voided(session, slip_id, by=user.id, reason=why)
+            custody_service.void_transfer(
+                session, user=user, transfer_id=slip["custody_transfer_id"], reason=why
+            )
         for other_gs in repo.gs_ids_on_slip(session, slip_id):
             gs = gs_service.lock_goods_slip(session, other_gs)
-            if gs["status"] == GENERATED:
+            if gs["status"] in (GENERATED, ACKNOWLEDGED_GS):
                 gs_service.change_status_within_step(
                     session,
                     gs_id=other_gs,
-                    from_status=GENERATED,
+                    from_status=gs["status"],
                     to_status=PENDING,
                     step_code=STATUS_STEP,
                     reason=f"Transfer slip {slip['slip_no']} voided (DEC-65, Q10)",
                     by=user.id,
                 )
+            gs_service.sync_step_task(
+                session,
+                gs_id=other_gs,
+                step_code=ROUTING_STEP,
+                role_id=store["role_id"],
+                needed=repo.has_acknowledged_slip(session, other_gs, slip["store_id"]),
+            )
         # Recipients: the notification rule (RM). The store users already got the custody
         # TRANSFER_CANCELLED alert from the void above.
         notifications.publish(
@@ -197,6 +234,25 @@ class _Line:
     store_name: str
 
 
+def _store_scope(
+    session: Session, user: CurrentUser, perms: EffectivePermissions
+) -> list[UUID] | None:
+    """DEC-66: the stores whose slips the user sees. None = every store (Super Admin, the RM who
+    generates slips, Management and other viewers without a store role); a store user sees only
+    the slips of the store(s) whose role they hold."""
+    if user.is_super_admin or perms.allows("transfer_slips", "create"):
+        return None
+    stores = repo.user_store_role_ids(session, user.id)
+    return stores or None
+
+
+def _require_unscoped(session: Session, user: CurrentUser, perms: EffectivePermissions) -> None:
+    if _store_scope(session, user, perms) is not None:
+        raise PermissionDenied(
+            "Intermediate Store users see only the transfer slips of their store (DEC-66)"
+        )
+
+
 class TransferSlipService:
     def __init__(self, uow: UnitOfWork) -> None:
         self._uow = uow
@@ -205,6 +261,7 @@ class TransferSlipService:
     def pending(
         self,
         user: CurrentUser,
+        perms: EffectivePermissions,
         *,
         party_id: UUID | None,
         date_from: date | None,
@@ -212,6 +269,7 @@ class TransferSlipService:
         store_id: UUID | None,
     ) -> list[PendingGsOut]:
         with self._uow.transaction(user.id) as session:
+            _require_unscoped(session, user, perms)
             tz = _tz(session)
             headers = repo.pending_goods_slips(
                 session,
@@ -287,6 +345,7 @@ class TransferSlipService:
     def list_slips(
         self,
         user: CurrentUser,
+        perms: EffectivePermissions,
         *,
         status: str | None,
         store_id: UUID | None,
@@ -299,21 +358,44 @@ class TransferSlipService:
                 session,
                 status=status,
                 store_id=store_id,
+                store_scope=_store_scope(session, user, perms),
                 gs_no=(q or "").strip() or None,
                 limit=page_size,
                 offset=(page - 1) * page_size,
             )
             return SlipPage(items=[_summary(r) for r in rows], total=total)
 
-    def detail(self, user: CurrentUser, slip_id: UUID) -> SlipDetailOut:
+    def detail(
+        self, user: CurrentUser, perms: EffectivePermissions, slip_id: UUID
+    ) -> SlipDetailOut:
         with self._uow.transaction(user.id) as session:
-            return self._detail(session, slip_id)
+            return self._detail(session, user, perms, slip_id)
 
-    def _detail(self, session: Session, slip_id: UUID) -> SlipDetailOut:
-        row = repo.get_slip(session, slip_id)
-        if not row:
+    def _visible_slip(
+        self,
+        session: Session,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        slip_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> dict[str, Any]:
+        row = repo.get_slip(session, slip_id, for_update=for_update)
+        scope = _store_scope(session, user, perms) if row else None
+        if not row or (scope is not None and row["store_id"] not in scope):
             raise NotFound("Transfer slip not found", code="TRANSFER_SLIP_NOT_FOUND")
+        return row
+
+    def _detail(
+        self, session: Session, user: CurrentUser, perms: EffectivePermissions, slip_id: UUID
+    ) -> SlipDetailOut:
+        row = self._visible_slip(session, user, perms, slip_id)
         base = _summary(row)
+        may_ack = (
+            row["status"] == "GENERATED"
+            and perms.allows("transfer_slips", "approve")
+            and repo.user_acts_for_store(session, user.id, row["store_id"])
+        )
         return SlipDetailOut(
             **base.model_dump(),
             custody_transfer_id=row["custody_transfer_id"],
@@ -322,7 +404,11 @@ class TransferSlipService:
             ],
             lines=[SlipLineOut.model_validate(ln) for ln in repo.slip_lines(session, slip_id)],
             acknowledged_by_name=row.get("acknowledged_by_name"),
-            acknowledged_at=row.get("acknowledged_at"),
+            acknowledge_remarks=row.get("acknowledge_remarks"),
+            discrepancies=[
+                DiscrepancyOut.model_validate(d) for d in repo.discrepancies(session, slip_id)
+            ],
+            can_acknowledge=may_ack,
         )
 
     def for_gs(
@@ -331,23 +417,33 @@ class TransferSlipService:
         with self._uow.transaction(user.id) as session:
             gs_service.get_visible_goods_slip(session, user, perms, gs_id)
             requests = [_request_out(r) for r in repo.edit_requests_for_gs(session, gs_id)]
+            scope = _store_scope(session, user, perms)
             return GsTransferSlipsOut(
                 gs_id=gs_id,
-                slips=[_summary(r) for r in repo.slips_for_gs(session, gs_id)],
+                slips=[
+                    _summary(r)
+                    for r in repo.slips_for_gs(session, gs_id)
+                    if scope is None or r["store_id"] in scope
+                ],
                 edit_requests=requests,
                 open_edit_request=next((r for r in requests if r.status == "OPEN"), None),
             )
 
-    def edit_requests(self, user: CurrentUser, *, status: str | None) -> list[EditRequestOut]:
+    def edit_requests(
+        self, user: CurrentUser, perms: EffectivePermissions, *, status: str | None
+    ) -> list[EditRequestOut]:
         with self._uow.transaction(user.id) as session:
+            _require_unscoped(session, user, perms)
             return [_request_out(r) for r in repo.edit_requests(session, status=status)]
 
     # ------------------------------------------------------------------ PDF -----------------
-    def pdf(self, user: CurrentUser, slip_id: UUID) -> tuple[str, bytes]:
+    def pdf(
+        self, user: CurrentUser, perms: EffectivePermissions, slip_id: UUID
+    ) -> tuple[str, bytes]:
         """A4 PDF of the slip (Q20), rendered from its stored snapshots: the same slip always
         gives the same bytes (deterministic renderer)."""
         with self._uow.transaction(user.id) as session:
-            detail = self._detail(session, slip_id)
+            detail = self._detail(session, user, perms, slip_id)
             row = repo.get_slip(session, slip_id)
             template = repo.published_template(session)
             if not template or not row:
@@ -390,6 +486,17 @@ class TransferSlipService:
                     SlipField("Date", generated),
                     SlipField("Generated by", generated_by),
                     *([SlipField("Status", d.status)] if d.status != "GENERATED" else []),
+                    *(
+                        [
+                            SlipField(
+                                "Acknowledged",
+                                f"{d.acknowledged_by_name or ''} · "
+                                f"{_fmt(d.acknowledged_at, f'{fmt} %H:%M', tz)}",
+                            )
+                        ]
+                        if d.acknowledged_at
+                        else []
+                    ),
                 ],
             )
         ]
@@ -669,6 +776,7 @@ class TransferSlipService:
                 notes=f"Transfer Slip {slip_no} to {store['name']} (DEC-65)",
                 check_custodian=False,
                 transfer_no=slip_no,
+                notify_receiver=False,  # DEC-66: TRANSFER_SLIP_GENERATED below instead
             )
             gs_lines = [ln for ln in lines_all if ln.item["gs_id"] in set(slip_gs)]
             relevant_qty = sum(int(i["received_qty"]) for i in rel_items)
@@ -717,6 +825,20 @@ class TransferSlipService:
                             },
                         )
             slip_ids.append(slip_id)
+            # DEC-66: the users of the store the slip is addressed to (context recipients; the
+            # notification rule may add more).
+            notifications.publish(
+                session,
+                "TRANSFER_SLIP_GENERATED",
+                role_codes=[store["role_code"]],
+                title=f"Transfer slip {slip_no}: {relevant_qty} pc for {store['name']}",
+                body=(
+                    f"{', '.join(headers[g]['gs_no'] for g in slip_gs)} - check the goods and "
+                    "acknowledge receipt"
+                ),
+                entity_type=SLIP_ENTITY,
+                entity_id=slip_id,
+            )
             log.info(
                 "transfer_slip_generated",
                 slip_no=slip_no,
@@ -743,6 +865,138 @@ class TransferSlipService:
         return GenerateOut(
             slips=[_summary(s) for s in slips], goods_slip_ids=list(gs_ids)
         ).model_dump(mode="json")
+
+    # ------------------------------------------------------------------ acknowledgement ----
+    def acknowledge(
+        self,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        slip_id: UUID,
+        payload: AcknowledgeIn,
+        idem: IdempotencyKey,
+    ) -> IdempotentResult:
+        """DEC-66: one transaction; a duplicate Idempotency-Key returns the first result (G-16)."""
+        with self._uow.transaction(user.id) as session:
+            return run_idempotent(
+                session,
+                idem,
+                user.id,
+                lambda: (200, self._acknowledge(session, user, perms, slip_id, payload)),
+            )
+
+    def _store_slip_for_action(
+        self,
+        session: Session,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        slip_id: UUID,
+        verb: str,
+    ) -> dict[str, Any]:
+        if not perms.allows("transfer_slips", "approve"):
+            raise PermissionDenied(f"Only Intermediate Store users {verb} transfer slips (DEC-66)")
+        slip = self._visible_slip(session, user, perms, slip_id, for_update=True)
+        if not repo.user_acts_for_store(session, user.id, slip["store_id"]):
+            raise PermissionDenied(
+                f"Only a user of {slip['store_name']} may {verb} transfer slip {slip['slip_no']}"
+                " (DEC-66)",
+                code="NOT_SLIP_STORE_USER",
+                details={"store_code": slip["store_code"]},
+            )
+        if slip["status"] == "VOIDED":
+            raise Conflict(
+                f"Transfer slip {slip['slip_no']} is void; wait for the regenerated slip",
+                code="TRANSFER_SLIP_VOIDED",
+                details={"slip_no": slip["slip_no"]},
+            )
+        if slip["status"] == "ACKNOWLEDGED":
+            raise Conflict(
+                f"Transfer slip {slip['slip_no']} is already acknowledged",
+                code="TRANSFER_SLIP_ALREADY_ACKNOWLEDGED",
+                details={"slip_no": slip["slip_no"]},
+            )
+        return slip
+
+    def _acknowledge(
+        self,
+        session: Session,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        slip_id: UUID,
+        payload: AcknowledgeIn,
+    ) -> dict[str, Any]:
+        slip = self._store_slip_for_action(session, user, perms, slip_id, "acknowledge")
+        gs_ids = repo.gs_ids_on_slip(session, slip_id)  # sorted: fixed lock order
+        for gs_id in gs_ids:
+            gs_service.lock_goods_slip(session, gs_id)
+        store = repo.stores_by_ids(session, [slip["store_id"]])[0]
+        # The DB requires the slip first, then its custody transfer (DEC-66).
+        repo.set_acknowledged(session, slip_id, by=user.id, remarks=payload.remarks)
+        custody_service.accept_slip_transfer(
+            session, user=user, transfer_id=slip["custody_transfer_id"]
+        )
+        for gs_id in gs_ids:
+            # P7: the store routes its goods of this GS (one open task per GS and store).
+            gs_service.sync_step_task(
+                session, gs_id=gs_id, step_code=ROUTING_STEP, role_id=store["role_id"], needed=True
+            )
+            gs = gs_service.lock_goods_slip(session, gs_id)
+            if gs["status"] == GENERATED and repo.slips_acknowledged(session, gs_id):
+                gs_service.change_status_within_step(
+                    session,
+                    gs_id=gs_id,
+                    from_status=GENERATED,
+                    to_status=ACKNOWLEDGED_GS,
+                    step_code=STATUS_STEP,
+                    reason=f"All transfer slips acknowledged (last: {slip['slip_no']}, DEC-66)",
+                    by=user.id,
+                )
+        log.info(
+            "transfer_slip_acknowledged",
+            slip_no=slip["slip_no"],
+            store=slip["store_code"],
+            gs_count=len(gs_ids),
+        )
+        return self._detail(session, user, perms, slip_id).model_dump(mode="json")
+
+    def report_discrepancy(
+        self,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        slip_id: UUID,
+        payload: DiscrepancyIn,
+        idem: IdempotencyKey,
+    ) -> IdempotentResult:
+        with self._uow.transaction(user.id) as session:
+            return run_idempotent(
+                session,
+                idem,
+                user.id,
+                lambda: (201, self._report_discrepancy(session, user, perms, slip_id, payload)),
+            )
+
+    def _report_discrepancy(
+        self,
+        session: Session,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        slip_id: UUID,
+        payload: DiscrepancyIn,
+    ) -> dict[str, Any]:
+        """Q13 (PROVISIONAL): remark only, no quantity change; the slip stays GENERATED."""
+        slip = self._store_slip_for_action(session, user, perms, slip_id, "report on")
+        repo.insert_discrepancy(session, slip_id=slip_id, remark=payload.remark)
+        notifications.publish(
+            session,
+            "TRANSFER_SLIP_DISCREPANCY",
+            user_ids=[slip["generated_by"]],
+            title=f"{slip['slip_no']}: discrepancy reported by {user.full_name}",
+            body=payload.remark,
+            entity_type=SLIP_ENTITY,
+            entity_id=slip_id,
+            priority="HIGH",
+        )
+        log.info("transfer_slip_discrepancy", slip_no=slip["slip_no"], store=slip["store_code"])
+        return self._detail(session, user, perms, slip_id).model_dump(mode="json")
 
     # ------------------------------------------------------------------ edit requests -------
     @staticmethod

@@ -23,6 +23,10 @@ export function notificationPath(n: AppNotification, can: Can): string | null {
     if (can('dispatch', 'view')) return '/dispatch-slips';
     if (n.gs_id && can('ac_entry', 'view')) return `/accounts-entry/${n.gs_id}`;
   }
+  // DEC-65 / DEC-66: transfer slip generated / voided / discrepancy -> the slip.
+  if (n.entity_type === 'transfer_slips' && n.entity_id) {
+    return `/transfer-slips/${n.entity_id}`;
+  }
   if (n.entity_type === 'custody_transfer' && n.entity_id) {
     return `/custody/transfers/${n.entity_id}`;
   }

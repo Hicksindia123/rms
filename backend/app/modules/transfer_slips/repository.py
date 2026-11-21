@@ -1,4 +1,4 @@
-"""Transfer slip SQL (Phase P5, DEC-65). SQL only, no business rules."""
+"""Transfer slip SQL (Phase P5, DEC-65; Phase P6, DEC-66). SQL only, no business rules."""
 
 from __future__ import annotations
 
@@ -213,7 +213,7 @@ def stores_by_ids(session: Session, store_ids: Sequence[UUID]) -> list[dict[str,
         session,
         """
         select s.id, s.code, s.name, s.sort_order, s.is_active, s.location_id,
-               l.code as location_code, r.code as role_code
+               l.code as location_code, s.role_id, r.code as role_code
           from public.intermediate_stores s
           join public.inventory_locations l on l.id = s.location_id
           join public.roles r on r.id = s.role_id
@@ -310,8 +310,10 @@ _SLIP_SELECT = """
            s.store_name_snapshot as store_name, s.custody_transfer_id, s.status,
            s.relevant_qty, s.grand_total_qty, s.template_version_no, s.content,
            s.generated_by, gp.full_name as generated_by_name, s.generated_at,
-           s.acknowledged_at, ap.full_name as acknowledged_by_name,
-           s.voided_at, s.void_reason,
+           s.acknowledged_at, ap.full_name as acknowledged_by_name, s.acknowledge_remarks,
+           s.voided_at, s.void_reason, s.void_return_transfer_id,
+           (select count(*) from public.transfer_slip_discrepancies d
+             where d.slip_id = s.id) as discrepancy_count,
            (select count(*) from public.transfer_slip_gs g where g.slip_id = s.id) as gs_count,
            coalesce((select array_agg(g.gs_no_snapshot order by g.gs_no_snapshot)
                        from public.transfer_slip_gs g where g.slip_id = s.id), '{}') as gs_nos
@@ -341,6 +343,7 @@ def list_slips(
     *,
     status: str | None,
     store_id: UUID | None,
+    store_scope: Sequence[UUID] | None,
     gs_no: str | None,
     limit: int,
     offset: int,
@@ -348,6 +351,7 @@ def list_slips(
     where = """
      where (cast(:status as text) is null or s.status = cast(:status as text))
        and (cast(:store as uuid) is null or s.store_id = cast(:store as uuid))
+       and (cast(:scope as uuid[]) is null or s.store_id = any(cast(:scope as uuid[])))
        and (cast(:gs as text) is null or s.slip_no ilike '%' || cast(:gs as text) || '%'
             or exists (select 1 from public.transfer_slip_gs g
                         where g.slip_id = s.id
@@ -356,6 +360,7 @@ def list_slips(
     params = {
         "status": status,
         "store": str(store_id) if store_id else None,
+        "scope": _ids(store_scope) if store_scope is not None else None,
         "gs": gs_no,
         "limit": limit,
         "offset": offset,
@@ -447,16 +452,128 @@ def gs_ids_on_slip(session: Session, slip_id: UUID) -> list[UUID]:
     return [UUID(str(r)) for r in rows]
 
 
-def set_voided(session: Session, slip_id: UUID, *, by: UUID, reason: str) -> None:
+def set_voided(
+    session: Session,
+    slip_id: UUID,
+    *,
+    by: UUID,
+    reason: str,
+    return_transfer_id: UUID | None = None,
+) -> None:
     session.execute(
         text(
             """
             update public.transfer_slips
-               set status = 'VOIDED', voided_by = :by, voided_at = now(), void_reason = :reason
+               set status = 'VOIDED', voided_by = :by, voided_at = now(), void_reason = :reason,
+                   void_return_transfer_id = :ret
              where id = :id
             """
         ),
-        {"id": slip_id, "by": by, "reason": reason},
+        {"id": slip_id, "by": by, "reason": reason, "ret": return_transfer_id},
+    )
+
+
+# --- acknowledgement (P6, DEC-66) --------------------------------------------------------------
+def user_store_role_ids(session: Session, user_id: UUID) -> list[UUID]:
+    """Stores whose own role the user holds (MANAGEMENT is not a store user here)."""
+    rows = session.execute(
+        text(
+            """
+            select s.id from public.intermediate_stores s
+              join public.user_roles ur on ur.role_id = s.role_id
+             where ur.user_id = :uid
+             order by s.sort_order, s.code
+            """
+        ),
+        {"uid": user_id},
+    ).scalars()
+    return [UUID(str(r)) for r in rows]
+
+
+def user_acts_for_store(session: Session, user_id: UUID, store_id: UUID) -> bool:
+    return bool(
+        session.execute(
+            text("select rms_private.user_acts_for_store(:u, :s)"), {"u": user_id, "s": store_id}
+        ).scalar_one()
+    )
+
+
+def set_acknowledged(session: Session, slip_id: UUID, *, by: UUID, remarks: str | None) -> None:
+    session.execute(
+        text(
+            """
+            update public.transfer_slips
+               set status = 'ACKNOWLEDGED', acknowledged_by = :by, acknowledged_at = now(),
+                   acknowledge_remarks = :remarks
+             where id = :id
+            """
+        ),
+        {"id": slip_id, "by": by, "remarks": remarks},
+    )
+
+
+def insert_discrepancy(session: Session, *, slip_id: UUID, remark: str) -> UUID:
+    return UUID(
+        str(
+            session.execute(
+                text(
+                    "insert into public.transfer_slip_discrepancies (slip_id, remark) "
+                    "values (:slip, :remark) returning id"
+                ),
+                {"slip": slip_id, "remark": remark},
+            ).scalar_one()
+        )
+    )
+
+
+def discrepancies(session: Session, slip_id: UUID) -> list[dict[str, Any]]:
+    return _rows(
+        session,
+        """
+        select d.id, d.remark, p.full_name as reported_by_name, d.reported_at
+          from public.transfer_slip_discrepancies d
+          left join public.profiles p on p.id = d.reported_by
+         where d.slip_id = :id
+         order by d.reported_at, d.id
+        """,
+        {"id": slip_id},
+    )
+
+
+def custody_lines(session: Session, transfer_id: UUID) -> list[dict[str, Any]]:
+    """The lots and quantities of the custody transfer behind a slip."""
+    return _rows(
+        session,
+        """
+        select lot_id, qty_sent from public.custody_transfer_lines
+         where transfer_id = :id order by lot_id
+        """,
+        {"id": transfer_id},
+    )
+
+
+def slips_acknowledged(session: Session, gs_id: UUID) -> bool:
+    return bool(
+        session.execute(
+            text("select rms_private.gs_slips_acknowledged(:gs)"), {"gs": gs_id}
+        ).scalar_one()
+    )
+
+
+def has_acknowledged_slip(session: Session, gs_id: UUID, store_id: UUID) -> bool:
+    """The store holds goods of the GS on an ACKNOWLEDGED slip (its routing task stays open)."""
+    return bool(
+        session.execute(
+            text(
+                """
+                select exists (select 1 from public.transfer_slip_gs g
+                                 join public.transfer_slips s on s.id = g.slip_id
+                                where g.gs_id = :gs and s.store_id = :store
+                                  and s.status = 'ACKNOWLEDGED')
+                """
+            ),
+            {"gs": gs_id, "store": store_id},
+        ).scalar_one()
     )
 
 

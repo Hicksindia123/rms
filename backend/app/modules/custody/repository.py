@@ -126,6 +126,15 @@ def get_transfer(
     return dict(row) if row else None
 
 
+def transfer_slip_no(session: Session, transfer_id: UUID) -> str | None:
+    """DEC-66: the Transfer Slip a custody transfer backs (None for any other transfer)."""
+    value = session.execute(
+        text("select slip_no from public.transfer_slips where custody_transfer_id = :id"),
+        {"id": transfer_id},
+    ).scalar()
+    return str(value) if value is not None else None
+
+
 def transfers_for_gs(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
     rows = session.execute(
         text(

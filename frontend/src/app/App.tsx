@@ -276,6 +276,11 @@ const TransferSlipsPage = lazy(() =>
     default: m.TransferSlipsPage,
   })),
 );
+const StoreAcknowledgementPage = lazy(() =>
+  import('@/features/transfer-slips/StoreAcknowledgementPage').then((m) => ({
+    default: m.StoreAcknowledgementPage,
+  })),
+);
 const TransferSlipDetailPage = lazy(() =>
   import('@/features/transfer-slips/TransferSlipDetailPage').then((m) => ({
     default: m.TransferSlipDetailPage,
@@ -1524,11 +1529,25 @@ function Shell() {
                 }}
               >
                 {can('transfer_slips', 'view') || isSuperAdmin ? (
-                  second ? (
+                  second === 'acknowledge' ? (
+                    // DEC-66: the Intermediate Store's list of slips to acknowledge.
+                    <StoreAcknowledgementPage
+                      onOpenSlip={(id: string) => {
+                        navigate(`/transfer-slips/${id}`);
+                      }}
+                    />
+                  ) : second ? (
                     <TransferSlipDetailPage
                       slipId={second}
+                      {...(can('transfer_slips', 'create') || isSuperAdmin
+                        ? {}
+                        : { backLabel: 'Acknowledge Transfer Slips' })}
                       onBack={() => {
-                        navigate('/transfer-slips');
+                        navigate(
+                          can('transfer_slips', 'create') || isSuperAdmin
+                            ? '/transfer-slips'
+                            : '/transfer-slips/acknowledge',
+                        );
                       }}
                       onOpenGs={(id: string) => {
                         navigate(`/gs/${id}`);

@@ -80,7 +80,7 @@ class JourneyService:
                 count: int | None = None
                 nxt: JourneyNext | None = None
                 if s["queue_code"]:
-                    count, first = repo.queue_summary(session, s["queue_code"])
+                    count, first = repo.queue_summary(session, s["queue_code"], user.id)
                     nxt = JourneyNext(**first) if first else None
                 entries.append(
                     JourneyEntry(
@@ -113,7 +113,7 @@ class JourneyService:
                 raise NotFound(
                     f"Journey step {code} is not on your menu", code="JOURNEY_STEP_NOT_FOUND"
                 )
-            rows, total = repo.queue_items(session, step["queue_code"], QUEUE_PAGE_LIMIT)
+            rows, total = repo.queue_items(session, step["queue_code"], QUEUE_PAGE_LIMIT, user.id)
         return JourneyQueueOut(
             code=step["code"],
             label=step["label"],

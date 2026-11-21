@@ -18,6 +18,7 @@ const STATUS_VARIANT: Record<string, BadgeVariant> = {
   // DEC-64: locked and waiting for the RM's transfer slip; Complete Sales Return parked (Q11).
   PENDING_TRANSFER_SLIP: 'warning',
   TRANSFER_SLIP_GENERATED: 'info', // DEC-65: in transit to the Intermediate Stores
+  STORE_ACKNOWLEDGED: 'success', // DEC-66: every slip acknowledged by its store
   SALES_RETURN_HOLD: 'warning',
   HELD_AT_INTERMEDIATE_STORE: 'success',
   COMMERCIAL_RESOLUTION: 'warning',

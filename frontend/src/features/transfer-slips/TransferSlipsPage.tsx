@@ -667,8 +667,12 @@ const PendingTab: React.FC<Props> = ({ canGenerate, onOpenGs, onOpenSlip }) => {
   );
 };
 
-const SlipsTab: React.FC<{ onOpenSlip: (id: string) => void }> = ({ onOpenSlip }) => {
-  const [status, setStatus] = useState<SlipStatus | ''>('');
+/** Generated slips (P5) — also the store's list in P6 (the API returns only its store's slips). */
+export const SlipsTab: React.FC<{
+  onOpenSlip: (id: string) => void;
+  initialStatus?: SlipStatus | '';
+}> = ({ onOpenSlip, initialStatus = '' }) => {
+  const [status, setStatus] = useState<SlipStatus | ''>(initialStatus);
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
@@ -761,7 +765,7 @@ const SlipsTab: React.FC<{ onOpenSlip: (id: string) => void }> = ({ onOpenSlip }
           No transfer slips found.
         </div>
       ) : (
-        <ul className="space-y-3" data-testid="slip-list">
+        <ul className="m-0 list-none space-y-3 p-0" data-testid="slip-list">
           {items.map((s) => (
             <li key={s.id}>
               <button
@@ -782,6 +786,11 @@ const SlipsTab: React.FC<{ onOpenSlip: (id: string) => void }> = ({ onOpenSlip }
                   {s.relevant_qty} pc for the store · {s.grand_total_qty} pc in total ·{' '}
                   {formatDateTime(s.generated_at)} · {s.generated_by_name ?? '—'}
                 </span>
+                {s.discrepancy_count > 0 ? (
+                  <span className="mt-1 block text-xs font-semibold text-amber-700 dark:text-amber-400">
+                    {s.discrepancy_count} discrepancy report(s)
+                  </span>
+                ) : null}
               </button>
             </li>
           ))}

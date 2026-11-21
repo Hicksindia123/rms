@@ -8,7 +8,7 @@ select set_eq(
   $$select oi.code from public.option_items oi join public.option_sets os on os.id = oi.option_set_id
      where os.code = 'GS_STATUS'$$,
   $$values ('GATE_CREATED'),('UNBOXING'),('ITEMIZATION'),('CATEGORISATION'),('CSR_APPROVAL_PENDING'),
-           ('INSPECTION'),('RM_REVIEW'),('PENDING_TRANSFER_SLIP'),('TRANSFER_SLIP_GENERATED'),('SALES_RETURN_HOLD'),('HELD_AT_INTERMEDIATE_STORE'),('IN_PROCESS'),('COMMERCIAL_RESOLUTION'),
+           ('INSPECTION'),('RM_REVIEW'),('PENDING_TRANSFER_SLIP'),('TRANSFER_SLIP_GENERATED'),('STORE_ACKNOWLEDGED'),('SALES_RETURN_HOLD'),('HELD_AT_INTERMEDIATE_STORE'),('IN_PROCESS'),('COMMERCIAL_RESOLUTION'),
            ('AWAITING_NOTIFICATION'),('CLOSED'),('CANCELLED')$$,
   'GS_STATUS labels cover exactly the goods_slips status codes');
 select is((select oi.label from public.option_items oi join public.option_sets os on os.id = oi.option_set_id

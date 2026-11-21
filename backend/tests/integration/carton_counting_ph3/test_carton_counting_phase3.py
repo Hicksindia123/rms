@@ -63,9 +63,10 @@ async def test_status_and_step_labels_come_from_config(
     assert labels["ITEMIZATION"] == "Counting"
     assert labels["CATEGORISATION"] == "Categorisation"
     assert labels["HELD_AT_INTERMEDIATE_STORE"] == "Held at Intermediate Store"
-    assert (
-        len(labels) == 16
-    )  # + PENDING_TRANSFER_SLIP, SALES_RETURN_HOLD (DEC-64), TRANSFER_SLIP_GENERATED (DEC-65)
+    # + PENDING_TRANSFER_SLIP, SALES_RETURN_HOLD (DEC-64), TRANSFER_SLIP_GENERATED (DEC-65),
+    # STORE_ACKNOWLEDGED (DEC-66)
+    assert len(labels) == 17
+    assert labels["STORE_ACKNOWLEDGED"] == "Acknowledged by Store"
 
     # Workflow v2 (G-18: codes unchanged): the open S1_UNBOX task shows the new step label.
     gs = (await _create(client, actors.gate, masters, _values())).json()["goods_slip"]

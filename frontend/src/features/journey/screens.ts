@@ -19,6 +19,7 @@ import {
   Mail,
   MessageSquareWarning,
   Package,
+  PackageCheck,
   PackageOpen,
   PlusCircle,
   Receipt,
@@ -60,6 +61,7 @@ const SCREEN_PATHS: Record<string, string> = {
   'department-routing': '/department-routing',
   'department-issue': '/department-issue',
   'transfer-slips': '/transfer-slips',
+  'transfer-slip-acks': '/transfer-slips/acknowledge', // DEC-66
   'department-receiving': '/department-receiving',
   'accounts-entry': '/accounts-entry',
   'accounts-docs': '/accounts',
@@ -102,6 +104,8 @@ export function itemPath(
       return '/department-issue';
     case 'transfer-slips':
       return '/transfer-slips';
+    case 'transfer-slip': // DEC-66: the queue item is the slip itself
+      return `/transfer-slips/${item.target_id}`;
     case 'accounts-docs':
       return '/accounts';
     case 'dispatch-slips':
@@ -127,6 +131,7 @@ const ICONS: Record<string, LucideIcon> = {
   TRANSFER_SLIPS: Send,
   EDIT_REQUESTS: MessageSquareWarning,
   STORE_ACCEPT: Warehouse,
+  ACK_TRANSFER_SLIPS: PackageCheck,
   DEPT_ROUTING: Building2,
   DEPT_ISSUE: FolderInput,
   DEPT_RECEIVING: CheckCircle2,

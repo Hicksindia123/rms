@@ -154,6 +154,18 @@ _QUEUES: dict[str, str] = {
          where g.status = 'PENDING_TRANSFER_SLIP'
            and not exists (select 1 from public.gs_edit_requests r
                             where r.gs_id = g.id and r.status = 'OPEN')""",  # noqa: S608
+    # DEC-66: transfer slips waiting for the signed-in user's Intermediate Store (one row per slip;
+    # gs_no = the slip number, party_name = its goods slips). Scoped by :uid (Super Admin: all).
+    "STORE_ACK": """
+        select (select g.gs_id from public.transfer_slip_gs g
+                 where g.slip_id = s.id order by g.gs_no_snapshot limit 1) as gs_id,
+               s.slip_no as gs_no,
+               (select string_agg(g.gs_no_snapshot, ', ' order by g.gs_no_snapshot)
+                  from public.transfer_slip_gs g where g.slip_id = s.id) as party_name,
+               s.store_name_snapshot as station_name, s.id as target_id, s.generated_at as since
+          from public.transfer_slips s
+         where s.status = 'GENERATED'
+           and rms_private.user_acts_for_store(cast(:uid as uuid), s.store_id)""",
     # DEC-65: the RM's open edit requests on locked GSs (Management / Super Admin).
     "EDIT_REQUESTS": f"""
         select {_GS_COLS}, g.id as target_id, r.requested_at as since
@@ -206,13 +218,24 @@ def list_user_steps(session: Session, user_id: UUID) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def queue_summary(session: Session, queue_code: str) -> tuple[int, dict[str, Any] | None]:
+def _params(sql: str, user_id: UUID | None) -> dict[str, Any]:
+    """A user-scoped queue (DEC-66 STORE_ACK) binds :uid; the others take no parameters."""
+    return {"uid": str(user_id) if user_id else None} if ":uid" in sql else {}
+
+
+def queue_summary(
+    session: Session, queue_code: str, user_id: UUID | None = None
+) -> tuple[int, dict[str, Any] | None]:
     """(count, oldest waiting entry) of one queue."""
     sql = _QUEUES[queue_code]
-    count = int(session.execute(text(f"select count(*) from ({sql}) q")).scalar_one())  # noqa: S608
+    params = _params(sql, user_id)
+    count = int(
+        session.execute(text(f"select count(*) from ({sql}) q"), params).scalar_one()  # noqa: S608
+    )
     first = (
         session.execute(
-            text(f"select * from ({sql}) q order by q.since nulls last, q.gs_no limit 1")  # noqa: S608
+            text(f"select * from ({sql}) q order by q.since nulls last, q.gs_no limit 1"),  # noqa: S608
+            params,
         )
         .mappings()
         .first()
@@ -220,12 +243,17 @@ def queue_summary(session: Session, queue_code: str) -> tuple[int, dict[str, Any
     return count, (dict(first) if first else None)
 
 
-def queue_items(session: Session, queue_code: str, limit: int) -> tuple[list[dict[str, Any]], int]:
+def queue_items(
+    session: Session, queue_code: str, limit: int, user_id: UUID | None = None
+) -> tuple[list[dict[str, Any]], int]:
     sql = _QUEUES[queue_code]
-    total = int(session.execute(text(f"select count(*) from ({sql}) q")).scalar_one())  # noqa: S608
+    params = _params(sql, user_id)
+    total = int(
+        session.execute(text(f"select count(*) from ({sql}) q"), params).scalar_one()  # noqa: S608
+    )
     rows = session.execute(
         text(f"select * from ({sql}) q order by q.since nulls last, q.gs_no limit :lim"),  # noqa: S608
-        {"lim": limit},
+        {**params, "lim": limit},
     ).mappings()
     return [dict(r) for r in rows], total
 

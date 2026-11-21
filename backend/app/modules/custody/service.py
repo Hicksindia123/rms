@@ -248,11 +248,14 @@ def initiate_transfer(
     supersedes_transfer_id: UUID | None = None,
     task_step_code: str = HANDOVER_STEP,
     transfer_no: str | None = None,
+    notify_receiver: bool = True,
 ) -> UUID:
     """Create a transfer and dispatch its quantities to TRANSIT (one transaction).
 
     `transfer_no`: a number the caller already drew (DEC-65: a Transfer Slip's custody transfer
-    carries the slip number); default = the next number of series TRANSFER."""
+    carries the slip number); default = the next number of series TRANSFER.
+    `notify_receiver=False`: the caller sends its own alert (DEC-66: TRANSFER_SLIP_GENERATED
+    replaces the generic TRANSFER_INITIATED for a slip; a void return needs none)."""
     source = _location(session, from_location_code)
     target = _location(session, to_location_code)
     transit = _transit(session)
@@ -311,7 +314,13 @@ def initiate_transfer(
     )
     for line in lines:
         repo.insert_line(session, transfer_id=transfer_id, lot_id=line.lot_id, qty_sent=line.qty)
-    _dispatch(session, transfer_id, actor_id=actor.id, task_step_code=task_step_code)
+    _dispatch(
+        session,
+        transfer_id,
+        actor_id=actor.id,
+        task_step_code=task_step_code,
+        notify=notify_receiver,
+    )
     return transfer_id
 
 
@@ -369,6 +378,7 @@ def auto_transfer(
     notes: str | None = None,
     gs_id: UUID | None = None,
     accepted_on_behalf_of: str | None = None,
+    notify_receiver: bool = True,
 ) -> UUID:
     """Execute an atomic custody transfer with immediate auto-acceptance (DEC-34).
     Dispatches source -> TRANSIT -> target in a single transaction."""
@@ -382,6 +392,7 @@ def auto_transfer(
         notes=notes,
         gs_id=gs_id,
         check_custodian=False,
+        notify_receiver=notify_receiver,
     )
     transfer = _locked(session, transfer_id)
     accept_opt = _form_option(session, ACCEPT_FORM, ACCEPT_FIELD, ACCEPTED_VERIFIED)
@@ -434,6 +445,7 @@ def accept_transfer(
     payload: AcceptIn,
 ) -> None:
     transfer = _locked(session, transfer_id)
+    _refuse_slip_backed(session, transfer, "acknowledged on its transfer slip")
     if transfer["status"] != "INITIATED" or not transfer["stock_moved"]:
         raise Conflict(
             "This transfer is not waiting for acceptance",
@@ -706,6 +718,7 @@ def approve_adjustment(
 
 def cancel_transfer(session: Session, *, user: CurrentUser, transfer_id: UUID, reason: str) -> None:
     transfer = _locked(session, transfer_id)
+    _refuse_slip_backed(session, transfer, "voided with its transfer slip (Q10)")
     if transfer["status"] != "INITIATED":
         raise Conflict(
             "Only a transfer that has not been counted can be cancelled",
@@ -732,6 +745,71 @@ def void_transfer(session: Session, *, user: CurrentUser, transfer_id: UUID, rea
             details={"transfer_no": transfer["transfer_no"], "status": transfer["status"]},
         )
     _cancel(session, transfer, user=user, reason=reason)
+
+
+def accept_slip_transfer(session: Session, *, user: CurrentUser, transfer_id: UUID) -> None:
+    """DEC-66: the Intermediate Store acknowledges a transfer slip; its custody transfer is accepted
+    in full (Q13: no partial or short receipt; every count = the quantity sent, ACCEPTED_VERIFIED,
+    TRANSIT -> the store's location). The transfer-slip service has authorised the store user and
+    marked the slip ACKNOWLEDGED first (the DB requires that order). Segregation of duties applies
+    as for any transfer: the initiator (the RM who generated the slip) never accepts it."""
+    transfer = _locked(session, transfer_id)
+    if transfer["status"] != "INITIATED" or not transfer["stock_moved"]:
+        raise Conflict(
+            "The goods of this transfer are not in transit",
+            code="TRANSFER_NOT_AWAITING_ACCEPTANCE",
+            details={"transfer_no": transfer["transfer_no"], "status": transfer["status"]},
+        )
+    _assert_segregation(session, transfer, user)
+    option = _form_option(session, ACCEPT_FORM, ACCEPT_FIELD, ACCEPTED_VERIFIED)
+    lines = repo.lines_for_transfers(session, [transfer_id])
+    for ln in lines:
+        repo.set_line_count(session, transfer_id, ln["lot_id"], ln["qty_sent"])
+    repo.set_received(
+        session,
+        transfer_id,
+        status="ACCEPTED",
+        acceptance_code=ACCEPTED_VERIFIED,
+        by=user.id,
+        discrepancy_notes=None,
+        accept_form_version_id=option["form_version_id"],
+        labels={ACCEPT_FIELD: option["snapshot"]},
+    )
+    for ln in lines:
+        _move(
+            session,
+            transfer,
+            ln,
+            "accept",
+            to=transfer["to_location_id"],
+            qty=ln["qty_sent"],
+            actor=user.id,
+        )
+        repo.add_line_outcome(session, transfer_id, ln["lot_id"], accepted=ln["qty_sent"])
+    _close_receiver_task(session, transfer)
+    notifications.publish(
+        session,
+        "TRANSFER_ACCEPTED",
+        user_ids=[transfer["initiated_by"]],
+        notification_type="TRANSFER_ACCEPTED",
+        title=f"{transfer['transfer_no']} acknowledged by {user.full_name}",
+        body=f"Received in {transfer['to_location_name']}",
+        entity_type=ENTITY,
+        entity_id=transfer_id,
+    )
+    _after_change(session, transfer)
+    log.info("custody_slip_transfer_accepted", transfer_id=str(transfer_id))
+
+
+def _refuse_slip_backed(session: Session, transfer: dict[str, Any], how: str) -> None:
+    """DEC-66: a transfer behind a Transfer Slip follows the slip (the DB refuses it too)."""
+    slip_no = repo.transfer_slip_no(session, transfer["id"])
+    if slip_no:
+        raise Conflict(
+            f"{transfer['transfer_no']} belongs to Transfer Slip {slip_no}; it is {how}",
+            code="TRANSFER_SLIP_BACKED",
+            details={"transfer_no": transfer["transfer_no"], "slip_no": slip_no},
+        )
 
 
 def _cancel(session: Session, transfer: dict[str, Any], *, user: CurrentUser, reason: str) -> None:
@@ -777,7 +855,14 @@ def party_side(session: Session, user: CurrentUser, transfer: dict[str, Any]) ->
 
 
 # --- engine internals --------------------------------------------------------------------------
-def _dispatch(session: Session, transfer_id: UUID, *, actor_id: UUID, task_step_code: str) -> None:
+def _dispatch(
+    session: Session,
+    transfer_id: UUID,
+    *,
+    actor_id: UUID,
+    task_step_code: str,
+    notify: bool = True,
+) -> None:
     """Phase 1: every line from the source into TRANSIT; receiver task + notification."""
     transit = _transit(session)
     repo.mark_dispatched(session, transfer_id, transit["id"])
@@ -795,6 +880,13 @@ def _dispatch(session: Session, transfer_id: UUID, *, actor_id: UUID, task_step_
             user_id=None if transfer["to_custodian_role_id"] else transfer["to_custodian_user_id"],
         )
         repo.set_receiver_task(session, transfer_id, task_id)
+    if notify:
+        _notify_initiated(session, transfer)
+    _after_change(session, transfer)
+    log.info("custody_transfer_dispatched", transfer_id=str(transfer_id))
+
+
+def _notify_initiated(session: Session, transfer: dict[str, Any]) -> None:
     _notify(
         session,
         transfer,
@@ -807,8 +899,6 @@ def _dispatch(session: Session, transfer_id: UUID, *, actor_id: UUID, task_step_
             + " — count and accept"
         ),
     )
-    _after_change(session, transfer)
-    log.info("custody_transfer_dispatched", transfer_id=str(transfer_id))
 
 
 def _apply_reconciliation(

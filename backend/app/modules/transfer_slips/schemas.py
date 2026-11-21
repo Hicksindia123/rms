@@ -1,4 +1,4 @@
-"""Transfer slip I/O models (Phase P5, DEC-65)."""
+"""Transfer slip I/O models (Phase P5, DEC-65; Phase P6 store acknowledgement, DEC-66)."""
 
 from __future__ import annotations
 
@@ -94,6 +94,8 @@ class SlipSummaryOut(_Out):
     generated_at: datetime
     voided_at: datetime | None = None
     void_reason: str | None = None
+    acknowledged_at: datetime | None = None
+    discrepancy_count: int = 0
 
 
 class GenerateOut(_Out):
@@ -126,12 +128,49 @@ class SlipLineOut(_Out):
     belongs_store_name: str
 
 
+class DiscrepancyOut(_Out):
+    """DEC-66 (Q13): a discrepancy reported by the store (remark only)."""
+
+    id: UUID
+    remark: str
+    reported_by_name: str | None
+    reported_at: datetime
+
+
 class SlipDetailOut(SlipSummaryOut):
     custody_transfer_id: UUID
     goods_slips: list[SlipGsOut]
     lines: list[SlipLineOut]
     acknowledged_by_name: str | None = None
     acknowledged_at: datetime | None = None
+    acknowledge_remarks: str | None = None
+    discrepancies: list[DiscrepancyOut] = []
+    # DEC-66: the signed-in user may acknowledge / report a discrepancy (a user of the slip's
+    # store, or Super Admin, holding transfer_slips.approve, while the slip is GENERATED).
+    can_acknowledge: bool = False
+
+
+class AcknowledgeIn(BaseModel):
+    """DEC-66 (Q13): full acknowledgement only, optional remark."""
+
+    remarks: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("remarks")
+    @classmethod
+    def _strip(cls, v: str | None) -> str | None:
+        return v.strip() or None if v is not None else None
+
+
+class DiscrepancyIn(BaseModel):
+    remark: str = Field(min_length=3, max_length=2000)
+
+    @field_validator("remark")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 3:
+            raise ValueError("Describe the discrepancy (at least 3 characters)")
+        return v
 
 
 class SlipPage(_Out):

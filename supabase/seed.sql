@@ -241,6 +241,10 @@ insert into _seed_role_matrix values
 
   -- DEC-61 (P1): Intermediate Store users. Their working rights (acknowledge, route, receive,
   -- analyse) are added in P6-P9. A store created in the Admin Panel copies the default store's role.
+  -- DEC-66 (P6): transfer_slips view (own store's slips only) + approve (acknowledge / discrepancy).
+  ('ISTORE_OP',                  'transfer_slips',  array['view','approve']),
+  ('ISTORE_DT',                  'transfer_slips',  array['view','approve']),
+  ('ISTORE_RI',                  'transfer_slips',  array['view','approve']),
   ('ISTORE_OP',                  'dashboards',      array['view']),
   ('ISTORE_OP',                  'notifications',   array['view']),
   ('ISTORE_OP',                  'goods_slips',     array['view']),
@@ -321,7 +325,7 @@ select r.id, s.id, m.ord
     ('REPLACEMENT_MANAGER',        'REPORTS',        140),
     ('REPLACEMENT_MANAGER',        'AUDIT',          150),
 
-    ('INTERMEDIATE_STORE_MANAGER', 'STORE_ACCEPT',    10),
+    -- DEC-66 (P6): STORE_ACCEPT retired (hidden); legacy custody transfers are accepted from Custody.
     ('INTERMEDIATE_STORE_MANAGER', 'DEPT_ISSUE',      20),   -- DEC-55
     ('INTERMEDIATE_STORE_MANAGER', 'CUSTODY',        100),
     ('INTERMEDIATE_STORE_MANAGER', 'INVENTORY',      110),
@@ -372,6 +376,9 @@ select r.id, s.id, m.ord
     ('MANAGEMENT',                 'PENDENCIES',     120),
     ('MANAGEMENT',                 'REPORTS',        130),
     ('MANAGEMENT',                 'AUDIT',          140),
+    ('ISTORE_OP',                  'ACK_TRANSFER_SLIPS', 10),   -- DEC-66
+    ('ISTORE_DT',                  'ACK_TRANSFER_SLIPS', 10),
+    ('ISTORE_RI',                  'ACK_TRANSFER_SLIPS', 10),
     ('ISTORE_OP',                  'GS_LIST',        100),
     ('ISTORE_DT',                  'GS_LIST',        100),
     ('ISTORE_RI',                  'GS_LIST',        100)
@@ -383,8 +390,8 @@ on conflict (role_id, journey_step_id) do nothing;
 -- Fail loudly on a typo in the journey matrix (same rule as the permission matrix).
 do $$
 begin
-  if (select count(*) from public.role_journey_steps) < 53 then
-    raise exception 'role journey seed incomplete: % rows (expected 53)',
+  if (select count(*) from public.role_journey_steps) < 55 then
+    raise exception 'role journey seed incomplete: % rows (expected 55)',
       (select count(*) from public.role_journey_steps);
   end if;
 end
@@ -609,6 +616,7 @@ from (values
   ('RM_REVIEW', 'RM Review', 70, '§6.5'),
   ('PENDING_TRANSFER_SLIP', 'Pending Transfer Slip', 72, 'DEC-64'),
   ('TRANSFER_SLIP_GENERATED', 'Transfer Slip Generated', 73, 'DEC-65'),
+  ('STORE_ACKNOWLEDGED', 'Acknowledged by Store', 74, 'DEC-66'),
   ('SALES_RETURN_HOLD', 'Sales Return – On Hold', 74, 'DEC-64'),
   ('HELD_AT_INTERMEDIATE_STORE', 'Held at Intermediate Store', 75, 'AMD-13'),
   ('IN_PROCESS', 'In Process', 80, '§6.5'),
@@ -630,6 +638,8 @@ update public.option_items oi
  where os.code = 'RETURN_CATEGORY' and oi.option_set_id = os.id and oi.code = v.code
    and (oi.label, oi.sort_order) is distinct from (v.label, v.sort_order);
 update public.journey_steps set is_active = false where code = 'RM_REVIEW' and is_active;
+-- DEC-66 (P6): the store acknowledges transfer slips (ACK_TRANSFER_SLIPS); STORE_ACCEPT is hidden.
+update public.journey_steps set is_active = false where code = 'STORE_ACCEPT' and is_active;
 
 
 -- -----------------------------------------------------------------------------
@@ -3712,7 +3722,11 @@ select v.event_type, v.name, true, v.roles, array['IN_APP'], v.priority, true
     -- DEC-65 (P5): transfer slips (the store users get the custody TRANSFER_CANCELLED alert on a void).
     ('TRANSFER_SLIP_VOIDED', 'RM: transfer slip voided, regenerate it', array['REPLACEMENT_MANAGER'], 'HIGH'),
     ('GS_EDIT_REQUESTED', 'Management & Super Admin: edit request for a locked goods slip', array['MANAGEMENT', 'SUPER_ADMIN'], 'HIGH'),
-    ('GS_EDIT_REQUEST_RESOLVED', 'RM: edit request resolved', array['REPLACEMENT_MANAGER'], 'NORMAL')
+    ('GS_EDIT_REQUEST_RESOLVED', 'RM: edit request resolved', array['REPLACEMENT_MANAGER'], 'NORMAL'),
+    -- DEC-66 (P6): the slip's store users are the context recipients (the service names the users
+    -- of the store role the slip is addressed to); discrepancies go to RM + Management.
+    ('TRANSFER_SLIP_GENERATED', 'Store users: transfer slip to acknowledge', '{}'::text[], 'NORMAL'),
+    ('TRANSFER_SLIP_DISCREPANCY', 'RM & Management: transfer slip discrepancy', array['REPLACEMENT_MANAGER', 'MANAGEMENT'], 'HIGH')
   ) as v(event_type, name, roles, priority)
  where not exists (select 1 from public.notification_rules r where r.event_type = v.event_type);
 

@@ -1,6 +1,6 @@
 /**
- * Phase P5 (DEC-65): transfer slips + edit requests. Shapes mirror
- * backend/app/modules/transfer_slips/schemas.py.
+ * Phase P5 (DEC-65): transfer slips + edit requests; Phase P6 (DEC-66): store acknowledgement and
+ * discrepancy reports. Shapes mirror backend/app/modules/transfer_slips/schemas.py.
  */
 import { apiDownload, apiRequest, toApiError } from '@/lib/api/client';
 
@@ -74,6 +74,8 @@ export interface SlipSummary {
   generated_at: string;
   voided_at: string | null;
   void_reason: string | null;
+  acknowledged_at: string | null;
+  discrepancy_count: number;
 }
 
 export interface SlipGs {
@@ -101,12 +103,23 @@ export interface SlipLine {
   belongs_store_name: string;
 }
 
+/** DEC-66 (Q13): a discrepancy the store reported (remark only). */
+export interface SlipDiscrepancy {
+  id: string;
+  remark: string;
+  reported_by_name: string | null;
+  reported_at: string;
+}
+
 export interface SlipDetail extends SlipSummary {
   custody_transfer_id: string;
   goods_slips: SlipGs[];
   lines: SlipLine[];
   acknowledged_by_name: string | null;
-  acknowledged_at: string | null;
+  acknowledge_remarks: string | null;
+  discrepancies: SlipDiscrepancy[];
+  /** The signed-in user may acknowledge / report a discrepancy (a user of the slip's store). */
+  can_acknowledge: boolean;
 }
 
 export interface GenerateResult {
@@ -162,6 +175,22 @@ export const transferSlipsApi = {
       undefined,
       `${slip.slip_no.replace(/\//g, '-')}.pdf`,
     ),
+
+  /** DEC-66: the store acknowledges the whole slip (stock TRANSIT -> store). Idempotency-Key (G-16). */
+  acknowledge: (slipId: string, remarks: string | null, idempotencyKey: string) =>
+    apiRequest<SlipDetail>(`/transfer-slips/${encodeURIComponent(slipId)}/acknowledge`, {
+      method: 'POST',
+      body: { remarks },
+      idempotencyKey,
+    }),
+
+  /** DEC-66 (Q13): remark only; alerts the RM + Management; the slip stays open. */
+  reportDiscrepancy: (slipId: string, remark: string, idempotencyKey: string) =>
+    apiRequest<SlipDetail>(`/transfer-slips/${encodeURIComponent(slipId)}/discrepancies`, {
+      method: 'POST',
+      body: { remark },
+      idempotencyKey,
+    }),
 
   forGs: (gsId: string) =>
     apiRequest<GsTransferSlips>(`/gs/${encodeURIComponent(gsId)}/transfer-slips`),
