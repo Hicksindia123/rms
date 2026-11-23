@@ -552,3 +552,170 @@ def get_setting(session: Session, key: str) -> Any:
     return session.execute(
         text("select value from public.system_settings where key = :key"), {"key": key}
     ).scalar()
+
+
+# --- DEC-69 (Phase P9): analysis by the Intermediate Store user ---------------------------------
+
+
+def store_analysis_progress(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
+    """Per store on the GS: routing progress (P7/P8) and analysis state, with the submitter."""
+    return _rows(
+        session,
+        """
+        select p.store_id, p.store_code, p.store_name, p.routing_status, p.analysis_status,
+               p.submitted_at, pr.full_name as submitted_by_name, a.remarks, a.total_qty
+          from rms_private.gs_store_analysis_progress(:gs_id) p
+          left join public.gs_store_analyses a on a.gs_id = :gs_id and a.store_id = p.store_id
+          left join public.profiles pr on pr.id = p.submitted_by
+          left join public.intermediate_stores s on s.id = p.store_id
+         order by s.sort_order, p.store_code
+        """,
+        {"gs_id": gs_id},
+    )
+
+
+def store_analysis_groups(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
+    """G-21 groups of the store flow (item + current condition) with the store of the item."""
+    return _rows(
+        session,
+        """
+        select g.store_id, s.code as store_code, s.name as store_name,
+               g.gs_item_id, g.line_no, g.product_id, g.condition_field_id, g.condition_code,
+               g.condition_label, g.sort_order, g.current_qty, g.at_dept_qty, g.available_qty,
+               g.actioned_qty, gi.received_qty,
+               coalesce(gi.product_code_snapshot, pr.code) as product_code,
+               coalesce(gi.product_name_snapshot, pr.name, g.item_name) as product_name
+          from rms_private.store_analysis_groups(:gs_id) g
+          join public.gs_items gi on gi.id = g.gs_item_id
+          left join public.products pr on pr.id = g.product_id
+          left join public.intermediate_stores s on s.id = g.store_id
+         order by g.line_no, g.sort_order, g.condition_label nulls first
+        """,
+        {"gs_id": gs_id},
+    )
+
+
+def get_store(session: Session, store_id: UUID) -> dict[str, Any] | None:
+    return _row(
+        session,
+        """
+        select s.id, s.code, s.name, s.role_id, r.code as role_code
+          from public.intermediate_stores s
+          left join public.roles r on r.id = s.role_id
+         where s.id = :id
+        """,
+        {"id": store_id},
+    )
+
+
+def user_store_ids(session: Session, user_id: UUID) -> list[UUID]:
+    """Stores whose own role the user holds (Management is not a store user, DEC-66)."""
+    rows = session.execute(
+        text(
+            """
+            select s.id from public.intermediate_stores s
+              join public.user_roles ur on ur.role_id = s.role_id
+             where ur.user_id = :uid
+            """
+        ),
+        {"uid": user_id},
+    ).scalars()
+    return [UUID(str(r)) for r in rows]
+
+
+def user_acts_for_store(session: Session, user_id: UUID, store_id: UUID) -> bool:
+    return bool(
+        session.execute(
+            text("select rms_private.user_acts_for_store(:u, :s)"), {"u": user_id, "s": store_id}
+        ).scalar_one()
+    )
+
+
+def insert_store_analysis(
+    session: Session,
+    *,
+    gs_id: UUID,
+    store_id: UUID,
+    totals: list[dict[str, Any]],
+    remarks: str | None,
+) -> None:
+    # The guard (DEC-69) checks the store, the status and G-21, and stamps the snapshots,
+    # revision, total and submitter; the placeholders below are overwritten by it.
+    session.execute(
+        text(
+            """
+            insert into public.gs_store_analyses
+                   (gs_id, store_id, store_code_snapshot, store_name_snapshot, revision_no,
+                    total_qty, totals, remarks)
+            values (:gs_id, :store_id, '-', '-', 1, 1, cast(:totals as jsonb), :remarks)
+            """
+        ),
+        {"gs_id": gs_id, "store_id": store_id, "totals": json.dumps(totals), "remarks": remarks},
+    )
+
+
+def gs_store_analysis_complete(session: Session, gs_id: UUID) -> bool:
+    return bool(
+        session.execute(
+            text("select rms_private.gs_store_analysis_complete(:gs_id)"), {"gs_id": gs_id}
+        ).scalar()
+    )
+
+
+def validate_store_analysis(session: Session, gs_id: UUID) -> None:
+    """DB G-21 check of the store flow (the deferred trigger checks again at commit)."""
+    session.execute(text("select rms_private.validate_store_analysis(:gs_id)"), {"gs_id": gs_id})
+
+
+def store_analysis_queue(session: Session, statuses: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Goods slips in the store analysis stage (party-wise), oldest first."""
+    return _rows(
+        session,
+        """
+        select g.id as gs_id, g.gs_no, g.status, pa.name as party_name, st.name as station_name,
+               coalesce((select max(h."at") from public.gs_status_history h
+                          where h.gs_id = g.id and h.to_status = g.status), g.created_at) as since,
+               exists (select 1 from public.gs_management_approval_requests r
+                        where r.gs_id = g.id and r.status = 'OPEN') as approval_requested
+          from public.goods_slips g
+          left join public.parties pa on pa.id = g.party_id
+          left join public.stations st on st.id = g.station_id
+         where g.status = any(:statuses)
+         order by since, g.gs_no
+        """,
+        {"statuses": list(statuses)},
+    )
+
+
+def list_approval_requests(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
+    return _rows(
+        session,
+        """
+        select r.id, r.store_id, r.store_name_snapshot as store_name, r.reason, r.status,
+               r.requested_at, pr.full_name as requested_by_name
+          from public.gs_management_approval_requests r
+          left join public.profiles pr on pr.id = r.requested_by
+         where r.gs_id = :gs_id
+         order by r.requested_at desc
+        """,
+        {"gs_id": gs_id},
+    )
+
+
+def insert_approval_request(session: Session, *, gs_id: UUID, store_id: UUID, reason: str) -> UUID:
+    # The guard (DEC-69) checks the store user and the status and stamps the snapshot.
+    return UUID(
+        str(
+            session.execute(
+                text(
+                    """
+                    insert into public.gs_management_approval_requests
+                           (gs_id, store_id, store_name_snapshot, reason)
+                    values (:gs_id, :store_id, '-', :reason)
+                    returning id
+                    """
+                ),
+                {"gs_id": gs_id, "store_id": store_id, "reason": reason},
+            ).scalar_one()
+        )
+    )

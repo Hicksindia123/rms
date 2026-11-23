@@ -31,6 +31,7 @@ from app.core.db import UnitOfWork
 from app.core.errors import (
     Conflict,
     NotFound,
+    PermissionDenied,
     ServiceUnavailable,
     SystemGuardViolation,
     ValidationFailed,
@@ -54,9 +55,18 @@ from app.modules.final_actions.schemas import (
     FinalActionsState,
     FinaliseFinalActionsIn,
     ItemConditionQty,
+    ManagementApprovalRequestIn,
+    ManagementApprovalRequestOut,
     OutcomeQty,
     SaveFinalActionsIn,
+    StoreAnalysisGroupOut,
+    StoreAnalysisGsOut,
+    StoreAnalysisItemOut,
+    StoreAnalysisQueueRowOut,
+    StoreAnalysisStoreOut,
+    StoreAnalysisSubmitIn,
 )
+from app.modules.goods_slips import service as gs_service
 from app.modules.notifications import service as notifications
 from app.shared.branding import template_logo
 from app.shared.pdf import (
@@ -1074,3 +1084,511 @@ class FinalActionsService:
                 expires_in=ttl,
                 print_count=int(slip["print_count"]) + 1,
             )
+
+
+# =============================================================================================
+# DEC-69 (Phase P9): analysis by the Intermediate Store user (Steps 7-8 of the 20-11-2026 flow)
+# =============================================================================================
+#
+# Once a store's part of a goods slip is READY_FOR_ANALYSIS (P8), a user of that store decides
+# per item + current condition (DEC-57 groups) and submits its part in one transaction: the
+# decisions are round-1 rm_item_actions rows (G-18 snapshots) plus a gs_store_analyses row. Each
+# store submits independently; the last one moves the GS to ANALYSIS_COMPLETED. No stock moves
+# here (the DEC-57 destinations are settled by Accounts / dispatch, P11) and no A/c slip is made
+# (one per GS at the Accounts gate, DEC-71). The DB enforces the same rules (migration
+# 20261123000100); the checks here give the clear 4xx answers first.
+
+STORE_ANALYSIS_STATUSES = ("STORE_PROCESSING", "ANALYSIS_COMPLETED")
+ANALYSIS_STATUS = "STORE_PROCESSING"
+ANALYSIS_DONE_STATUS = "ANALYSIS_COMPLETED"
+ANALYSIS_TASK_STEP = "STORE_ANALYSIS"
+READY_FOR_ANALYSIS = "READY_FOR_ANALYSIS"
+# Q15 / DEC-70: stable codes the store never picks (Issue CN = Management, Pending retired).
+STORE_RESERVED_ACTIONS = frozenset({"ISSUE_CN", PENDING_ACTION})
+
+
+class StoreAnalysisService:
+    def __init__(self, uow: UnitOfWork) -> None:
+        self._uow = uow
+
+    # --- scope -------------------------------------------------------------------------------
+
+    @staticmethod
+    def _scope(session: Session, actor: CurrentUser) -> set[UUID] | None:
+        """Stores whose goods the user sees. None = every store (Super Admin and viewers without a
+        store role: RM, Management); a store user sees only the stores whose role they hold."""
+        if actor.is_super_admin:
+            return None
+        return set(repo.user_store_ids(session, actor.id)) or None
+
+    @staticmethod
+    def _acts_for(
+        session: Session, actor: CurrentUser, cache: dict[UUID, bool], store_id: UUID | None
+    ) -> bool:
+        if store_id is None:
+            return False
+        if store_id not in cache:
+            cache[store_id] = repo.user_acts_for_store(session, actor.id, store_id)
+        return cache[store_id]
+
+    def _stores(
+        self, session: Session, actor: CurrentUser, gs_id: UUID, cache: dict[UUID, bool]
+    ) -> list[StoreAnalysisStoreOut]:
+        return [
+            StoreAnalysisStoreOut.model_validate(
+                {**s, "is_mine": self._acts_for(session, actor, cache, s["store_id"])}
+            )
+            for s in repo.store_analysis_progress(session, gs_id)
+        ]
+
+    # --- queries -----------------------------------------------------------------------------
+
+    def queue(self, actor: CurrentUser, *, pending_only: bool) -> list[StoreAnalysisQueueRowOut]:
+        """Goods slips in the analysis stage, one row per GS with the stores the user sees.
+        `pending_only`: one of the user's stores is ready and has not submitted."""
+        with self._uow.transaction(actor.id) as session:
+            scope = self._scope(session, actor)
+            cache: dict[UUID, bool] = {}
+            out: list[StoreAnalysisQueueRowOut] = []
+            for row in repo.store_analysis_queue(session, STORE_ANALYSIS_STATUSES):
+                stores = [
+                    s
+                    for s in self._stores(session, actor, row["gs_id"], cache)
+                    if scope is None or s.store_id in scope
+                ]
+                if not stores:
+                    continue
+                if pending_only and not any(
+                    s.is_mine and s.analysis_status == "PENDING" for s in stores
+                ):
+                    continue
+                out.append(StoreAnalysisQueueRowOut.model_validate({**row, "stores": stores}))
+            return out
+
+    def get_gs(self, actor: CurrentUser, gs_id: UUID) -> StoreAnalysisGsOut:
+        with self._uow.transaction(actor.id) as session:
+            return self._gs(session, actor, gs_id)
+
+    def _gs(self, session: Session, actor: CurrentUser, gs_id: UUID) -> StoreAnalysisGsOut:
+        gs = repo.get_gs_header(session, gs_id)
+        if not gs:
+            raise NotFound(f"Goods slip {gs_id} not found", code="GS_NOT_FOUND")
+        cache: dict[UUID, bool] = {}
+        stores = self._stores(session, actor, gs_id, cache)
+        scope = self._scope(session, actor)
+        if not stores or (scope is not None and not any(s.store_id in scope for s in stores)):
+            # A store user sees only goods slips its store has goods of (as for routing, DEC-67).
+            raise NotFound(
+                f"Goods slip {gs['gs_no']} has no goods at your Intermediate Store",
+                code="GS_NOT_AT_STORE",
+            )
+        version_id = gs["item_field_profile_version_id"]
+        decisions: dict[tuple[UUID, UUID | None], list[FinalActionAllocation]] = {}
+        for a in repo.current_actions(session, gs_id, 1):
+            decisions.setdefault((a["gs_item_id"], a["condition_field_id"]), []).append(
+                FinalActionAllocation(action_code=a["action_code"], label=a["label"], qty=a["qty"])
+            )
+        outcomes: dict[UUID, list[OutcomeQty]] = {}
+        for o in repo.outcome_breakdown(session, gs_id):
+            outcomes.setdefault(o["gs_item_id"], []).append(
+                OutcomeQty(
+                    **{k: o[k] for k in ("outcome_code", "outcome_label", "is_wastage", "qty")}
+                )
+            )
+        options: dict[UUID, list[FinalActionOption]] = {}
+        items: dict[UUID, StoreAnalysisItemOut] = {}
+        for g in repo.store_analysis_groups(session, gs_id):
+            item = items.get(g["gs_item_id"])
+            if item is None:
+                if g["product_id"] not in options:
+                    options[g["product_id"]] = [
+                        FinalActionOption(**a)
+                        for a in repo.allowed_actions(session, g["product_id"], version_id)
+                        if a["code"] not in STORE_RESERVED_ACTIONS
+                    ]
+                item = items[g["gs_item_id"]] = StoreAnalysisItemOut(
+                    gs_item_id=g["gs_item_id"],
+                    line_no=g["line_no"],
+                    product_code=g["product_code"],
+                    product_name=g["product_name"],
+                    received_qty=g["received_qty"],
+                    store_id=g["store_id"],
+                    store_code=g["store_code"],
+                    store_name=g["store_name"],
+                    is_mine=self._acts_for(session, actor, cache, g["store_id"]),
+                    outcomes=outcomes.get(g["gs_item_id"], []),
+                    options=options[g["product_id"]],
+                )
+            item.groups.append(
+                StoreAnalysisGroupOut(
+                    condition_field_id=g["condition_field_id"],
+                    condition_code=g["condition_code"],
+                    condition_label=g["condition_label"],
+                    qty=g["available_qty"],
+                    decisions=decisions.get((g["gs_item_id"], g["condition_field_id"]), []),
+                )
+            )
+        requests = [
+            ManagementApprovalRequestOut.model_validate(r)
+            for r in repo.list_approval_requests(session, gs_id)
+        ]
+        open_request = next((r for r in requests if r.status == "OPEN"), None)
+        mine = [s.store_id for s in stores if s.is_mine]
+        can_analyse = gs["status"] == ANALYSIS_STATUS
+        return StoreAnalysisGsOut(
+            gs_id=gs["id"],
+            gs_no=gs["gs_no"],
+            status=gs["status"],
+            party_name=gs["party_name"],
+            station_name=gs["station_name"],
+            stores=stores,
+            items=list(items.values()),
+            submittable_store_ids=[
+                s.store_id
+                for s in stores
+                if s.is_mine and s.analysis_status == "PENDING" and can_analyse
+            ],
+            approval_store_ids=mine,
+            can_request_approval=bool(mine)
+            and open_request is None
+            and gs["status"] in STORE_ANALYSIS_STATUSES,
+            open_approval_request=open_request,
+            approval_requests=requests,
+        )
+
+    # --- submit ------------------------------------------------------------------------------
+
+    def submit(
+        self,
+        actor: CurrentUser,
+        gs_id: UUID,
+        payload: StoreAnalysisSubmitIn,
+        idem: IdempotencyKey,
+    ) -> IdempotentResult:
+        """DEC-69: one transaction; a duplicate Idempotency-Key returns the first result (G-16)."""
+        with self._uow.transaction(actor.id) as session:
+            return run_idempotent(
+                session,
+                idem,
+                actor.id,
+                lambda: (
+                    200,
+                    self._submit(session, actor, gs_id, payload).model_dump(mode="json"),
+                ),
+            )
+
+    @staticmethod
+    def _store_for(
+        session: Session, actor: CurrentUser, store_id: UUID, verb: str
+    ) -> dict[str, Any]:
+        store = repo.get_store(session, store_id)
+        if not store:
+            raise NotFound("Intermediate Store not found", code="STORE_NOT_FOUND")
+        if not repo.user_acts_for_store(session, actor.id, store_id):
+            raise PermissionDenied(
+                f"Only a user of {store['name']} {verb} (DEC-69)",
+                code="NOT_STORE_USER",
+                details={"store_code": store["code"]},
+            )
+        return store
+
+    def _submit(
+        self, session: Session, actor: CurrentUser, gs_id: UUID, payload: StoreAnalysisSubmitIn
+    ) -> StoreAnalysisGsOut:
+        # 1. Lock the GS (serialises with the other stores' submissions and receipts).
+        gs = repo.get_gs_header(session, gs_id, lock=True)
+        if not gs:
+            raise NotFound(f"Goods slip {gs_id} not found", code="GS_NOT_FOUND")
+        store = self._store_for(session, actor, payload.store_id, "analyses its goods")
+        if gs["status"] != ANALYSIS_STATUS:
+            raise Conflict(
+                f"Goods slip {gs['gs_no']} is not in store processing (status {gs['status']}); "
+                "its analysis cannot be submitted",
+                code="INVALID_GS_STATUS",
+            )
+        part = next(
+            (
+                s
+                for s in repo.store_analysis_progress(session, gs_id)
+                if s["store_id"] == store["id"]
+            ),
+            None,
+        )
+        if part is None:
+            raise Conflict(f"{store['name']} has no goods on {gs['gs_no']}", code="STORE_NOT_ON_GS")
+        if part["analysis_status"] == "SUBMITTED":
+            raise Conflict(
+                f"{store['name']} already submitted its analysis of {gs['gs_no']}",
+                code="ANALYSIS_ALREADY_SUBMITTED",
+            )
+        if part["routing_status"] != READY_FOR_ANALYSIS:
+            raise Conflict(
+                f"The goods of {store['name']} on {gs['gs_no']} are not ready for analysis yet: "
+                "everything must be routed and back from the departments first",
+                code="NOT_READY_FOR_ANALYSIS",
+                details={"routing_status": part["routing_status"]},
+            )
+
+        # 2. Validate: every group of the store exactly once, store options only, G-21 totals.
+        all_groups = repo.store_analysis_groups(session, gs_id)
+        groups = {
+            (g["gs_item_id"], g["condition_field_id"]): g
+            for g in all_groups
+            if g["store_id"] == store["id"]
+        }
+        other_items = {g["gs_item_id"]: g for g in all_groups if g["store_id"] != store["id"]}
+        version_id = gs["item_field_profile_version_id"]
+
+        def where(g: dict[str, Any]) -> str:
+            cond = f" ({g['condition_label']})" if g["condition_label"] else ""
+            return f"Item #{g['line_no']} {g['product_name']}{cond}"
+
+        seen: set[tuple[UUID, UUID | None]] = set()
+        allowed: dict[UUID, dict[str, str]] = {}
+        new_rows: list[tuple[dict[str, Any], str, int]] = []
+        for line in payload.lines:
+            key = (line.gs_item_id, line.condition_field_id)
+            grp = groups.get(key)
+            if grp is None:
+                other = other_items.get(line.gs_item_id)
+                if other is not None:
+                    raise PermissionDenied(
+                        f"Item #{other['line_no']} belongs to "
+                        f"{other['store_name'] or 'no Intermediate Store'}; only that store "
+                        "analyses it (DEC-69)",
+                        code="ITEM_OF_OTHER_STORE",
+                    )
+                raise ValidationFailed(
+                    "A decision names an item / condition that is not part of the goods of "
+                    f"{store['name']} on {gs['gs_no']}",
+                    code="CONDITION_NOT_IN_ITEM",
+                    details={
+                        "gs_item_id": str(line.gs_item_id),
+                        "condition_field_id": str(line.condition_field_id)
+                        if line.condition_field_id
+                        else None,
+                    },
+                )
+            if key in seen:
+                raise ValidationFailed(
+                    f"{where(grp)} is listed more than once", code="DUPLICATE_LINE"
+                )
+            seen.add(key)
+            if grp["product_id"] not in allowed:
+                allowed[grp["product_id"]] = {
+                    a["code"]: a["label"]
+                    for a in repo.allowed_actions(session, grp["product_id"], version_id)
+                }
+            codes: set[str] = set()
+            total = 0
+            for d in line.decisions:
+                if d.action_code in codes:
+                    raise ValidationFailed(
+                        f"{where(grp)}: {d.action_code} is listed twice", code="DUPLICATE_ACTION"
+                    )
+                codes.add(d.action_code)
+                if d.qty == 0:
+                    continue
+                if d.action_code in STORE_RESERVED_ACTIONS:
+                    raise PermissionDenied(
+                        f"{where(grp)}: {d.action_code} is not a store analysis option; Issue CN "
+                        "is decided by Management (DEC-69, DEC-70)",
+                        code="ACTION_RESERVED",
+                        details={"action_code": d.action_code},
+                    )
+                if d.action_code not in allowed[grp["product_id"]]:
+                    raise SystemGuardViolation(
+                        "G-21",
+                        f"G-21: {d.action_code} is not allowed by the resolved profile of "
+                        f"item #{grp['line_no']} ({grp['product_name']})",
+                        details={"line_no": grp["line_no"], "action_code": d.action_code},
+                    )
+                total += d.qty
+                new_rows.append((grp, d.action_code, d.qty))
+            if total != grp["available_qty"]:
+                raise SystemGuardViolation(
+                    "G-21",
+                    f"G-21: {where(grp)}: decisions total {total} pc(s), it has "
+                    f"{grp['available_qty']} pc(s) to decide",
+                    details={
+                        "line_no": grp["line_no"],
+                        "decided_qty": total,
+                        "qty": grp["available_qty"],
+                    },
+                )
+        missing = sorted(
+            {g["line_no"] for k, g in groups.items() if k not in seen and g["available_qty"] > 0}
+        )
+        if missing:
+            raise ValidationFailed(
+                f"Every item of {store['name']} needs its decision; missing item(s) "
+                + ", ".join(f"#{n}" for n in missing),
+                code="LINES_MISSING",
+                details={"line_nos": missing},
+            )
+
+        # 3. Write: the decisions (one revision for the store's part) and the submission.
+        revision_no = repo.max_revision(session, gs_id) + 1
+        remarks = (payload.remarks or "").strip() or None
+        totals: dict[str, dict[str, Any]] = {}
+        for grp, code, qty in new_rows:
+            repo.insert_action(
+                session,
+                gs_item_id=grp["gs_item_id"],
+                revision_no=revision_no,
+                round_no=1,
+                condition_field_id=grp["condition_field_id"],
+                action_code=code,
+                qty=qty,
+                reason=remarks,
+                decided_by=actor.id,
+            )
+            t = totals.setdefault(
+                code,
+                {
+                    "action_code": code,
+                    "label": allowed[grp["product_id"]].get(code, code),
+                    "qty": 0,
+                },
+            )
+            t["qty"] += qty
+        repo.insert_store_analysis(
+            session,
+            gs_id=gs_id,
+            store_id=store["id"],
+            totals=sorted(totals.values(), key=lambda t: str(t["action_code"])),
+            remarks=remarks,
+        )
+        # The DB checks the same now (and again at commit): G-21 per store, G-20 conservation.
+        repo.validate_store_analysis(session, gs_id)
+        repo.validate_reconciliation(session, gs_id)
+
+        # 4. The store's analysis task closes; the last store completes the GS.
+        gs_service.sync_step_task(
+            session,
+            gs_id=gs_id,
+            step_code=ANALYSIS_TASK_STEP,
+            role_id=store["role_id"],
+            needed=False,
+        )
+        summary = ", ".join(f"{t['label']} {t['qty']}" for t in totals.values())
+        notifications.publish(
+            session,
+            "STORE_ANALYSIS_SUBMITTED",
+            title=f"{gs['gs_no']}: {store['name']} submitted its analysis",
+            body=f"{actor.full_name}: {summary}." + (f" Remarks: {remarks}" if remarks else ""),
+            entity_type="goods_slips",
+            entity_id=gs_id,
+            gs_id=gs_id,
+            data={"gs_no": gs["gs_no"], "store_code": store["code"]},
+            dedupe_key=f"store-analysis:{gs_id}:{store['id']}",
+        )
+        completed = repo.gs_store_analysis_complete(session, gs_id)
+        if completed:
+            gs_service.change_status_within_step(
+                session,
+                gs_id=gs_id,
+                from_status=ANALYSIS_STATUS,
+                to_status=ANALYSIS_DONE_STATUS,
+                step_code=ANALYSIS_TASK_STEP,
+                reason=f"Analysis submitted by every Intermediate Store (last: {store['name']})",
+                by=actor.id,
+            )
+            notifications.publish(
+                session,
+                "GS_ANALYSIS_COMPLETED",
+                title=f"{gs['gs_no']}: analysis completed by every store",
+                body=f"{gs['party_name'] or 'Goods slip'}: every Intermediate Store submitted its "
+                "analysis.",
+                entity_type="goods_slips",
+                entity_id=gs_id,
+                gs_id=gs_id,
+                data={"gs_no": gs["gs_no"]},
+                dedupe_key=f"gs-analysis-completed:{gs_id}",
+            )
+        log.info(
+            "store_analysis_submitted",
+            gs_id=str(gs_id),
+            store=store["code"],
+            revision_no=revision_no,
+            qty=sum(int(t["qty"]) for t in totals.values()),
+            gs_completed=completed,
+        )
+        return self._gs(session, actor, gs_id)
+
+    # --- send for Management approval --------------------------------------------------------
+
+    def request_approval(
+        self,
+        actor: CurrentUser,
+        gs_id: UUID,
+        payload: ManagementApprovalRequestIn,
+        idem: IdempotencyKey,
+    ) -> IdempotentResult:
+        """Target flow step 9: any user of a store on the GS (reason required). One transaction;
+        a duplicate Idempotency-Key returns the first result (G-16). Resolved in P10."""
+        with self._uow.transaction(actor.id) as session:
+            return run_idempotent(
+                session,
+                idem,
+                actor.id,
+                lambda: (
+                    200,
+                    self._request_approval(session, actor, gs_id, payload).model_dump(mode="json"),
+                ),
+            )
+
+    def _request_approval(
+        self,
+        session: Session,
+        actor: CurrentUser,
+        gs_id: UUID,
+        payload: ManagementApprovalRequestIn,
+    ) -> StoreAnalysisGsOut:
+        gs = repo.get_gs_header(session, gs_id, lock=True)
+        if not gs:
+            raise NotFound(f"Goods slip {gs_id} not found", code="GS_NOT_FOUND")
+        store = self._store_for(
+            session, actor, payload.store_id, "sends its goods slips for Management approval"
+        )
+        if gs["status"] not in STORE_ANALYSIS_STATUSES:
+            raise Conflict(
+                f"Goods slip {gs['gs_no']} is {gs['status']}; it is sent for Management approval "
+                "during or after the store analysis",
+                code="INVALID_GS_STATUS",
+            )
+        if not any(
+            s["store_id"] == store["id"] for s in repo.store_analysis_progress(session, gs_id)
+        ):
+            raise Conflict(f"{store['name']} has no goods on {gs['gs_no']}", code="STORE_NOT_ON_GS")
+        if any(r["status"] == "OPEN" for r in repo.list_approval_requests(session, gs_id)):
+            raise Conflict(
+                f"{gs['gs_no']} is already waiting for Management approval",
+                code="APPROVAL_ALREADY_REQUESTED",
+            )
+        reason = payload.reason.strip()
+        if len(reason) < 3:
+            raise ValidationFailed(
+                "A reason is required (at least 3 characters)", code="REASON_REQUIRED"
+            )
+        request_id = repo.insert_approval_request(
+            session, gs_id=gs_id, store_id=store["id"], reason=reason
+        )
+        notifications.publish(
+            session,
+            "MANAGEMENT_APPROVAL_REQUESTED",
+            title=f"{gs['gs_no']}: sent for Management approval",
+            body=f"{actor.full_name} ({store['name']}): {reason}",
+            entity_type="gs_management_approval_requests",
+            entity_id=request_id,
+            gs_id=gs_id,
+            data={"gs_no": gs["gs_no"], "store_code": store["code"]},
+            dedupe_key=f"mgmt-approval-requested:{request_id}",
+        )
+        log.info(
+            "management_approval_requested",
+            gs_id=str(gs_id),
+            store=store["code"],
+            request_id=str(request_id),
+        )
+        return self._gs(session, actor, gs_id)

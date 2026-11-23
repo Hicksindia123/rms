@@ -32,6 +32,7 @@ from app.modules.dismantling.router import router as dismantling_router
 from app.modules.dismantling.router import scrap_router
 from app.modules.dispatch.router import router as dispatch_router
 from app.modules.final_actions.router import router as final_actions_router
+from app.modules.final_actions.router import store_analysis_router
 from app.modules.goods_slips.router import router as goods_slips_router
 from app.modules.health.router import router as health_router
 from app.modules.inspection.router import router as inspection_router
@@ -112,6 +113,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(rm_review_router, prefix=API_PREFIX)
     app.include_router(department_routing_router, prefix=API_PREFIX)
     app.include_router(final_actions_router, prefix=API_PREFIX)
+    app.include_router(store_analysis_router, prefix=API_PREFIX)
     app.include_router(ac_entry_router, prefix=API_PREFIX)
     app.include_router(dispatch_slips_router, prefix=API_PREFIX)
     app.include_router(rm_actions_router, prefix=API_PREFIX)

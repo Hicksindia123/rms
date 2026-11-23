@@ -184,3 +184,108 @@ class AcSlipPrintOut(BaseModel):
     url: str
     expires_in: int
     print_count: int
+
+
+# --- DEC-69 (Phase P9): analysis by the Intermediate Store user ---------------------------------
+
+
+class StoreAnalysisStoreOut(BaseModel):
+    """One Intermediate Store's part of a GS: routing progress (P7/P8) and analysis state."""
+
+    store_id: UUID
+    store_code: str
+    store_name: str
+    # AWAITING_ACKNOWLEDGEMENT | ROUTING_PENDING | AT_DEPARTMENTS | READY_FOR_ANALYSIS
+    routing_status: str
+    # NOT_READY | PENDING | SUBMITTED (computed, not configurable)
+    analysis_status: str
+    submitted_at: datetime | None = None
+    submitted_by_name: str | None = None
+    remarks: str | None = None
+    total_qty: int | None = None
+    # The signed-in user acts for this store (may analyse its lines).
+    is_mine: bool = False
+
+
+class StoreAnalysisGroupOut(BaseModel):
+    """DEC-57 group: one item + one current condition (no condition = item without a split)."""
+
+    condition_field_id: UUID | None = None
+    condition_code: str | None = None
+    condition_label: str | None = None
+    qty: int = Field(description="G-21: pieces to decide in this group")
+    decisions: list[FinalActionAllocation] = Field(default_factory=list)
+
+
+class StoreAnalysisItemOut(BaseModel):
+    gs_item_id: UUID
+    line_no: int
+    product_code: str | None = None
+    product_name: str
+    received_qty: int
+    store_id: UUID | None = None
+    store_code: str | None = None
+    store_name: str | None = None
+    is_mine: bool = False
+    outcomes: list[OutcomeQty] = Field(default_factory=list)
+    # Q15: the store's options (the product's resolved ACTION profile without Issue CN / Pending).
+    options: list[FinalActionOption] = Field(default_factory=list)
+    groups: list[StoreAnalysisGroupOut] = Field(default_factory=list)
+
+
+class ManagementApprovalRequestOut(BaseModel):
+    id: UUID
+    store_id: UUID
+    store_name: str
+    reason: str
+    status: str
+    requested_at: datetime
+    requested_by_name: str | None = None
+
+
+class StoreAnalysisGsOut(BaseModel):
+    gs_id: UUID
+    gs_no: str
+    status: str
+    party_name: str | None = None
+    station_name: str | None = None
+    stores: list[StoreAnalysisStoreOut] = Field(default_factory=list)
+    items: list[StoreAnalysisItemOut] = Field(default_factory=list)
+    # The user's stores whose part may be submitted now.
+    submittable_store_ids: list[UUID] = Field(default_factory=list)
+    # The user's stores on this GS (any of them may send it for Management approval).
+    approval_store_ids: list[UUID] = Field(default_factory=list)
+    can_request_approval: bool = False
+    open_approval_request: ManagementApprovalRequestOut | None = None
+    approval_requests: list[ManagementApprovalRequestOut] = Field(default_factory=list)
+
+
+class StoreAnalysisQueueRowOut(BaseModel):
+    gs_id: UUID
+    gs_no: str
+    status: str
+    party_name: str | None = None
+    station_name: str | None = None
+    since: datetime | None = None
+    approval_requested: bool = False
+    stores: list[StoreAnalysisStoreOut] = Field(default_factory=list)
+
+
+class StoreAnalysisLineIn(BaseModel):
+    """One item + condition group of the store's part (DEC-57). `condition_field_id` is omitted
+    only for items without a condition split."""
+
+    gs_item_id: UUID
+    condition_field_id: UUID | None = None
+    decisions: list[FinalActionInput] = Field(default_factory=list, max_length=10)
+
+
+class StoreAnalysisSubmitIn(BaseModel):
+    store_id: UUID
+    lines: list[StoreAnalysisLineIn] = Field(..., min_length=1, max_length=500)
+    remarks: str | None = Field(None, max_length=500)
+
+
+class ManagementApprovalRequestIn(BaseModel):
+    store_id: UUID = Field(description="The user's store on this GS that sends the request")
+    reason: str = Field(..., min_length=3, max_length=500)

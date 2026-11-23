@@ -90,6 +90,8 @@ _ROLE_CODE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 STORE_ROUTING_STATUSES = ("TRANSFER_SLIP_GENERATED", "STORE_ACKNOWLEDGED", "STORE_PROCESSING")
 PROCESSING_STATUS = "STORE_PROCESSING"
 ROUTING_TASK_STEP = "STORE_ROUTING"  # DEC-66: task per GS and store, opened at acknowledgement
+ANALYSIS_TASK_STEP = "STORE_ANALYSIS"  # DEC-69: task per GS and store while ready for analysis
+READY_FOR_ANALYSIS = "READY_FOR_ANALYSIS"
 ROUTING_PENDING = "ROUTING_PENDING"
 
 
@@ -761,6 +763,35 @@ class DepartmentRoutingService:
             cache[store_id] = repo.user_acts_for_store(session, actor.id, store_id)
         return cache[store_id]
 
+    @staticmethod
+    def _sync_store_tasks(
+        session: Session, *, gs_id: UUID, role_id: UUID | None, status: str
+    ) -> None:
+        """The store's open work on a GS follows its progress: a STORE_ROUTING task while it has
+        goods to route (DEC-67/68) and a STORE_ANALYSIS task once everything is back or had no
+        work (DEC-69). Analysis happens only once nothing can change any more (Q32: the undo of
+        an analysed item is refused), so the analysis task is closed by the submission."""
+        gs_service.sync_step_task(
+            session,
+            gs_id=gs_id,
+            step_code=ROUTING_TASK_STEP,
+            role_id=role_id,
+            needed=status == ROUTING_PENDING,
+        )
+        gs_service.sync_step_task(
+            session,
+            gs_id=gs_id,
+            step_code=ANALYSIS_TASK_STEP,
+            role_id=role_id,
+            needed=status == READY_FOR_ANALYSIS,
+        )
+
+    def store_analysis_progress(
+        self, session: Session, actor: CurrentUser, gs_id: UUID
+    ) -> list[StoreProgressOut]:
+        """DEC-69: the routing progress of every store on a GS (for the store analysis)."""
+        return self._progress(session, actor, gs_id, {})
+
     def _progress(
         self, session: Session, actor: CurrentUser, gs_id: UUID, cache: dict[UUID, bool]
     ) -> list[StoreProgressOut]:
@@ -928,12 +959,8 @@ class DepartmentRoutingService:
             progress = next(
                 p for p in self._progress(session, actor, gs_id, cache) if p.store_id == store["id"]
             )
-            gs_service.sync_step_task(
-                session,
-                gs_id=gs_id,
-                step_code=ROUTING_TASK_STEP,
-                role_id=store["role_id"],
-                needed=progress.status == ROUTING_PENDING,
+            self._sync_store_tasks(
+                session, gs_id=gs_id, role_id=store["role_id"], status=progress.status
             )
             log.info(
                 "store_routing_undone",
@@ -1175,12 +1202,8 @@ class DepartmentRoutingService:
         progress = next(
             p for p in self._progress(session, actor, gs_id, cache) if p.store_id == store["id"]
         )
-        gs_service.sync_step_task(
-            session,
-            gs_id=gs_id,
-            step_code=ROUTING_TASK_STEP,
-            role_id=store["role_id"],
-            needed=progress.status == ROUTING_PENDING,
+        self._sync_store_tasks(
+            session, gs_id=gs_id, role_id=store["role_id"], status=progress.status
         )
         log.info(
             "store_routing_saved",
@@ -1315,16 +1338,12 @@ class DepartmentRoutingService:
         progress = next(
             p for p in self._progress(session, actor, gs["id"], cache) if p.store_id == store["id"]
         )
-        gs_service.sync_step_task(
-            session,
-            gs_id=gs["id"],
-            step_code=ROUTING_TASK_STEP,
-            role_id=store["role_id"],
-            needed=progress.status == ROUTING_PENDING,
+        self._sync_store_tasks(
+            session, gs_id=gs["id"], role_id=store["role_id"], status=progress.status
         )
         din = repo.store_receiving_dins(session, routing_id=routing_id)[0]
         if din["status"] == "COMPLETED":
-            ready = progress.status == "READY_FOR_ANALYSIS"
+            ready = progress.status == READY_FOR_ANALYSIS
             notifications.publish(
                 session,
                 "DEPT_ROUTING_COMPLETED",

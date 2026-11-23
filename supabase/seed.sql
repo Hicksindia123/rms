@@ -198,6 +198,7 @@ insert into _seed_role_matrix values
   -- which inserts nothing on a fresh `supabase db reset` (roles are seed data); the grants live here.
   ('REPLACEMENT_MANAGER',        'department_routing', array['view','create','export']),
   ('REPLACEMENT_MANAGER',        'store_routing',   array['view']),               -- DEC-67: progress of the stores
+  ('REPLACEMENT_MANAGER',        'store_analysis',  array['view']),               -- DEC-69: the stores' analysis
   ('INWARD_VERIFIER',            'department_routing', array['view','edit']),
   -- DEC-55 (gap plan G2): the Store Manager issues planned goods to departments (DIN).
   ('INTERMEDIATE_STORE_MANAGER', 'department_routing', array['view','approve']),
@@ -237,6 +238,7 @@ insert into _seed_role_matrix values
   ('MANAGEMENT',                 'credit_notes',    array['view']),
   ('MANAGEMENT',                 'department_routing', array['view']),
   ('MANAGEMENT',                 'store_routing',   array['view']),               -- DEC-67: sees store routing
+  ('MANAGEMENT',                 'store_analysis',  array['view']),               -- DEC-69: sees the stores' analysis
   ('MANAGEMENT',                 'final_actions',   array['view']),
   ('MANAGEMENT',                 'ac_entry',        array['view']),
   ('MANAGEMENT',                 'intermediate_stores', array['view']),
@@ -253,6 +255,10 @@ insert into _seed_role_matrix values
   ('ISTORE_OP',                  'store_routing',   array['view','create','edit']),
   ('ISTORE_DT',                  'store_routing',   array['view','create','edit']),
   ('ISTORE_RI',                  'store_routing',   array['view','create','edit']),
+  -- DEC-69 (P9): analyse the store's own goods, submit, send for Management approval.
+  ('ISTORE_OP',                  'store_analysis',  array['view','create']),
+  ('ISTORE_DT',                  'store_analysis',  array['view','create']),
+  ('ISTORE_RI',                  'store_analysis',  array['view','create']),
   ('ISTORE_OP',                  'department_routing', array['view']),
   ('ISTORE_DT',                  'department_routing', array['view']),
   ('ISTORE_RI',                  'department_routing', array['view']),
@@ -396,6 +402,9 @@ select r.id, s.id, m.ord
     ('ISTORE_OP',                  'STORE_DEPT_RECEIVING', 30),   -- DEC-68
     ('ISTORE_DT',                  'STORE_DEPT_RECEIVING', 30),
     ('ISTORE_RI',                  'STORE_DEPT_RECEIVING', 30),
+    ('ISTORE_OP',                  'STORE_ANALYSIS', 40),   -- DEC-69
+    ('ISTORE_DT',                  'STORE_ANALYSIS', 40),
+    ('ISTORE_RI',                  'STORE_ANALYSIS', 40),
     ('ISTORE_OP',                  'GS_LIST',        100),
     ('ISTORE_DT',                  'GS_LIST',        100),
     ('ISTORE_RI',                  'GS_LIST',        100)
@@ -635,6 +644,7 @@ from (values
   ('TRANSFER_SLIP_GENERATED', 'Transfer Slip Generated', 73, 'DEC-65'),
   ('STORE_ACKNOWLEDGED', 'Acknowledged by Store', 74, 'DEC-66'),
   ('STORE_PROCESSING', 'In Store Processing', 74, 'DEC-67'),
+  ('ANALYSIS_COMPLETED', 'Analysis Completed', 74, 'DEC-69'),
   ('SALES_RETURN_HOLD', 'Sales Return – On Hold', 74, 'DEC-64'),
   ('HELD_AT_INTERMEDIATE_STORE', 'Held at Intermediate Store', 75, 'AMD-13'),
   ('IN_PROCESS', 'In Process', 80, '§6.5'),
@@ -703,6 +713,15 @@ select rms_private.seed_item_field_library_from_options();
 update public.item_field_library
    set label = 'Pending'
  where field_group = 'ACTION' and code = 'PENDING_BP' and label = 'Pending (BP)';
+-- DEC-69 (P9, Q15): the store's analysis options read "Dispatch New Piece" / "Dispatch Repaired
+-- Piece" (codes SEND_NEW / SEND_REPAIRED unchanged, G-18; an admin may relabel). Same updates in
+-- supabase/snippets/release_20261123_p9_store_analysis.sql. The RM_ITEM_ACTION option items keep
+-- the workbook's verbatim WF r6 labels; the ACTION library is what the screens and snapshots use.
+update public.item_field_library l
+   set label = v.label
+  from (values ('SEND_NEW', 'Send New', 'Dispatch New Piece'),
+               ('SEND_REPAIRED', 'Send Repaired', 'Dispatch Repaired Piece')) as v(code, old_label, label)
+ where l.field_group = 'ACTION' and l.code = v.code and l.label = v.old_label;
 -- DEC-55: every active department enabled for every category by default (admin may restrict).
 -- The category insert trigger already does this; repeated for clarity / idempotence.
 select rms_private.enable_departments_for_categories();
@@ -3758,7 +3777,11 @@ select v.event_type, v.name, true, v.roles, array['IN_APP'], v.priority, true
     -- DEC-66 (P6): the slip's store users are the context recipients (the service names the users
     -- of the store role the slip is addressed to); discrepancies go to RM + Management.
     ('TRANSFER_SLIP_GENERATED', 'Store users: transfer slip to acknowledge', '{}'::text[], 'NORMAL'),
-    ('TRANSFER_SLIP_DISCREPANCY', 'RM & Management: transfer slip discrepancy', array['REPLACEMENT_MANAGER', 'MANAGEMENT'], 'HIGH')
+    ('TRANSFER_SLIP_DISCREPANCY', 'RM & Management: transfer slip discrepancy', array['REPLACEMENT_MANAGER', 'MANAGEMENT'], 'HIGH'),
+    -- DEC-69 (P9): store analysis and "Send for Management Approval".
+    ('STORE_ANALYSIS_SUBMITTED', 'RM: a store submitted its analysis', array['REPLACEMENT_MANAGER'], 'NORMAL'),
+    ('GS_ANALYSIS_COMPLETED', 'RM & Management: every store analysed the goods slip', array['REPLACEMENT_MANAGER', 'MANAGEMENT'], 'NORMAL'),
+    ('MANAGEMENT_APPROVAL_REQUESTED', 'Management & Super Admin: goods slip sent for approval', array['MANAGEMENT', 'SUPER_ADMIN'], 'HIGH')
   ) as v(event_type, name, roles, priority)
  where not exists (select 1 from public.notification_rules r where r.event_type = v.event_type);
 

@@ -308,6 +308,17 @@ const StoreReceivingPage = lazy(() =>
     default: m.StoreReceivingPage,
   })),
 );
+// DEC-69 (P9): analysis by the Intermediate Store user.
+const StoreAnalysisQueuePage = lazy(() =>
+  import('@/features/store-analysis/StoreAnalysisQueuePage').then((m) => ({
+    default: m.StoreAnalysisQueuePage,
+  })),
+);
+const StoreAnalysisGsPage = lazy(() =>
+  import('@/features/store-analysis/StoreAnalysisGsPage').then((m) => ({
+    default: m.StoreAnalysisGsPage,
+  })),
+);
 const DepartmentIssueNotePrintPage = lazy(() =>
   import('@/features/department-routing/DepartmentIssueNotePrintPage').then((m) => ({
     default: m.DepartmentIssueNotePrintPage,
@@ -354,6 +365,7 @@ type NavTab =
   | 'department-issue'
   | 'store-routing'
   | 'store-receiving'
+  | 'store-analysis'
   | 'transfer-slips'
   | 'department-receiving'
   | 'accounts-entry'
@@ -402,6 +414,7 @@ const STATIC_TABS: ReadonlySet<string> = new Set([
   'department-issue',
   'store-routing',
   'store-receiving',
+  'store-analysis',
   'transfer-slips',
   'department-receiving',
   'accounts-entry',
@@ -1664,6 +1677,40 @@ function Shell() {
                   <EmptyState
                     title="Access Restricted"
                     hint="You do not have permission to view Receive from Departments."
+                  />
+                )}
+              </RequireAuth>
+            )}
+            {activeTab === 'store-analysis' && (
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
+                {can('store_analysis', 'view') || isSuperAdmin ? (
+                  second ? (
+                    // DEC-69: one goods slip; the store decides per item + condition.
+                    <StoreAnalysisGsPage
+                      key={second}
+                      gsId={second}
+                      onBack={() => {
+                        navigate('/store-analysis');
+                      }}
+                      onOpenGs={(id: string) => {
+                        navigate(`/gs/${id}`);
+                      }}
+                    />
+                  ) : (
+                    <StoreAnalysisQueuePage
+                      onOpenGs={(id: string) => {
+                        navigate(`/store-analysis/${id}`);
+                      }}
+                    />
+                  )
+                ) : (
+                  <EmptyState
+                    title="Access Restricted"
+                    hint="You do not have permission to view Analysis."
                   />
                 )}
               </RequireAuth>

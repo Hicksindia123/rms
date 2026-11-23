@@ -192,6 +192,16 @@ _QUEUES: dict[str, str] = {
          where r.status in ('DISPATCHED', 'PARTIALLY_RECEIVED') and r.store_id is not null
            and rms_private.user_acts_for_store(cast(:uid as uuid), r.store_id)
          group by g.id, g.gs_no, pa.name, st.name""",  # noqa: S608
+    # DEC-69: goods slips on which one of the signed-in user's Intermediate Stores is ready for
+    # analysis (everything back from the departments or no work) and has not submitted it yet.
+    # Scoped by :uid (Super Admin: all stores).
+    "STORE_ANALYSIS": f"""
+        select {_GS_COLS}, g.id as target_id, {_SINCE_STATUS} as since
+          from public.goods_slips g {_GS_JOINS}
+         where g.status = 'STORE_PROCESSING'
+           and exists (select 1 from rms_private.gs_store_analysis_progress(g.id) p
+                        where p.analysis_status = 'PENDING'
+                          and rms_private.user_acts_for_store(cast(:uid as uuid), p.store_id))""",  # noqa: S608
     # DEC-65: the RM's open edit requests on locked GSs (Management / Super Admin).
     "EDIT_REQUESTS": f"""
         select {_GS_COLS}, g.id as target_id, r.requested_at as since
@@ -245,7 +255,8 @@ def list_user_steps(session: Session, user_id: UUID) -> list[dict[str, Any]]:
 
 
 def _params(sql: str, user_id: UUID | None) -> dict[str, Any]:
-    """A user-scoped queue (DEC-66 STORE_ACK, DEC-67 STORE_ROUTING, DEC-68 STORE_RECEIVING) binds
+    """A user-scoped queue (DEC-66 STORE_ACK, DEC-67 STORE_ROUTING, DEC-68 STORE_RECEIVING,
+    DEC-69 STORE_ANALYSIS) binds
     :uid; the others take no parameters."""
     return {"uid": str(user_id) if user_id else None} if ":uid" in sql else {}
 
