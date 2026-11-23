@@ -342,13 +342,33 @@ async def test_send_for_management_approval(
     assert (await send(stores.op, r.dt_store, "Please check")).status_code == 403
     assert (await send(stores.dt, r.dt_store, "ab")).status_code == 422
 
-    # OP may send it although its goods are still at a department (any store on the GS).
-    res = await send(stores.op, r.op_store, "Party asks for a credit note")
+    # Q36 (user 2026-11-23): a store submits its own analysis before it sends the GS.
+    before = await send(stores.dt, r.dt_store, "Party asks for a credit note")
+    assert before.status_code == 409
+    assert before.json()["error"]["code"] == "ANALYSIS_NOT_SUBMITTED"
+    state = (await _state(client, stores.dt, r.gs_id)).json()
+    assert state["can_request_approval"] is False and state["approval_store_ids"] == []
+    dt = _item(state, "DT")
+    done = await _submit(
+        client,
+        stores.dt,
+        r.gs_id,
+        r.dt_store,
+        [_decide(dt, 0, SEND_NEW=2), _decide(dt, 1, SEND_NEW=1)],
+    )
+    assert done.status_code == 200, done.text
+    assert done.json()["can_request_approval"] is True
+    # OP has not submitted (its goods are still at a department).
+    op_send = await send(stores.op, r.op_store, "Another reason")
+    assert op_send.status_code == 409
+    assert op_send.json()["error"]["code"] == "ANALYSIS_NOT_SUBMITTED"
+
+    res = await send(stores.dt, r.dt_store, "Party asks for a credit note")
     assert res.status_code == 200, res.text
     body = res.json()
     req = body["open_approval_request"]
     assert (req["store_id"], req["reason"], req["status"]) == (
-        r.op_store,
+        r.dt_store,
         "Party asks for a credit note",
         "OPEN",
     )
@@ -363,9 +383,9 @@ async def test_send_for_management_approval(
         g=r.gs_id,
     )
     assert len(events) == 1
-    # The DT view shows the open request too.
-    dt_state = (await _state(client, stores.dt, r.gs_id)).json()
-    assert dt_state["open_approval_request"]["id"] == req["id"]
+    # The OP view shows the open request too.
+    op_state = (await _state(client, stores.op, r.gs_id)).json()
+    assert op_state["open_approval_request"]["id"] == req["id"]
 
 
 # --- DB guards (non-bypassable) ---------------------------------------------------------------
@@ -426,8 +446,18 @@ async def test_db_refuses_store_analysis_bypass(
     with pytest.raises(DBAPIError, match="no goods ready for analysis"), c.begin_nested():
         submission(r.op_store)
 
-    # G-21: a partial decision cannot be submitted, nor committed (deferred check).
+    # Q36: the DT store has not submitted: it cannot send the GS for Management approval yet.
     users.set_actor(stores.dt_id)
+    with pytest.raises(DBAPIError, match="Q36"), c.begin_nested():
+        c.execute(
+            text(
+                "insert into public.gs_management_approval_requests"
+                " (gs_id, store_id, store_name_snapshot, reason) values (:g, :s, '-', 'why')"
+            ),
+            {"g": r.gs_id, "s": r.dt_store},
+        )
+
+    # G-21: a partial decision cannot be submitted, nor committed (deferred check).
     with c.begin_nested():
         action(dt, 0, "SEND_NEW", 2)
         with pytest.raises(DBAPIError, match="G-21"), c.begin_nested():

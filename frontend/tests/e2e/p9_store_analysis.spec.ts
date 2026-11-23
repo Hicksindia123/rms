@@ -14,9 +14,9 @@ import { lockedGs, productOf } from './support/transfer_slips';
  * Phase P9 (docs/RMS_PHASE_PROMPTS_20-11-2026.md; DEC-69) against the REAL local stack, at 360 px
  * and 1280 px. Setup through the API: one locked Replacement GS with a DT (DMT) line of 3; the RM
  * generates the slip, the DT store acknowledges it and routes every piece "Issue to Store" (no
- * work), so its part is ready for analysis. The DT store user opens "Analysis", sends the GS for
- * Management approval with a reason, decides each condition (Dispatch New / Dispatch Repaired /
- * Not Allowed; no Issue CN) and submits; the GS becomes Analysis Completed. No console errors, no
+ * work), so its part is ready for analysis. The DT store user opens "Analysis", decides each
+ * condition (Dispatch New / Dispatch Repaired / Not Allowed; no Issue CN) and submits; the GS
+ * becomes Analysis Completed; then (Q36) it sends the GS for Management approval with a reason. No console errors, no
  * horizontal scroll, touch targets ≥ 44 px.
  */
 const DT_STORE = 'dtstore@rms.local';
@@ -105,18 +105,11 @@ test.describe('P9 store analysis', () => {
       await expect(line).not.toContainText('Issue CN');
       const submit = page.getByRole('button', { name: 'Submit analysis' });
       await expect(submit).toBeDisabled();
-
-      // Send for Management approval (reason required).
-      await page.getByRole('button', { name: /Send for Management Approval/ }).click();
-      const dialog = dt.page.getByRole('dialog');
-      await dialog.getByLabel('Reason (required)').fill('Party asks for a credit note');
-      await expectNoHorizontalOverflow(dt.page);
-      await dt.page.screenshot({ path: `test-results/p9/${vp.name}-approval.png`, fullPage: true });
-      await dialog.getByRole('button', { name: 'Send' }).click();
-      await expect(page.getByTestId('approval-request')).toContainText(
-        'Party asks for a credit note',
-        { timeout: 20_000 },
+      // Q36: no "Send for Management Approval" before the store's own submission.
+      await expect(page.getByRole('button', { name: /Send for Management Approval/ })).toHaveCount(
+        0,
       );
+      const dialog = dt.page.getByRole('dialog');
 
       // Decide: the first condition all "Dispatch New Piece" by the touch shortcut, the others
       // "Not Allowed"; then fix the first one to 1 new + rest repaired by typing.
@@ -144,6 +137,17 @@ test.describe('P9 store analysis', () => {
       await expect(page).toContainText('Every store has submitted');
       await expect(page.getByRole('button', { name: 'Submit analysis' })).toHaveCount(0);
       await expect.poll(() => gsStatus(gs.id)).toBe('ANALYSIS_COMPLETED');
+
+      // Q36: after its submission the store may send the GS for Management approval (reason).
+      await page.getByRole('button', { name: /Send for Management Approval/ }).click();
+      await dialog.getByLabel('Reason (required)').fill('Party asks for a credit note');
+      await expectNoHorizontalOverflow(dt.page);
+      await dt.page.screenshot({ path: `test-results/p9/${vp.name}-approval.png`, fullPage: true });
+      await dialog.getByRole('button', { name: 'Send' }).click();
+      await expect(page.getByTestId('approval-request')).toContainText(
+        'Party asks for a credit note',
+        { timeout: 20_000 },
+      );
       await expectNoHorizontalOverflow(dt.page);
       await dt.page.screenshot({ path: `test-results/p9/${vp.name}-done.png`, fullPage: true });
       expect(dt.errors).toEqual([]);

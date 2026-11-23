@@ -2,11 +2,11 @@
 -- a store's goods of a GS are analysed only by a user of that store once they are ready for
 -- analysis; Issue CN / Pending are refused to the store (Q15, DEC-70); the submission needs every
 -- piece decided (G-21) and is history; a submitted store cannot change its decisions; the last
--- store moves the GS to ANALYSIS_COMPLETED (G-03); the Management approval request is sent only by
+-- store moves the GS to ANALYSIS_COMPLETED (G-03); the Management approval request is sent (Q36: after its own submission) only by
 -- a user of a store on the GS, once per GS; the Q32 undo stops once the item is analysed.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(20);
+select plan(21);
 
 insert into auth.users (id, email, raw_app_meta_data, raw_user_meta_data) values
   ('aaaaaaaa-0000-4000-8000-0000000009e1', 'pgtap-p9-re@example.test', '{"rms_activate": true}', '{"full_name": "P9 RE"}'),
@@ -131,6 +131,11 @@ select throws_like($$ select pg_temp.decide('ISSUE_CN', 3) $$,
   'DEC-69: ISSUE_CN is not a store analysis option%', 'the store cannot pick Issue CN');
 select throws_like($$ select pg_temp.decide('PENDING_BP', 3) $$,
   'DEC-69: PENDING_BP is not a store analysis option%', 'the store cannot pick Pending');
+
+-- 7b. Q36 (user 2026-11-23): the store submits its own analysis before sending for approval.
+select throws_like($$ select pg_temp.request('Party wants a credit note') $$,
+  'DEC-69 (Q36): % submits its own analysis of this goods slip before sending it for Management approval',
+  'no approval request before the store''s own submission');
 
 -- 8–9. G-21: a partial decision is not submitted (nor committed).
 select lives_ok($$ select pg_temp.decide('SEND_NEW', 2) $$, 'the DT user decides 2 of 3');

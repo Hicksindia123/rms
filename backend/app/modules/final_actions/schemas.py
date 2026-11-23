@@ -253,7 +253,8 @@ class StoreAnalysisGsOut(BaseModel):
     items: list[StoreAnalysisItemOut] = Field(default_factory=list)
     # The user's stores whose part may be submitted now.
     submittable_store_ids: list[UUID] = Field(default_factory=list)
-    # The user's stores on this GS (any of them may send it for Management approval).
+    # The user's stores on this GS that submitted their analysis (Q36: they may send it for
+    # Management approval).
     approval_store_ids: list[UUID] = Field(default_factory=list)
     can_request_approval: bool = False
     open_approval_request: ManagementApprovalRequestOut | None = None

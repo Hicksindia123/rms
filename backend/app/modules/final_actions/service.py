@@ -1233,7 +1233,8 @@ class StoreAnalysisService:
             for r in repo.list_approval_requests(session, gs_id)
         ]
         open_request = next((r for r in requests if r.status == "OPEN"), None)
-        mine = [s.store_id for s in stores if s.is_mine]
+        # Q36 (user 2026-11-23): a store sends for approval once it submitted its own analysis.
+        mine = [s.store_id for s in stores if s.is_mine and s.analysis_status == "SUBMITTED"]
         can_analyse = gs["status"] == ANALYSIS_STATUS
         return StoreAnalysisGsOut(
             gs_id=gs["id"],
@@ -1557,10 +1558,23 @@ class StoreAnalysisService:
                 "during or after the store analysis",
                 code="INVALID_GS_STATUS",
             )
-        if not any(
-            s["store_id"] == store["id"] for s in repo.store_analysis_progress(session, gs_id)
-        ):
+        part = next(
+            (
+                s
+                for s in repo.store_analysis_progress(session, gs_id)
+                if s["store_id"] == store["id"]
+            ),
+            None,
+        )
+        if part is None:
             raise Conflict(f"{store['name']} has no goods on {gs['gs_no']}", code="STORE_NOT_ON_GS")
+        if part["analysis_status"] != "SUBMITTED":
+            # Q36 (user 2026-11-23): the store submits its own analysis first (DB checks it too).
+            raise Conflict(
+                f"{store['name']} submits its own analysis of {gs['gs_no']} before sending it for "
+                "Management approval",
+                code="ANALYSIS_NOT_SUBMITTED",
+            )
         if any(r["status"] == "OPEN" for r in repo.list_approval_requests(session, gs_id)):
             raise Conflict(
                 f"{gs['gs_no']} is already waiting for Management approval",

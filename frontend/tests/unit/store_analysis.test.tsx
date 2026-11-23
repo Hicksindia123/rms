@@ -130,8 +130,9 @@ const GS = {
     },
   ],
   submittable_store_ids: ['s-dt'],
-  approval_store_ids: ['s-dt'],
-  can_request_approval: true,
+  // Q36: a store sends for Management approval only after its own submission.
+  approval_store_ids: [],
+  can_request_approval: false,
   open_approval_request: null,
   approval_requests: [],
 };
@@ -203,6 +204,9 @@ describe('Store analysis (P9, DEC-69)', () => {
     expect(within(item).queryByText(/Issue CN/)).not.toBeInTheDocument();
     const submit = screen.getByRole('button', { name: 'Submit analysis' });
     expect(submit).toBeDisabled();
+    expect(
+      screen.queryByRole('button', { name: /Send for Management Approval/ }),
+    ).not.toBeInTheDocument();
 
     // Working: 1 new + 1 not allowed; Broken: all repaired (touch shortcut).
     fireEvent.change(within(item).getByLabelText('Dispatch New Piece, Working, item 1'), {
@@ -258,9 +262,16 @@ describe('Store analysis (P9, DEC-69)', () => {
     expect(within(other).queryByRole('spinbutton')).not.toBeInTheDocument();
   });
 
-  it('sends the goods slip for Management approval with a reason', async () => {
+  it('sends the goods slip for Management approval with a reason (after submitting)', async () => {
+    const submitted = {
+      ...GS,
+      stores: [OP, { ...DT, analysis_status: 'SUBMITTED', total_qty: 3 }],
+      submittable_store_ids: [],
+      approval_store_ids: ['s-dt'],
+      can_request_approval: true,
+    };
     serve({
-      '/store-analysis/gs/gs-1': GS,
+      '/store-analysis/gs/gs-1': submitted,
       '/store-analysis/gs/gs-1/management-approval': {
         ...GS,
         can_request_approval: false,
