@@ -67,6 +67,7 @@ from app.modules.final_actions.schemas import (
     StoreAnalysisSubmitIn,
 )
 from app.modules.goods_slips import service as gs_service
+from app.modules.management_approval import service as management_approval
 from app.modules.notifications import service as notifications
 from app.shared.branding import template_logo
 from app.shared.pdf import (
@@ -760,6 +761,8 @@ class FinalActionsService:
             user=user,
             remarks=remarks,
         )
+        # DEC-70: the Management e-approval stamp (VALID approval only) is printed and recorded.
+        content["management_stamp"] = management_approval.stamp_for_print(session, gs_id)
         pdf = render_slip_pdf(self._slip_document(session, template, content))
         digest = hashlib.sha256(pdf).hexdigest()
 
@@ -1008,6 +1011,7 @@ class FinalActionsService:
             subtitle=str(layout.get("header_subtitle") or template.get("name") or ""),
             document_ref=f"{c['slip_no']} · Version {c['version_no']} · {c['gs_no']}",
             sections=sections,
+            stamp=c.get("management_stamp"),
             tables=[
                 SlipTable(
                     title=title("items", "Item \u00d7 Action \u00d7 Qty"),

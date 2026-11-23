@@ -95,9 +95,9 @@ select set_eq($$select code from public.roles$$,
         -- Phase P1 20-11-2026: DEC-60 Management, DEC-61 one role per Intermediate Store
         'MANAGEMENT','ISTORE_OP','ISTORE_DT','ISTORE_RI'],
   'roles match master plan §3.3');
-select is((select count(*)::int from public.permissions), 164, '20 modules × 7 actions + 5 department_routing (G2 approve = Store issue) + 4 final_actions + 3 ac_entry + 4 intermediate_stores (DEC-61) + 3 transfer_slips (DEC-65, DEC-66 approve = acknowledge) + 3 store_routing (DEC-67; DEC-68 edit = receive) + 2 store_analysis (DEC-69) actions');
+select is((select count(*)::int from public.permissions), 166, '20 modules × 7 actions + 5 department_routing (G2 approve = Store issue) + 4 final_actions + 3 ac_entry + 4 intermediate_stores (DEC-61) + 3 transfer_slips (DEC-65, DEC-66 approve = acknowledge) + 3 store_routing (DEC-67; DEC-68 edit = receive) + 2 store_analysis (DEC-69) + 2 management_approval (DEC-70) actions');
 select is((select count(*)::int from public.role_permissions rp join public.roles r on r.id = rp.role_id
-            where r.code = 'SUPER_ADMIN'), 164, 'SUPER_ADMIN marker role holds every permission');
+            where r.code = 'SUPER_ADMIN'), 166, 'SUPER_ADMIN marker role holds every permission');
 select is((select count(*)::int from public.roles r
             where not exists (select 1 from public.role_permissions rp where rp.role_id = r.id)), 0,
           'every role has a default permission set');

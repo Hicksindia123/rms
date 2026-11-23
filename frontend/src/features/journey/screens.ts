@@ -32,6 +32,7 @@ import {
   Warehouse,
   Wrench,
   FileCheck2,
+  BadgeCheck,
 } from 'lucide-react';
 
 /**
@@ -63,6 +64,7 @@ const SCREEN_PATHS: Record<string, string> = {
   'store-routing': '/store-routing', // DEC-67
   'store-receiving': '/store-receiving', // DEC-68
   'store-analysis': '/store-analysis', // DEC-69
+  'management-approval': '/management-approval', // DEC-70
   'transfer-slips': '/transfer-slips',
   'transfer-slip-acks': '/transfer-slips/acknowledge', // DEC-66
   'department-receiving': '/department-receiving',
@@ -113,6 +115,8 @@ export function itemPath(
       return `/store-receiving/${item.gs_id}`;
     case 'gs-store-analysis': // DEC-69: the store analyses its goods of this GS
       return `/store-analysis/${item.gs_id}`;
+    case 'gs-management-approval': // DEC-70: Management reviews / approves this GS
+      return `/management-approval/${item.gs_id}`;
     case 'transfer-slip': // DEC-66: the queue item is the slip itself
       return `/transfer-slips/${item.target_id}`;
     case 'accounts-docs':
@@ -146,6 +150,7 @@ const ICONS: Record<string, LucideIcon> = {
   STORE_DEPT_ROUTING: Building2,
   STORE_DEPT_RECEIVING: CheckCircle2,
   STORE_ANALYSIS: Split, // DEC-69
+  MANAGEMENT_APPROVAL: BadgeCheck, // DEC-70
   DEPT_RECEIVING: CheckCircle2,
   FINAL_ACTIONS: Split,
   ACCOUNTS_DOCS: FileSpreadsheet,

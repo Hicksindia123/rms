@@ -65,6 +65,7 @@ from app.modules.attachments.service import signed_url_ttl
 from app.modules.closure import service as closure_service
 from app.modules.goods_slips import service as gs_service
 from app.modules.inventory import ledger_service
+from app.modules.management_approval import service as management_approval
 from app.modules.notifications import service as notifications
 from app.modules.party_notifications import email_service as party_email
 from app.shared.branding import template_logo
@@ -714,6 +715,8 @@ class AcEntryService:
             ],
             "total_qty": sum(int(ln["qty"]) for ln in shipping),
         }
+        # DEC-70: the Management e-approval stamp (VALID approval only) is printed and recorded.
+        content["management_stamp"] = management_approval.stamp_for_print(session, gs["id"])
         pdf = render_slip_pdf(self._slip_document(session, template, content))
         digest = hashlib.sha256(pdf).hexdigest()
         path = build_object_path(gs["id"], "generated_pdf", "pdf")
@@ -801,6 +804,7 @@ class AcEntryService:
             title=str(layout.get("header_title") or template.get("name") or ""),
             subtitle=str(layout.get("header_subtitle") or template.get("name") or ""),
             document_ref=f"{c['slip_no']} · {c['gs_no']}",
+            stamp=c.get("management_stamp"),
             sections=[
                 SlipSection(
                     title("header", "Dispatch Slip"),

@@ -10,6 +10,9 @@ the stored file's SHA-256 identifies its content.
 DEC-65 / Q26: an optional PNG logo is drawn left of the title block when the template has
 `show_logo` on (the owning service passes the bytes); a table can be printed greyed with
 strike-through (`SlipTable.muted`, used for the "other stores" section of a Transfer Slip).
+
+DEC-70 (Q17): an optional one-line approval stamp (`SlipDocument.stamp`, the text comes from the
+owning service) is drawn in a framed box below the header sections.
 """
 
 from __future__ import annotations
@@ -98,6 +101,8 @@ class SlipDocument:
     signatures_title: str = "Signatures"
     # DEC-65 / Q26: PNG / JPEG bytes of the logo (None = company name only).
     logo: bytes | None = None
+    # DEC-70: "Digitally approved by Management — name, date time, ref …" (None = no stamp).
+    stamp: str | None = None
 
 
 def _color(value: str) -> colors.Color:
@@ -219,6 +224,23 @@ def render_slip_pdf(doc: SlipDocument) -> bytes:
             )
         )
         story += [grid, Spacer(1, 3 * mm)]
+
+    # DEC-70: the Management e-approval stamp.
+    if doc.stamp:
+        s_stamp = ParagraphStyle(
+            "slip_stamp", parent=s_value, fontName="Helvetica-Bold", textColor=brand
+        )
+        box = Table([[_p(doc.stamp, s_stamp)]], colWidths=[usable_w])
+        box.setStyle(
+            TableStyle(
+                [
+                    ("BOX", (0, 0), (-1, -1), 1.2, brand),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
+        story += [box, Spacer(1, 3 * mm)]
 
     # Line tables.
     for table in doc.tables:

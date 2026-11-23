@@ -42,6 +42,7 @@ from app.modules.inventory.battery_router import router as battery_router
 from app.modules.inventory.router import router as inventory_router
 from app.modules.itemization.router import router as itemization_router
 from app.modules.journeys.router import router as journeys_router
+from app.modules.management_approval.router import router as management_approval_router
 from app.modules.masters.router import router as masters_router
 from app.modules.notifications.router import admin_router as notifications_admin_router
 from app.modules.notifications.router import router as notifications_router
@@ -114,6 +115,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(department_routing_router, prefix=API_PREFIX)
     app.include_router(final_actions_router, prefix=API_PREFIX)
     app.include_router(store_analysis_router, prefix=API_PREFIX)
+    app.include_router(management_approval_router, prefix=API_PREFIX)
     app.include_router(ac_entry_router, prefix=API_PREFIX)
     app.include_router(dispatch_slips_router, prefix=API_PREFIX)
     app.include_router(rm_actions_router, prefix=API_PREFIX)

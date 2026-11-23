@@ -208,6 +208,12 @@ _QUEUES: dict[str, str] = {
           from public.gs_edit_requests r
           join public.goods_slips g on g.id = r.gs_id {_GS_JOINS}
          where r.status = 'OPEN'""",  # noqa: S608
+    # DEC-70: goods slips a store sent for Management approval (open request).
+    "MANAGEMENT_APPROVAL": f"""
+        select {_GS_COLS}, g.id as target_id, r.requested_at as since
+          from public.gs_management_approval_requests r
+          join public.goods_slips g on g.id = r.gs_id {_GS_JOINS}
+         where r.status = 'OPEN'""",  # noqa: S608
 }
 
 QUEUE_CODES = frozenset(_QUEUES)

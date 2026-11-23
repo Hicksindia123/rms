@@ -23,6 +23,7 @@ import { RejectionsTab } from '@/features/inspection/RejectionsTab';
 import { INSPECTION_VISIBLE, useInspection } from '@/features/inspection/useInspection';
 import { PendencyTab } from '@/features/pendency/PendencyTab';
 import { GsActivityTab } from '@/features/goods-slips/GsActivityTab';
+import { StampPanel } from '@/features/management-approval/ApprovalStamp';
 import { departmentRoutingApi } from '@/features/department-routing/api';
 import type {
   GsReconciliationOut,
@@ -548,6 +549,9 @@ export function GoodsSlipDetailPage({
               ) : null}
             </dl>
           </section>
+
+          {/* DEC-70: Management e-approval stamp + Verify (nothing when not approved). */}
+          <StampPanel gsId={gs.id} status={gs.status} />
 
           {detail.tasks.length > 0 ? (
             <section>

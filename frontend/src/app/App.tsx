@@ -319,6 +319,17 @@ const StoreAnalysisGsPage = lazy(() =>
     default: m.StoreAnalysisGsPage,
   })),
 );
+// DEC-70 (P10): Management approval + e-approval stamp.
+const ManagementApprovalQueuePage = lazy(() =>
+  import('@/features/management-approval/ManagementApprovalQueuePage').then((m) => ({
+    default: m.ManagementApprovalQueuePage,
+  })),
+);
+const ManagementApprovalGsPage = lazy(() =>
+  import('@/features/management-approval/ManagementApprovalGsPage').then((m) => ({
+    default: m.ManagementApprovalGsPage,
+  })),
+);
 const DepartmentIssueNotePrintPage = lazy(() =>
   import('@/features/department-routing/DepartmentIssueNotePrintPage').then((m) => ({
     default: m.DepartmentIssueNotePrintPage,
@@ -366,6 +377,7 @@ type NavTab =
   | 'store-routing'
   | 'store-receiving'
   | 'store-analysis'
+  | 'management-approval'
   | 'transfer-slips'
   | 'department-receiving'
   | 'accounts-entry'
@@ -415,6 +427,7 @@ const STATIC_TABS: ReadonlySet<string> = new Set([
   'store-routing',
   'store-receiving',
   'store-analysis',
+  'management-approval',
   'transfer-slips',
   'department-receiving',
   'accounts-entry',
@@ -1677,6 +1690,40 @@ function Shell() {
                   <EmptyState
                     title="Access Restricted"
                     hint="You do not have permission to view Receive from Departments."
+                  />
+                )}
+              </RequireAuth>
+            )}
+            {activeTab === 'management-approval' && (
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
+                {can('management_approval', 'view') || isSuperAdmin ? (
+                  second ? (
+                    // DEC-70: one goods slip; Management changes decisions and approves.
+                    <ManagementApprovalGsPage
+                      key={second}
+                      gsId={second}
+                      onBack={() => {
+                        navigate('/management-approval');
+                      }}
+                      onOpenGs={(id: string) => {
+                        navigate(`/gs/${id}`);
+                      }}
+                    />
+                  ) : (
+                    <ManagementApprovalQueuePage
+                      onOpenGs={(id: string) => {
+                        navigate(`/management-approval/${id}`);
+                      }}
+                    />
+                  )
+                ) : (
+                  <EmptyState
+                    title="Access Restricted"
+                    hint="You do not have permission to view Management Approval."
                   />
                 )}
               </RequireAuth>

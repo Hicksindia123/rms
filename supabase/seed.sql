@@ -239,6 +239,7 @@ insert into _seed_role_matrix values
   ('MANAGEMENT',                 'department_routing', array['view']),
   ('MANAGEMENT',                 'store_routing',   array['view']),               -- DEC-67: sees store routing
   ('MANAGEMENT',                 'store_analysis',  array['view']),               -- DEC-69: sees the stores' analysis
+  ('MANAGEMENT',                 'management_approval', array['view','approve']),  -- DEC-70: changes + e-approval stamp
   ('MANAGEMENT',                 'final_actions',   array['view']),
   ('MANAGEMENT',                 'ac_entry',        array['view']),
   ('MANAGEMENT',                 'intermediate_stores', array['view']),
@@ -387,6 +388,7 @@ select r.id, s.id, m.ord
 
     -- DEC-60 / DEC-61 (P1): Management and the Intermediate Store users. Their journey steps
     -- (approval queue, acknowledgement, routing, receiving, analysis) come with P6-P10.
+    ('MANAGEMENT',                 'MANAGEMENT_APPROVAL', 5),   -- DEC-70
     ('MANAGEMENT',                 'EDIT_REQUESTS',   10),   -- DEC-65
     ('MANAGEMENT',                 'DASHBOARD',      100),
     ('MANAGEMENT',                 'GS_LIST',        110),
@@ -3781,7 +3783,9 @@ select v.event_type, v.name, true, v.roles, array['IN_APP'], v.priority, true
     -- DEC-69 (P9): store analysis and "Send for Management Approval".
     ('STORE_ANALYSIS_SUBMITTED', 'RM: a store submitted its analysis', array['REPLACEMENT_MANAGER'], 'NORMAL'),
     ('GS_ANALYSIS_COMPLETED', 'RM & Management: every store analysed the goods slip', array['REPLACEMENT_MANAGER', 'MANAGEMENT'], 'NORMAL'),
-    ('MANAGEMENT_APPROVAL_REQUESTED', 'Management & Super Admin: goods slip sent for approval', array['MANAGEMENT', 'SUPER_ADMIN'], 'HIGH')
+    ('MANAGEMENT_APPROVAL_REQUESTED', 'Management & Super Admin: goods slip sent for approval', array['MANAGEMENT', 'SUPER_ADMIN'], 'HIGH'),
+    -- DEC-70 (P10): the requesting store user and the stores of the GS are context recipients.
+    ('GS_MANAGEMENT_APPROVED', 'RM & Management: goods slip approved by Management', array['REPLACEMENT_MANAGER', 'MANAGEMENT'], 'NORMAL')
   ) as v(event_type, name, roles, priority)
  where not exists (select 1 from public.notification_rules r where r.event_type = v.event_type);
 
