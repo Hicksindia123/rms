@@ -92,7 +92,7 @@ Questions not answered on 2026-11-20 (Q1, Q2, Q4–Q7, Q9, Q13–Q16, Q18–Q20)
 | Q31 | (P6 report) The STORE_ROUTING task has no screen until P7 | P7 handles it | **User 2026-11-21: P7 handles it** |
 | Q32 | (P7 report) A store user saved a routing line by mistake (e.g. "Issue to Store" instead of Cleaning). May the store undo it? Today it cannot: issued pieces come back only through receiving (P8) | **Allow undoing a "no work" line** until that piece is analysed (P9); issued lines come back through P8 | **User 2026-11-21: accepted** (built in the P7 follow-up: migration 20261121000400; P9 must close the undo once a piece is analysed) |
 | Q33 | (P7 report) The old menus "Department Routing" (RM plan) and "Department Issue" (Store Manager) only list legacy goods slips held at the old Intermediate Store. Hide them? | **Hide them once no legacy goods slip is left** (the P7 release snippet prints the count) | **User 2026-11-21: yes** (seed hides them; snippet `release_20261121_p7_hide_legacy_routing_menus.sql` hides them only when no legacy GS is left) |
-| Q34 | (P8 report) The department outcome "Return to RM Routing Queue" now sends the pieces back to the Intermediate Store's own routing (the RM no longer routes). Rename it? | **"Return for Re-routing"** (code RE_ROUTE unchanged; built in the P8 seed + snippet, editable in Admin) | |
+| Q34 | (P8 report) The department outcome "Return to RM Routing Queue" now sends the pieces back to the Intermediate Store's own routing (the RM no longer routes). Rename it? | **"Return for Re-routing"** (code RE_ROUTE unchanged; built in the P8 seed + snippet, editable in Admin) | **User 2026-11-23: left to Claude → keep "Return for Re-routing"** (already built) |
 
 ---
 
