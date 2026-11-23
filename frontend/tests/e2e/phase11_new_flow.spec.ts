@@ -68,7 +68,10 @@ async function openPage(browser: Browser, email: string, path: string): Promise<
 
 test.describe('Phase 11: End-to-End Workflow & System Guards', () => {
   // DEC-64 (P4): categorisation is locked, not submitted to RM review; the path to the Intermediate Store is the P5 transfer slip. Rebuild this flow in P5.
-  test.fixme(true, 'DEC-64 (P4): flow retired; rebuild in P5 / P12');
+  test.fixme(
+    true,
+    'Earlier flow (RM review / RM final actions), retired by DEC-64 … DEC-71; superseded by offline_replacement_flow.spec.ts (P12)',
+  );
   test.describe.configure({ timeout: 240_000 });
 
   test.beforeEach(async ({ browserName }, testInfo) => {

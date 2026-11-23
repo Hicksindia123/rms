@@ -279,4 +279,7 @@ $env:CORS_ORIGINS="<V9>"
 4. Render → `rms-api`, `rms-worker` and `rms-web` → **Manual Deploy → Deploy latest commit**.
 5. Run step 2.7 and the smoke test in step 6.
 
+Release of the 12-step offline flow (P1 – P12: 14 migrations + 13 snippets, in order, plus the new
+users): [docs/RELEASE_OFFLINE_FLOW_2026-11.md](docs/RELEASE_OFFLINE_FLOW_2026-11.md).
+
 Full background: [docs/DATABASE_MIGRATION_GUIDE.md](docs/DATABASE_MIGRATION_GUIDE.md) · [docs/PRODUCTION_AUDIT.md](docs/PRODUCTION_AUDIT.md)

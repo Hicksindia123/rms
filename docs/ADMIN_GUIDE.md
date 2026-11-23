@@ -1,6 +1,6 @@
 # RMS Administrator & Governance Guide
 
-**Document Version:** 1.0.0  
+**Document Version:** 1.1.0 (12-step offline return flow, 2026-11-23)  
 **Target Audience:** Super Administrators, System Architects, IT Operations, and Compliance Officers  
 **Security Level:** Internal & Operational  
 
@@ -29,22 +29,24 @@ Administrators have granular authority over:
 ## 2. Managing Users, Roles & Permissions
 
 ### 2.1 Role Catalogue (§3.3)
-RMS defines 13 operational and management roles:
+RMS defines 17 roles (the 12-step offline flow added `MANAGEMENT` and one role per Intermediate Store, DEC-60 / DEC-61; role names are editable, codes are not):
 
 | Role Code | Description / Department | Typical Personnel | Key Responsibilities |
 |---|---|---|---|
 | `SUPER_ADMIN` | Global System Administrator | IT Admin | Full administrative access, user creation, config publishing. |
-| `GATE_INWARD` | Gate Security & Receiving | Anuj | Physical consignment intake, delivery modes, package tags. |
-| `INWARD_VERIFIER` | Unboxing & Inspection Verifier | Aman | Video/photo unboxing, itemisation, condition grading, daily container audit. |
-| `REPLACEMENT_MANAGER` | Replacement Dept Head | Pratham Pratap Singh | CSR approval/rejection, item actions (Send New/Repaired/CN/BP), CN decisions. |
-| `INTERMEDIATE_STORE_MANAGER` | Intermediate Store In-charge | Sahil | Physical custody intake, discrepancy reporting, packaging replacement, Main Store issues. |
+| `GATE_INWARD` | Gate User (Offline) | Anuj | Step 1: gate entry, cartons, documents, GS tag. |
+| `INWARD_VERIFIER` | Replacement Executive | Aman | Steps 2a–2c: carton videos, items, Replacement / Sales Return, categorisation + lock; daily container audit. |
+| `REPLACEMENT_MANAGER` | Replacement Manager | Pratham Pratap Singh | Step 2d: transfer slips per Intermediate Store (multi-GS) or an Edit Request to Management. Earlier-flow GSs: RM review, final actions. |
+| `INTERMEDIATE_STORE_MANAGER` | Intermediate Store Manager (earlier flow) | Sahil | Custody of the old `INTERMEDIATE_STORE` location and DEPT_* locations, Main Store issues. Not used by the 12-step flow. |
+| `ISTORE_OP` / `ISTORE_DT` / `ISTORE_RI` | Intermediate Store OP / DT / RI | Store users | Steps 3–8 for their own store only: acknowledge transfer slips, department routing, receiving back, analysis, send for Management approval. |
 | `TECHNICIAN_COORDINATOR` | Servicing Batch Coordinator | Aman, Sahil | Allots batches to technician, logs servicing results, tracks CR2032 battery stock. |
 | `TECHNICIAN` | Servicing & Repair Technician | Raj Kumar Ji | Performs cleaning, component fixes, and battery installations. |
 | `SPARE_PARTS_TECHNICIAN` | Parts Recovery Technician | Parts Recovery Tech | Dismantles non-good units, logs TIP/BODY/WIRE/PCB, records PCB model & supplier. |
 | `SPARE_PARTS_MANAGER` | Spare Parts Custodian | Spare Parts Manager | Exclusive custody of non-functional stock, scrap register, hazardous disposal manifests. |
-| `ACCOUNTS` | Commercial & Financial Team | Deepak Ji | Inspects unboxing documents, checks GST portal, issues GST/General CNs or JVs. |
+| `ACCOUNTS` | Accounts Team | Deepak Ji | Gate documents check; Steps 11–12: one Challan / Credit Note per goods slip, completion → Dispatch Slip; party email. |
 | `DISPATCH` | Replacement Dispatch Team | Logistics Dispatch | Issues replacement dispatch notes, records tracking details for Send New/Repaired. |
 | `MAIN_STORE` | Central Commercial Warehouse | Main Store Manager | Receives certified functional stock from Intermediate Store for sales replenishment. |
+| `MANAGEMENT` | Management (approver) | mgmt user | Edits a locked GS until routing (Edit Requests), changes any analysis decision incl. Issue CN, approves (e-approval stamp, DEC-70). |
 | `MANAGEMENT_VIEWER` | Executive & MIS Stakeholders | Management / Auditors | Read-only access to all reports (R-01…R-18), dashboards, and audit logs. |
 
 ### 2.2 User Provisioning & Immediate Deactivation
@@ -88,6 +90,38 @@ Navigate to **Admin Panel** → **Masters** to manage enterprise reference entit
   - `HAZARD_QUARANTINE`: Segregated storage for mercury-contaminated units.
   - `SCRAP_DISPOSED`: Terminal output location for manifested scrap.
   - `MAIN_STORE`: Central company warehouse.
+
+### 3.4 Intermediate Stores & category mapping (DEC-61)
+**Administration → Intermediate Stores.** Each store has an immutable code, a name, its own role and
+its own stock location (class FUNCTIONAL). Seeded: OP, DT, RI (`ISTORE_OP` / `ISTORE_DT` /
+`ISTORE_RI`, locations `ISTORE_OP` / `ISTORE_DT` / `ISTORE_RI`); RI is the **default** store.
+- **Rename** a store or **add** a new one (code, name; the role and location are created with it).
+  Give users the store's role in Administration → Users. Stores are never deleted.
+- **Mapping:** pick the categories and sub-categories a store handles. A sub-category mapping
+  overrides its category's; anything unmapped goes to the default store. Moving a mapped category to
+  another store needs "reassign". Default (Q4): OP = ENCLOSED_OVAL + PRISMATIC, DT = DMT,
+  RI = GENERAL + unmapped.
+- Transfer slips are split by this mapping when the RM generates them; a slip already generated keeps
+  its store.
+- ⚠️ A product can only pass the categorisation lock when its category (or sub-category / product)
+  has **condition fields** in Item Field Profiles (§10a, guard G-19). With the current masters GENERAL
+  has none, so nothing reaches RI until condition fields are assigned to GENERAL or another category is
+  mapped to RI (open question Q43).
+
+### 3.5 Settings used by the 12-step flow
+| Setting | Default | Effect |
+|---|---|---|
+| `branding_print_logo` | `hicks-logo.png` | Logo drawn on the Transfer Slip, Replacement Slip and Dispatch Slip PDFs (file in `backend/app/assets/branding/`). |
+| `management_approval_stamp_title` | "Digitally approved by Management" | Title of the e-approval stamp (screens + PDFs). |
+| Print templates `TRANSFER_SLIP`, `AC_ACTIONS_SLIP` ("Replacement Slip"), Dispatch Slip | published | Edit names / layout in the Template Designer (§8). |
+| GS_STATUS option labels | e.g. "At Accounts", "On Hold – Not Allowed" | Status labels everywhere; codes never change. |
+
+### 3.6 Retired menus (hidden, not deleted)
+The 12-step flow hid these journey steps (Administration → Role Journeys → Steps and tools): RM Review,
+Store Acceptance, Department Routing (RM plan), Department Issue (Store Manager), Department Receiving
+(RE), Final Actions (RM), Approvals (RM: CSR approval + line corrections) and Inspection & Grading
+(DEC-64 … DEC-68, DEC-72). The rows stay; switch one back on only if a goods slip from the earlier flow
+still needs it (the production snippets do this check themselves).
 
 ---
 

@@ -233,6 +233,10 @@ test.describe('Phase 2 gate scenarios (P2-08)', () => {
 
   // --- E2E-02 -----------------------------------------------------------------------------------
   test('E2E-02 CSR → RM approved → custody transfer initiated', async ({ browser }) => {
+    test.fixme(
+      true,
+      'Complete Sales Return now parks in SALES_RETURN_HOLD (DEC-64); the RM CSR approval is retired (DEC-72). Covered by offline_replacement_flow.spec.ts (P12)',
+    );
     test.setTimeout(150_000);
     const gs = await createGs('E2E02');
     await unboxed(gs);

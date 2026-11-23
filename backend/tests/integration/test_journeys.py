@@ -73,7 +73,7 @@ async def test_inward_verifier_journey_order_steps_then_tools(
     assert _codes(body) == [
         "CARTON_OPENING",
         "COUNTING",  # DEC-53: Counting & Categorisation, one entry
-        "INSPECTION",
+        # DEC-72 (P12): INSPECTION hidden (unreachable since the categorisation lock, DEC-64).
         # DEC-68 (P8): DEPT_RECEIVING hidden; the Intermediate Stores receive their goods back.
         "CONTAINER_AUDIT",
         "GS_LIST",
@@ -91,11 +91,89 @@ async def test_menu_follows_db_config_not_code(
             """update public.role_journey_steps rjs set sort_order = 1
                  from public.roles r, public.journey_steps s
                 where r.id = rjs.role_id and s.id = rjs.journey_step_id
-                  and r.code = 'INWARD_VERIFIER' and s.code = 'INSPECTION'"""
+                  and r.code = 'INWARD_VERIFIER' and s.code = 'COUNTING'"""
         )
     )
     body = await _journey(client, make_token(users.create(roles=["INWARD_VERIFIER"])))
-    assert _codes(body)[:3] == ["INSPECTION", "CARTON_OPENING", "COUNTING"]
+    assert _codes(body)[:2] == ["COUNTING", "CARTON_OPENING"]
+
+
+# DEC-72 (P12): the final role menus of the 12-step offline flow (phase prompts §1). Retired steps
+# (RM_REVIEW, STORE_ACCEPT, DEPT_ROUTING, DEPT_ISSUE, DEPT_RECEIVING, FINAL_ACTIONS, APPROVALS,
+# INSPECTION) are hidden, not deleted.
+_FLOW_MENUS: dict[str, list[str]] = {
+    "REPLACEMENT_MANAGER": [
+        "TRANSFER_SLIPS",
+        "GS_LIST",
+        "PENDENCIES",
+        "DASHBOARD",
+        "REPORTS",
+        "AUDIT",
+    ],
+    "ISTORE_OP": [
+        "ACK_TRANSFER_SLIPS",
+        "STORE_DEPT_ROUTING",
+        "STORE_DEPT_RECEIVING",
+        "STORE_ANALYSIS",
+        "GS_LIST",
+    ],
+    "MANAGEMENT": [
+        "MANAGEMENT_APPROVAL",
+        "EDIT_REQUESTS",
+        "DASHBOARD",
+        "GS_LIST",
+        "PENDENCIES",
+        "REPORTS",
+        "AUDIT",
+    ],
+    "ACCOUNTS": [
+        "ACCOUNTS_DOCS",
+        "ACCOUNTS_ENTRY",
+        "PARTY_EMAIL",
+        "GS_LIST",
+        "CREDIT_NOTES",
+        "REPORTS",
+    ],
+    "DISPATCH": ["DISPATCH_SLIP", "GS_LIST", "DISPATCH_QUEUE"],
+}
+_RETIRED = {
+    "RM_REVIEW",
+    "STORE_ACCEPT",
+    "DEPT_ROUTING",
+    "DEPT_ISSUE",
+    "DEPT_RECEIVING",
+    "FINAL_ACTIONS",
+    "APPROVALS",
+    "INSPECTION",
+}
+
+
+@pytest.mark.parametrize("role", sorted(_FLOW_MENUS))
+async def test_offline_flow_role_menus(
+    client: AsyncClient, users: UserFactory, make_token: JwtFactory, role: str
+) -> None:
+    body = await _journey(client, make_token(users.create(roles=[role])))
+    assert _codes(body) == _FLOW_MENUS[role]
+
+
+@pytest.mark.parametrize("role", ["ISTORE_DT", "ISTORE_RI"])
+async def test_every_store_role_has_the_store_menu(
+    client: AsyncClient, users: UserFactory, make_token: JwtFactory, role: str
+) -> None:
+    body = await _journey(client, make_token(users.create(roles=[role])))
+    assert _codes(body) == _FLOW_MENUS["ISTORE_OP"]
+
+
+def test_retired_steps_are_hidden_not_deleted(db_conn: Connection) -> None:
+    rows = fetch_all(
+        as_admin(db_conn),
+        "select code, is_active, (select count(*) from public.role_journey_steps r"
+        " where r.journey_step_id = s.id) as roles from public.journey_steps s"
+        " where code = any(:codes)",
+        codes=sorted(_RETIRED),
+    )
+    assert {r["code"] for r in rows} == _RETIRED  # catalogue rows kept
+    assert [r["code"] for r in rows if r["is_active"]] == []
 
 
 async def test_multi_role_user_gets_the_union_without_duplicates(

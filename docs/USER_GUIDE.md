@@ -1,7 +1,7 @@
 # RMS End-User Guide (Role-by-Role Operations)
 
 **System:** Replacement Management System (RMS)  
-**Version:** 1.0.0  
+**Version:** 1.1.0 (12-step offline return flow, 2026-11-23)  
 **Target Audience:** Operational teams, Store Managers, Technicians, Coordinators, Accounts, and Administrators  
 **Device Support:** Desktop Web Browsers (Chrome, Firefox, Edge, Safari) & Mobile Phones (Android & iOS)
 
@@ -10,196 +10,208 @@
 ## Table of Contents
 1. [General System Navigation & Shell](#1-general-system-navigation--shell)
    - [1.3 Your journey: one page per role](#13-your-journey-one-page-per-role)
-2. [Gate Inward Guide (Anuj)](#2-gate-inward-guide-anuj)
-3. [Unboxing & Inward Verifier Guide (Aman)](#3-unboxing--inward-verifier-guide-aman)
-4. [Replacement Manager Guide (Pratham Pratap Singh)](#4-replacement-manager-guide-pratham-pratap-singh)
-5. [Intermediate Store In-Charge Guide (Sahil)](#5-intermediate-store-in-charge-guide-sahil)
+2. [Gate User — Step 1 (Anuj)](#2-gate-user--step-1-anuj)
+3. [Replacement Executive — Steps 2a–2c (Aman)](#3-replacement-executive--steps-2a2c-aman)
+4. [Replacement Manager — Step 2d (Pratham Pratap Singh)](#4-replacement-manager--step-2d-pratham-pratap-singh)
+5. [Intermediate Store users OP / DT / RI — Steps 3–8](#5-intermediate-store-users-op--dt--ri--steps-38)
+   - [5a. Management — corrections, Steps 9–10](#5a-management--corrections-steps-910)
 6. [Technician Coordinator Guide (Aman / Sahil)](#6-technician-coordinator-guide-aman--sahil)
 7. [Spare Parts & Parts Recovery Guide (Technician & Manager)](#7-spare-parts--parts-recovery-guide-technician--manager)
-8. [Accounts Team Guide (Deepak Ji)](#8-accounts-team-guide-deepak-ji)
+8. [Accounts — Steps 11–12 (Deepak Ji)](#8-accounts--steps-1112-deepak-ji)
 9. [Dispatch Team Guide](#9-dispatch-team-guide)
 10. [Super Administrator Guide](#10-super-administrator-guide)
+11. [Appendix: goods slips from the earlier flow](#11-appendix-goods-slips-from-the-earlier-flow)
 
 ---
 
 ## 1. General System Navigation & Shell
 
 ### 1.1 Responsive Layout Overview
-RMS adapts seamlessly to your device:
-- **Desktop (>1024px):** Fixed left-hand navigation sidebar, top header with Global Search (`/search?q=...`), active role switcher, and quick notification bell.
-- **Mobile (<640px):** Fixed bottom navigation bar containing 5 quick-access tabs:
-  - 📋 **My Work:** Your personal task inbox, prioritized by SLA due dates.
-  - 📦 **Goods Slips:** Search and browse all consignments.
-  - ➕ **+ New:** Create a new Goods Slip (Gate role).
-  - 📊 **Dashboard:** Real-time role KPI cards and metrics.
-  - ⚙️ **Profile / Alerts:** Switch active role, view unread alerts, or sign out.
+RMS adapts to your device:
+- **Desktop (≥ 1024 px):** left-hand menu, top header with Global Search, notification bell and sign-out.
+- **Phone (360 px and up):** ☰ opens the menu; the bottom bar has **My Work**, **Goods Slips**,
+  **Dashboard** and **Alerts**. Every screen works on a 360 px phone without sideways scrolling, and
+  every button is at least 44 px tall.
 
 ### 1.2 Accessing Your Tasks ("My Work")
-1. Upon logging in, you land on **My Work** (`/#/mywork`). At the top, **My journey** shows one card
-   per step you work on, in the order you work: how many goods slips are waiting at the step and the
-   **next** one to act on (the one waiting longest). **Open next** takes you straight to that goods
-   slip's screen; **View all** lists every goods slip waiting at the step, oldest first.
-2. The left menu (☰ on a phone) shows **only your own steps and tools**, in the same order, with the
-   number waiting next to each step. Modules that are on hold (dismantling, scrap register, batteries)
-   are not shown. **Administration** is collapsed; open it only when you need it.
-3. Below the journey, **Assigned tasks** lists workflow tasks for your roles. Tasks are color-coded:
-   - 🟢 **Normal:** Within standard turnaround SLA.
-   - 🟡 **Due Soon:** Under 4 hours remaining.
-   - 🔴 **Overdue:** SLA exceeded; supervisor notified.
-4. Tap or click on any task card to navigate directly into the corresponding step screen.
+1. After signing in you land on **My Work**. At the top, **My journey** shows one card per step you
+   work on, in the order you work: how many goods slips (GS) are waiting at the step and the **next**
+   one (the one waiting longest). **Open next** takes you to that GS's screen; **View all** lists every
+   GS waiting at the step, oldest first.
+2. Store users see **only their own store's** work (OP, DT or RI): the counts and lists are per store.
+3. The left menu shows **only your own steps and tools**, with the number waiting next to each step.
+4. Alerts (the bell) tell you when work reaches you, e.g. a transfer slip for your store, a goods slip
+   sent for Management approval, or a goods slip at Accounts. Email alerts are not switched on yet.
 
 ### 1.3 Your journey: one page per role
-Each role's menu follows the goods slip (GS) from where it reaches you to where you hand it on.
-The administrator can change the order, labels and which role sees what (Administration → Role
-Journeys); the steps below are the defaults.
+Each role's menu follows the goods slip from where it reaches you to where you hand it on. The
+administrator can rename steps or change the order (Administration → Role Journeys); the defaults are:
 
-| Role (person) | Journey: start → end | Tools |
-|---|---|---|
-| **Gate Inward** (Anuj) | **Gate Entry**: choose Offline / E-Commerce return, gate entry date and number, State → Station → Distributor, carton count and documents (invoice / debit note alerts Accounts) → print the GS tag. The GS then waits at Carton Opening. | Goods Slips |
-| **Inward Verifier** (Aman) | **Carton Opening** (video per carton, more documents) → **Counting** (items and quantities) → **Categorisation** (split each item's quantity into its buckets, plus packaging / container / user-manual counts) → the GS goes to RM Review. Later: **Department Receiving**, receiving goods back from departments per outcome. | Container Register, Goods Slips, Reports |
-| **Replacement Manager** (Pratham) | **RM Review** (approve the whole GS; the Transfer Slip is created) → **Department Routing** (GS held in the store: send quantities to departments) → **Final Actions** (back from departments: split quantities across Send New / Send Repaired / Issue CN / Not Allowed and print the A/c Actions slip). | Approvals, Goods Slips, Pendency Register, Dashboard, Reports, Audit Explorer |
-| **Intermediate Store** (Sahil) | **Store Acceptance**: accept the Transfer Slip; the GS shows "Held at Intermediate Store". | Custody & Store, Inventory, Store Issues, Goods Slips |
-| **Accounts** (Deepak Ji) | **Gate Documents Check** (GST input check of invoices / debit notes) → **Accounts Entry** (CN No./Date/Value and Challan No./Date per action line; completing it creates the Dispatch Slip) → **Party Email** (send the party the CN / challan / dispatch details). | Goods Slips, Credit Notes (earlier flow), Reports |
-| **Dispatch** | **Dispatch**: issue the goods on each ready Dispatch Slip (date, transporter, docket / vehicle). | Goods Slips, Dispatch Queue (earlier flow) |
-| **Technician Coordinator / Technician** | No journey step in the new flow; servicing works as before. | Servicing, Custody & Store, Goods Slips |
-| **Spare Parts Manager / Technician, Main Store** | Dismantling and spare parts are **on hold**: their screens are hidden until released. | Inventory, Custody & Store, Reports |
-| **Management Viewer** | Read-only. | Dashboard, Goods Slips, Pendency Register, Reports, Audit Explorer |
-| **Super Admin** | Sees every step and tool, plus Administration. | All |
+| Step | Role (person) | Menu entry → what you do | Tools |
+|---|---|---|---|
+| 1 | **Gate User** (Anuj) | **Gate Entry**: party, cartons, how the goods came, optional documents → summary → Submit → print the GS tag | Goods Slips |
+| 2a–2c | **Replacement Executive** (Aman) | **Carton Opening** (one video per carton, optional carton document) → **Counting & Categorisation** (items and quantities → Replacement / Complete Sales Return → split each item by condition → **Lock**) | Container Register, Goods Slips, Reports |
+| 2d | **Replacement Manager** (Pratham) | **Transfer Slips**: one slip per Intermediate Store for one or many goods slips, or an **Edit Request** to Management | Goods Slips, Pendency Register, Dashboard, Reports, Audit Explorer |
+| 3–8 | **Intermediate Store OP / DT / RI** | **Acknowledge Transfer Slips** → **Department Routing** → **Receive from Departments** → **Analysis** (Dispatch New / Dispatch Repaired / Not Allowed; optionally send for Management approval) | Goods Slips |
+| 9–10 | **Management** | **Management Approval** (change any decision, incl. Issue CN; approve = e-approval stamp) · **Edit Requests** (correct a locked goods slip) | Dashboard, Goods Slips, Pendency Register, Reports, Audit Explorer |
+| 11–12 | **Accounts** (Deepak Ji) | **Gate Documents Check** · **Accounts Entry** (one Challan and, if needed, one Credit Note per goods slip → Dispatch Slip) · **Party Email** | Goods Slips, Credit Notes, Reports |
+| — | **Dispatch** | **Dispatch**: ship each ready Dispatch Slip | Goods Slips, Dispatch Queue |
+| — | **Management Viewer** | Read-only | Dashboard, Goods Slips, Pendency Register, Reports, Audit Explorer |
+| — | **Super Admin** | Every step and tool, plus Administration | All |
 
----
-
-## 2. Gate Inward Guide (Anuj)
-
-**Persona:** Anuj  
-**System Role:** `GATE_INWARD`  
-**Primary Devices:** Android smartphone or rugged tablet (📱)  
-
-### 2.1 Receiving a Delivery & Creating a Goods Slip (GS)
-1. Tap the **+ New** button on the bottom navigation bar or top header.
-2. Select the **Delivery Mode**:
-   - **COURIER:** Enter Courier Company Name and Tracking/Docket Number.
-   - **DIRECT_TRUCK:** Enter Truck Vehicle Registration Number and Driver Contact Phone.
-   - **SELF_DELIVERY:** Enter Bearer/Person Name and Contact Phone.
-3. **Party Selection:**
-   - Type to search party by Name or GSTIN.
-   - State and Station auto-populate based on party master data. If receiving from a different station, check the "Override" checkbox and enter the actual station and reason.
-   - If the party is not in the system, enter the party name; it will be registered as a **Provisional Party** for Accounts review.
-4. **Package Count & Condition:**
-   - Enter total number of physical boxes/packages received.
-   - Inspect outer box condition. If torn, crushed, or water-damaged, record remarks.
-5. **Document Verification:**
-   - If no delivery document (invoice, challan, debit note) is physically attached to the outer package, check the **"No Document Attached"** toggle.
-   - *Note:* This raises an alert for the Unboxing Verifier and Replacement Manager.
-6. Tap **"Create Goods Slip"**.
-7. The system generates a formal Goods Slip number (e.g., `GS/2026-27/00042`).
-
-### 2.2 Barcode & Tag Printing
-1. Immediately upon creation, tap **"Print Barcode Tags"**.
-2. One adhesive barcode label is printed per physical box (e.g., Box 1 of 3, Box 2 of 3).
-3. Affix each printed tag securely to the corresponding outer carton before placing into inward staging.
+A goods slip moves through these statuses (labels are configurable): Gate Created → Carton Opening →
+Counting → Categorisation → **Pending Transfer Slip** → **Transfer Slip Generated** → **Acknowledged
+by Store** → **In Store Processing** → **Analysis Completed** → **At Accounts** → **Pending Dispatch**
+→ In Process → Closed. Two parking statuses: **Sales Return – On Hold** (Complete Sales Return; that
+journey is built later) and **On Hold – Not Allowed** (every piece Not Allowed: no Accounts entry).
 
 ---
 
-## 3. Unboxing & Inward Verifier Guide (Aman)
+## 2. Gate User — Step 1 (Anuj)
 
-**Persona:** Aman  
-**System Role:** `INWARD_VERIFIER`  
-**Primary Devices:** Mobile phone with camera (📱) / Workbench terminal  
+**Role:** `GATE_INWARD` · **Device:** phone or tablet
 
-### 3.1 Unboxing Evidence & Document Classification (G-02)
-1. Open the assigned GS from your **My Work** inbox.
-2. Tap **"Start Unboxing"**.
-3. **Video Evidence:**
-   - Tap "Record Unboxing Video" or upload a pre-recorded clip showing the unopened carton, shipping label, cut seal, and contents unpacked.
-4. **Document Capture & Classification:**
-   - Photograph all enclosed documents (Invoice, Debit Note, Delivery Challan, Return Slip).
-   - For each photo, tap the document type tag (`INVOICE`, `DEBIT_NOTE`, `CHALLAN`, `RETURN_SLIP`).
-   - If "No Document Attached" was flagged at the gate, photograph the courier shipping label and outer carton clearly, enter a justification note, and tap **"Request Missing Document Exception"**.
-5. Once video and classified photos are attached, tap **"Complete Unboxing"**.
-
-### 3.2 Product Itemisation & Shortage Logging
-1. Enter each returned product:
-   - Search Product Code or Name.
-   - **Documented Quantity:** Quantity claimed on party document.
-   - **Received Quantity:** Actual physical count unpacked.
-2. If Received < Documented, the system automatically marks the difference as **Shortage** (e.g., "Short 2 pcs").
-3. Select Return Nature:
-   - **Replacement Only (RO):** Standard return for servicing/replacement.
-   - **Complete Sales Return (CSR):** Whole shipment commercial return. Requires RM approval.
-4. Tap **"Submit Itemisation"**.
-
-### 3.3 Condition Grading (BR-11, BR-12, G-06)
-1. For each itemized product line, tap **"Grade Conditions"**:
-   - **DMT Category (8 conditions):** OK Packed, Dirty, Scratched, Display Issue, Broken Body (Not Allowed), Other Brands (Not Allowed), Short Quantity.
-   - **Prismatic Category (3 conditions):** OK Packed, Bulb Broken (No Mercury), Broken With Mercury (Hazardous).
-   - **Enclosed Oval Category (4 conditions):**
-     > ⚠️ **Important Guard (G-06):** Grading options remain disabled until you tick the checkbox: *"Full outer enclosure opened and bulb inspected"*.
-2. **Hazard Handling:** Any piece marked "Broken With Mercury" turns the UI red, shows a hazardous materials warning, and routes immediately to `HAZARD_QUARANTINE`.
-3. **Extraction Reconciliation (G-07):**
-   - Record quantities extracted from packaging vs container bins.
-   - *Total extracted must exactly equal received quantity.*
-4. Tap **"Finalise Grading"**.
-
-### 3.4 Daily DMT Container Audit (BR-18)
-1. Every morning before 09:00, open **Container Register**.
-2. Count pieces in each DMT bin (`DMT-BIN-01` … `04`).
-3. Enter counts, tick the confirmation checkbox, and tap **"Submit Daily Audit"**.
+### 2.1 Creating a Goods Slip
+1. Menu → **Gate Entry** (or **+ New**).
+2. **Return Type**: Offline or E-Commerce. For Offline enter the **Gate Entry Date** and **Gate Entry
+   No.** (the number is unique in the financial year).
+3. **State → Station → Party**: pick the state, then the station, then search the party.
+4. **Cartons**: how many cartons arrived.
+5. **Received Through**: Courier (courier name + docket no.), Transport (transport name) or By Hand.
+6. **Documents From Party** (optional): one row per document (Invoice, GST Debit Note, Hand Written
+   Slip) with its photo, or choose **No Documents From Party**. **Documents From Transport** (optional):
+   e.g. the courier slip with its photo. Only photos are needed, no document numbers or dates.
+7. Tap **Submit & Create GS**. A **summary** opens: check party, station, cartons, transport and
+   documents. **Back to edit** returns to the form without creating anything; **Submit** creates the GS.
+8. The GS number appears (e.g. `GS/2026-27/00042`). Tap **Print GS Tag** and stick one tag on each
+   carton. The photos upload right after; a failed upload shows **Retry**.
 
 ---
 
-## 4. Replacement Manager Guide (Pratham Pratap Singh)
+## 3. Replacement Executive — Steps 2a–2c (Aman)
 
-**Persona:** Pratham Pratap Singh  
-**System Role:** `REPLACEMENT_MANAGER`  
-**Primary Devices:** Desktop PC / Tablet  
+**Role:** `INWARD_VERIFIER` (shown as "Replacement Executive") · **Device:** phone with camera
 
-### 4.1 Approving CSR Requests (G-03)
-1. In your **Approvals** inbox, review consignments flagged as **Complete Sales Return (CSR)**.
-2. Inspect unboxing video and uploaded party debit note.
-3. Click **"Approve CSR"** (moves directly to Intermediate Store with packaging) or **"Reject CSR"** (reverts consignment to Replacement Only for technical grading).
+### 3.1 Carton Opening (Step 2a)
+1. Menu → **Carton Opening** → open the GS → **Start**.
+2. Record or upload **one video per carton**. The checklist shows "Carton videos 1 of 2 · carton 2
+   missing" until every carton has its video.
+3. Optional: if a document is found inside a carton, choose its type (Invoice, GST Debit Note, Hand
+   Written Slip), take its photo and tap **Save document**. If the gate recorded "No Documents From
+   Party", this document clears that tag.
+4. **Next** is enabled once every carton has a video. It opens the item screen.
 
-### 4.2 Item-Wise Segregation & Pending (BP) Management (BR-19, G-08)
-1. Open the graded Goods Slip.
-2. For each condition group, assign an operational resolution:
-   - **Send New:** Dispatch brand new replacement unit.
-   - **Send Repaired:** Serviced/repaired unit to be issued.
-   - **Issue CN:** Issue commercial credit note.
-   - **Pending (BP):** Put on hold awaiting customer authorization or bill-pass approval. Enter mandatory reason.
-3. Tap **"Generate Replacement Slip"**.
-4. Hand over the printable slip to the Intermediate Store.
-5. To release a pending piece: Open **Pendency Register**, select line, click **"Resolve Pendency"**, choose final action (e.g., Send New), and save. This generates Revision 2.
+### 3.2 Items (Step 2b)
+1. For each product: search by name or code, enter **As per document** (optional) and **Physically
+   received**, tap **Add line**.
+2. Tap **Next**. A popup asks: **Replacement** or **Complete Sales Return**.
+   - **Complete Sales Return**: the GS parks as *Sales Return – On Hold* (no further steps for now).
+   - **Replacement**: the categorisation screen opens.
 
-### 4.3 Credit Note Decision (DEC-13)
-1. Following technical servicing and dismantling, open the **Resolution Board**.
-2. Compare the original planned RM action against actual technical outcome.
-3. Select **"ALLOW_CN"** or **"DENY_CN_SEND_REPLACEMENT"**.
-4. If denying CN after initially planning to issue one, enter a **Deviation Reason**.
-5. Submit decision to route approved lines to Accounts.
+### 3.3 Categorisation and Lock (Step 2c)
+1. For each line tap **Edit line** and split the physical quantity across the conditions offered for
+   that product's category (e.g. 3 OK + 1 Broken). The line shows "Split 4 / Physical 4" when it adds up.
+2. **Lock** is enabled only when every line adds up. Tap **Lock** and confirm. The goods are booked into
+   Inward Staging and the GS waits for the Replacement Manager's transfer slip.
+3. After the lock only Management (or the Super Admin) can change the GS, and only until department
+   routing has started.
+
+### 3.4 Daily DMT Container Audit
+Menu → **Container Register**: count each DMT bin, tick the confirmation and submit.
 
 ---
 
-## 5. Intermediate Store In-Charge Guide (Sahil)
+## 4. Replacement Manager — Step 2d (Pratham Pratap Singh)
 
-**Persona:** Sahil  
-**System Role:** `INTERMEDIATE_STORE_MANAGER`  
-**Primary Devices:** Desktop Terminal / Mobile Phone (📱)  
+**Role:** `REPLACEMENT_MANAGER` · **Device:** desktop or tablet
 
-### 5.1 Accepting Custody & Resolving Discrepancies (G-09)
-1. When Inward Verifier initiates a handover, an **Accept Custody** task appears in your inbox.
-2. Count the delivered physical pieces against the digital Transfer Note.
-3. If counts match: Tap **"Accept Handover"**. Stock immediately reflects in Intermediate Store ledger.
-4. If counts differ (e.g., 5 delivered vs 6 digital):
-   - Tap **"Report Discrepancy"**.
-   - Enter physical count received (5). Handover freezes.
-   - Inward Verifier (Aman) joins you to verify physical count.
-   - Both parties review the resolution dialog: select *"Accept Counted (5), Return Difference (1)"*.
-   - Both sign digitally. 5 units enter your store; 1 unit returns to Aman.
+### 4.1 Generating transfer slips
+1. Menu → **Transfer Slips** → tab **Pending Transfer Slip** lists every locked GS. **View items**
+   shows a GS's items (read-only).
+2. Tick one GS, several, or all. Tap **Generate Transfer Slip**. The confirmation shows one slip per
+   Intermediate Store (e.g. "DT · 2 GS · 7 pc", "OP · 1 GS · 2 pc"); confirm.
+3. Each store gets one slip that combines its items from all the selected goods slips (`TRF/DT/…`,
+   `TRF/OP/…`, `TRF/RI/…`). Which store gets which item comes from the category → store mapping
+   (Administration → Intermediate Stores).
+4. Tab **Generated slips**: open a slip to see its lines per GS and condition, subtotals and the grand
+   total; **Download PDF** prints it with the HICKS logo.
 
-### 5.2 Functional Stock Issuance to Main Store (BR-31)
-1. In your inventory view, filter by **Functional Good** or **Functional Repaired**.
-2. Select products and quantities ready for commercial distribution.
-3. Click **"Issue to Main Store"**.
-4. Print the **Store Issue Voucher** and physically transfer items to Main Store shelves.
+### 4.2 Edit Request instead of a slip
+If a locked GS is wrong (e.g. a wrong product or count), tap **Send Edit Request** on its card, write
+what should be corrected and tap **Send to Management**. The GS shows "Edit requested" and cannot be
+selected until Management resolves the request. If Management changes a GS that already has a slip,
+that slip is voided and the GS comes back to your pending list: generate it again.
+
+---
+
+## 5. Intermediate Store users OP / DT / RI — Steps 3–8
+
+**Roles:** `ISTORE_OP`, `ISTORE_DT`, `ISTORE_RI` (one per store; the Admin can add stores)
+**Device:** phone or desktop. You only see your own store's slips and items; **Show all items of this
+GS** shows the other stores' items read-only.
+
+### 5.1 Acknowledge the transfer slip (Step 3)
+1. Menu → **Acknowledge Transfer Slips** → open the slip. Check the goods against the lines.
+2. Tap **Acknowledge receipt**, add a remark if you like, **Confirm receipt**. The goods are now in
+   your store's location. A slip is always acknowledged in full.
+3. Something wrong (e.g. a damaged carton)? Tap **Report discrepancy** and describe it; the RM and
+   Management are alerted. You still acknowledge the slip afterwards.
+
+### 5.2 Department Routing (Steps 4–5)
+1. Menu → **Department Routing** → open the GS ("DT: Routing pending (3 pcs)"). You can start as soon
+   as **your** slip is acknowledged; you do not wait for the other stores.
+2. For each item and condition, enter how many pieces go to which department. "Issue to Store" (stays
+   in store) means no department work.
+3. **Save routing** → check the summary → **Save & issue**. Saving issues the pieces at once: a
+   Department Issue Note (DIN) is created; tap it to print. The pieces wait at the department.
+4. Saved an "Issue to Store" line by mistake? Tap **Undo**, give a reason, and route those pieces again
+   (possible until the piece is analysed).
+
+### 5.3 Receive from Departments (Step 6)
+1. Menu → **Receive from Departments** shows each GS with goods still at a department (per party).
+2. Tap **Receive** on a DIN. Enter the quantity back, the outcome (e.g. Repaired, Cleaned / Calibrated,
+   Not Repaired, **Return for Re-routing**) and the condition after the work. Partial receipts are
+   fine. **Confirm receipt**: the stock goes back to your store.
+3. "Return for Re-routing" sends the pieces back to your Department Routing list.
+4. When everything of your store is back (or stayed in store), the GS is **ready for analysis**.
+
+### 5.4 Analysis (Steps 7–8)
+1. Menu → **Analysis** → open the GS ("DT: Ready for analysis").
+2. For each item and condition decide the pieces: **Dispatch New Piece**, **Dispatch Repaired Piece**
+   or **Not Allowed** (you may split, e.g. 1 new + 2 repaired). The one-tap buttons put every piece of
+   a condition on one decision.
+3. **Submit analysis**. A submission is final for your store (only Management can change it later).
+4. **Send for Management Approval** (optional, Step 9): after your own submission, with a reason. If
+   your store is the last one to submit, tick **Also send for Management approval** in the submit
+   dialog; otherwise the GS goes straight on to Accounts.
+5. When every store on the GS has submitted, the GS is *Analysis Completed* and moves on by itself: to
+   Accounts, or on hold if every piece is Not Allowed.
+
+---
+
+## 5a. Management — corrections, Steps 9–10
+
+**Role:** `MANAGEMENT` · **Device:** phone or desktop
+
+### 5a.1 Edit Requests (after the lock)
+1. Menu → **Edit Requests** → open the GS. The request is shown at the top.
+2. **Change line** (quantities, product or condition split; a reason is required), or add / remove a
+   line. Possible until department routing has started. A change voids that GS's transfer slips; the
+   RM generates them again.
+3. **Mark as edited** closes the request, or **Reject request** with a note to the RM.
+
+### 5a.2 Management Approval (Steps 9–10)
+1. Menu → **Management Approval** lists the goods slips stores sent to you (with their reason); you can
+   also search any analysed goods slip.
+2. Open a GS. You may change any decision to any other, including **Issue CN** (only Management sets
+   Issue CN), change quantities, and add or remove decision lines. Every change needs a reason;
+   **Save changes**.
+3. **Approve**. The goods slip gets the **"Digitally approved by Management"** stamp (your name, role,
+   time and a reference). It is a system e-approval, not a legal digital signature. **Verify** checks
+   that the approved content is unchanged. The stamp prints on the Replacement Slip and Dispatch Slip.
+4. A goods slip with Issue CN always carries this stamp. Approving sends the GS on to Accounts (or on
+   hold). Until Accounts completes it you may still change it: the Replacement Slip is withdrawn and
+   your next approval sends version 2 to Accounts.
 
 ---
 
@@ -257,46 +269,43 @@ Journeys); the steps below are the defaults.
 
 ---
 
-## 8. Accounts Team Guide (Deepak Ji)
+## 8. Accounts — Steps 11–12 (Deepak Ji)
 
-**Persona:** Deepak Ji  
-**System Role:** `ACCOUNTS`  
-**Primary Devices:** Desktop Browser (Wide display recommended)  
+**Role:** `ACCOUNTS` · **Device:** desktop (works on a phone too)
 
-### 8.1 Document Audit & GST Portal Verification (G-13, G-14)
-1. Open **Credit Notes Workspace** (`/#/credit-notes`).
-2. Inspect unboxing document photos and party tax invoice.
-3. Open government GST portal in companion window.
-4. For each credit note line:
-   - Toggle **GST Portal Reflected**:
-     - **Yes (Reflected):** System permits standard **GST Credit Note**.
-     - **No (Not Reflected):** System strictly blocks GST Credit Note and allows only **Journal Voucher (JV)**.
-5. **Rate Verification (G-14):**
-   - Enter proposed CN rate.
-   - If rate exceeds the historical purchase rate recorded on the invoice, the system raises a rate violation warning requiring Manager sign-off.
-6. Select CN Type:
-   - **GST Credit Note:** Standard tax reversal.
-   - **General Credit Note:** For repaired items (no tax reversal).
-   - **Journal Voucher (JV):** Pure financial adjustment without GST return impact.
-7. Click **"Issue Credit Note"**.
+### 8.1 Gate Documents Check
+Menu → **Gate Documents Check**: the party documents photographed at the gate and in the cartons, for
+the GST input check. Acknowledge each.
+
+### 8.2 Accounts Entry per goods slip
+1. A goods slip reaches you only when **every** Intermediate Store on it has submitted its analysis
+   and no Management approval is pending. You get an alert; the Replacement Slip is ready.
+2. Menu → **Accounts Entry** → tab **To enter**. Each card says what is needed (e.g. "Challan to
+   enter"). Tab **On hold** lists goods slips where every piece is Not Allowed: they never need an
+   Accounts entry.
+3. Open the GS. **Print Replacement Slip** prints the GS-wise slip (lines with store, condition,
+   decision and quantity, totals per decision, Management stamp if any).
+4. Enter, for the whole goods slip:
+   - **Challan No.** + **Challan Date**: shown only if goods ship (Dispatch New / Dispatch Repaired);
+   - **CN No.** + **CN Date** + **CN Value (₹)**: shown only if the GS has Issue CN.
+   Dates cannot be in the future, the CN number must be unique and the value must be above 0. **Save**.
+5. **Complete** → **Complete & generate Dispatch Slip**. The Dispatch Slip (with the Challan, Credit
+   Note and stamp) goes to Dispatch and the GS shows *Pending Dispatch*. If nothing ships (Issue CN
+   only), completing settles the pieces and the GS goes on to closure.
+6. **Party Email** (menu): send the party the Credit Note / Challan / dispatch details.
 
 ---
 
 ## 9. Dispatch Team Guide
 
-**Persona:** Dispatch Team  
-**System Role:** `DISPATCH`  
-**Primary Devices:** Logistics Workbench Terminal / Mobile  
+**Role:** `DISPATCH`
 
-### 9.1 Processing Replacement Shipments
-1. Open **Dispatch Queue** (`/#/dispatch`).
-2. View pending dispatches:
-   - **Send New:** Brand new stock drawn from Main Store.
-   - **Send Repaired:** Tested repaired stock drawn from Intermediate Store.
-3. Package the replacement goods.
-4. Enter carrier details: Transporter / Courier Name and Docket / Consignment Number.
-5. Click **"Confirm Dispatch"**.
-6. System links the dispatch record directly to the original Goods Slip.
+1. Menu → **Dispatch** lists the ready Dispatch Slips.
+2. Open a slip, pack the goods (Dispatch New: a fresh piece from the Main Store; Dispatch Repaired: the
+   repaired piece from the store), enter the dispatch date, transporter / courier and docket or vehicle
+   number, and confirm.
+3. Dispatching moves the stock: the old piece of a "Dispatch New" goes to the Non-Functional Store, Not
+   Allowed pieces to the Rejected Hold, repaired pieces out as dispatched.
 
 ---
 
@@ -328,3 +337,19 @@ Journeys); the steps below are the defaults.
 - **Modules on hold:** setting `features.on_hold` (Administration → System Settings) lists the
   modules whose menu entries are hidden (default: dismantling, spare_parts, battery,
   pcb_subinventory). Remove a code to show its screens again. Nothing is deleted.
+
+### 10.5 Intermediate Stores and category mapping
+- **Administration → Intermediate Stores**: rename a store, add a new one (each has its own role and
+  stock location) and map product categories / sub-categories to it. A sub-category mapping overrides
+  its category; anything unmapped goes to the default store. See `docs/ADMIN_GUIDE.md` §3.4.
+
+---
+
+## 11. Appendix: goods slips from the earlier flow
+
+Goods slips created before the 12-step flow (RM Review, RM department routing, Store Manager
+acceptance / issue, RE department receiving, RM Final Actions, CSR approval, Inspection & Grading)
+still open from **Goods Slips** → the GS page, which shows the buttons for their current step. Those
+menu entries are hidden for new work; the administrator can switch one back on in Administration →
+Role Journeys if an old goods slip needs it. Accounts enters their Credit Note / Challan per line as
+before.

@@ -195,6 +195,10 @@ test.describe('Itemisation & CSR approval (P2-04)', () => {
     page,
     browser,
   }) => {
+    test.fixme(
+      true,
+      'Complete Sales Return now parks in SALES_RETURN_HOLD (DEC-64); the RM CSR approval is retired (DEC-72). Covered by offline_replacement_flow.spec.ts (P12)',
+    );
     test.setTimeout(120_000);
     const gs = await gsAtItemization();
     const errors = trackConsole(page);

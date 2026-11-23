@@ -5,6 +5,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## [1.1.0] - 2026-11-23 (not deployed)
+
+The 12-step **Offline Return → Replacement** flow (`docs/RMS_PHASE_PROMPTS_20-11-2026.md`, phases
+P0 – P12, decisions DEC-60 … DEC-72). Production steps: `docs/RELEASE_OFFLINE_FLOW_2026-11.md`.
+
+### Added
+- **Intermediate Stores** OP / DT / RI (Admin can rename and add), each with its own role and stock
+  location, and a category / sub-category → store mapping (DEC-61). New role **Management** (approver,
+  DEC-60).
+- **Gate entry v4** with a summary sheet before the GS is created; image-only party and transport
+  documents (DEC-62).
+- **Unboxing**: one video per carton (G-02 changed by DEC-63) and one optional carton document.
+- **Items → Replacement / Complete Sales Return popup → categorisation → Lock**; stock booked at the
+  lock; Sales Return parks in *Sales Return – On Hold* (DEC-64).
+- **Transfer slips** by the RM: one slip per Intermediate Store, many goods slips per slip, PDF with the
+  HICKS logo; **Edit Request** to Management; a Management change voids the slips (DEC-65).
+- **Store acknowledgement** per slip with discrepancy reports (DEC-66); **department routing** by the
+  store user (saving = issue, DIN) with undo of "Issue to Store" lines (DEC-67); **receiving back** per
+  store (DEC-68); **analysis** per item + condition: Dispatch New / Dispatch Repaired / Not Allowed,
+  optionally sent for Management approval (DEC-69).
+- **Management approval**: change any decision incl. Issue CN, approve with a verifiable
+  "Digitally approved by Management" e-approval stamp (SHA-256 of the approved snapshot) (DEC-70).
+- **Accounts per goods slip**: the GS reaches Accounts only when every store has submitted and no
+  approval is pending; GS-wise **Replacement Slip**; one Challan and one Credit Note per GS; Dispatch
+  Slip on completion; all Not Allowed → *On Hold – Not Allowed* (DEC-71).
+- E2E `frontend/tests/e2e/offline_replacement_flow.spec.ts` (whole flow for 3 goods slips across the
+  three stores at 1280 px and 360 px; Sales Return branch; Edit Request → void → regenerate).
+
+### Changed
+- Role menus follow the new flow (`docs/USER_GUIDE.md` §1.3). `INWARD_VERIFIER` is labelled
+  "Replacement Executive".
+- `docs/USER_GUIDE.md`, `docs/ADMIN_GUIDE.md` and `docs/UAT.md` (script O-01 … O-14) rewritten for the
+  new flow.
+
+### Retired (hidden, not deleted; goods slips from the earlier flow keep working from the GS page)
+- RM Review edits, RM department routing plan, Store Manager acceptance / department issue, RE
+  department receiving, RM final actions, the RM missing-document exception, the RM Approvals inbox and
+  Inspection & Grading menus (DEC-63 … DEC-68, DEC-72); legacy widgets on the RM / RE dashboards.
+
+### Known open points
+- Q43: GENERAL products have no condition fields, so nothing reaches the RI store with today's masters.
+- Email alerts for the new steps are deferred (Q22); in-app alerts only.
+
 ## [1.0.0] - 2026-11-07
 
 ### Added

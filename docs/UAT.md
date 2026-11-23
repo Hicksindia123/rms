@@ -1,6 +1,6 @@
 # RMS User Acceptance Testing (UAT) Guide & Test Protocol
 
-**Document Version:** 1.0.0 (Final)  
+**Document Version:** 1.1.0 (12-step offline flow added 2026-11-23)  
 **Status:** Approved for Local Business User Acceptance  
 **Reference:** `RMS_DEVELOPMENT_MASTER_PLAN.md` §18 (Scenarios U-01 … U-21) and §20  
 
@@ -21,7 +21,8 @@ Testing is organized into:
 8. **Stage 7 — Party Notification & Closure (U-18)**: Pre-closure party communications (G-15) and stage closure snapshots.
 9. **MIS, Reporting & Auditing (U-19 … U-20)**: Reports R-01 … R-18, dashboards, export validation, activity timeline.
 10. **Mobile & Cross-Device LAN Verification (U-21)**: Android Chrome & iPhone Safari on local network.
-11. **End-to-End Lifecycle Scenarios (L-01 … L-08)**: 8 integrated end-to-end multi-role scenarios with invariant check.
+11. **End-to-End Lifecycle Scenarios (L-01 … L-10)**: integrated end-to-end multi-role scenarios with invariant check.
+12. **12-step Offline Return → Replacement (O-01 … O-14, §4.2)**: the current flow (Intermediate Stores OP / DT / RI, Management approval, per-GS Accounts entry).
 
 ---
 
@@ -69,6 +70,10 @@ All accounts share the default password: **`Uat@2026RMS!`** (or as supplied via 
 | Logistics | `DISPATCH` | Dispatch Team | `dispatch@rms.local` | Replacement dispatches |
 | Main Store | `MAIN_STORE` | Main Store Manager | `mainstore@rms.local` | Stock receipt verification |
 | Executive | `MANAGEMENT_VIEWER` | Management | `management@rms.local` | Read-only reports & MIS |
+| Management | `MANAGEMENT` | Management approver | `mgmt@rms.local` | Edit requests, approval + stamp, Issue CN |
+| Intermediate Store OP | `ISTORE_OP` | OP store user | `opstore@rms.local` | Steps 3–8 for OP (📱) |
+| Intermediate Store DT | `ISTORE_DT` | DT store user | `dtstore@rms.local` | Steps 3–8 for DT (📱) |
+| Intermediate Store RI | `ISTORE_RI` | RI store user | `ristore@rms.local` | Steps 3–8 for RI (📱) |
 
 ---
 
@@ -130,6 +135,37 @@ Every system guard introduced or updated in the 2026-11-12 Change Plan has autom
 | **G-20** | Department routing dispatch cannot exceed in-store available quantity for the item. | In-store = 10 pcs; dispatch attempted for 15 pcs to REPAIR. | `422 VALIDATION_FAILED` / `409 CONFLICT` | **PASS (Rejected)** |
 | **G-21** | RM final action split quantities must equal available quantity; finalised slips are frozen and immutable without formal revision. | Available = 10 pcs; final action attempted with 7 pcs. Direct editing of finalised slip attempted without revision. | `422 VALIDATION_FAILED` / `409 CONFLICT` | **PASS (Rejected)** |
 | **G-22** | Accounts entry rules: no challan fields on CN actions; no future dates; no early completion with missing fields; frozen on complete; no double dispatch. | 1. Challan fields on `ISSUE_CN`.<br>2. Future date (`2099-01-01`).<br>3. Early complete with missing challan line.<br>4. Edit lines after completion.<br>5. Second dispatch on already-dispatched slip. | `422 VALIDATION_FAILED` / `409 CONFLICT` | **PASS (Rejected)** |
+
+### 4.2 12-step Offline Return → Replacement (UAT script for the business, 2026-11-23)
+
+The flow of `docs/RMS_PHASE_PROMPTS_20-11-2026.md` §1 (DEC-60 … DEC-72). L-09 / L-10 above describe the
+earlier flow (RM review, RM final actions) and stay valid only for goods slips created before it.
+Run each case on a phone (360–390 px) **and** a desktop. Fill in **Status** (PASS / FAIL + defect id)
+and **Tester**. The automated run of the same journey is `frontend/tests/e2e/offline_replacement_flow.spec.ts`
+(PASS at 1280 px and 360 px on 2026-11-23, zero console errors).
+
+**Test data.** Three goods slips: **A** with one DMT (→ DT), one Enclosed Oval (→ OP) and one product
+of a category mapped to RI; **B** with DMT + Enclosed Oval; **C** with an RI product only.
+⚠️ With today's masters, GENERAL products have no condition fields and cannot pass the categorisation
+lock, so nothing reaches RI (open question Q43). Until it is answered, map one category to RI for the
+test (Administration → Intermediate Stores) and map it back afterwards.
+
+| # | Who (login) | Steps | Expected result | Status | Tester |
+|---|---|---|---|---|---|
+| **O-01** | Gate User (`anuj@rms.local` 📱) | Gate Entry: Offline, gate entry date + no., State → Station → Party, Cartons 2, Received Through Courier (name + docket), Documents From Party = No Documents → **Submit & Create GS** → check the summary → **Back to edit** → **Submit & Create GS** → **Submit** → **Print GS Tag**. | Nothing is created before the summary's Submit. GS number shown; tag prints 2 labels. Gate entry no. used twice in the FY is refused. | | |
+| **O-02** | Replacement Executive (`aman@rms.local` 📱) | Carton Opening → Start → video for carton 1 only → try **Next** → video for carton 2 → optional carton document (Hand Written Slip + photo) → **Next**. | Next stays disabled with one video ("carton 2 missing"). The carton document clears "No Documents From Party". Next opens the item screen. | | |
+| **O-03** | Replacement Executive 📱 | Add 3 lines (DT, OP, RI products) with as-per-document and physical qty → **Next** → **Replacement** → split each line by condition → try **Lock** with one line not adding up → fix → **Lock**. | Lock disabled until every line adds up (G-19). After the lock the lines are read-only and the GS is "Pending Transfer Slip". | | |
+| **O-04** | Replacement Executive 📱 | New GS with one line → **Next** → **Complete Sales Return**. | GS shows "Sales Return – On Hold"; it never appears in the RM's pending list. | | |
+| **O-05** | Replacement Manager (`pratham@rms.local`) | Transfer Slips → select A, B, C → **Generate Transfer Slip** → confirm → open each slip → **Download PDF**. | 3 slips, one per store: OP (A + B), DT (A + B), RI (A + C). PDF has the HICKS logo, lines per GS and condition, totals. | | |
+| **O-06** | RM → Management (`mgmt@rms.local`) → RM | New locked GS → **Send Edit Request** (reason) → Management: Edit Requests → **Change line** (reason) → **Mark as edited** → RM generates → Management changes the GS again. | GS cannot be selected while the request is open. The second change voids the slip; the GS is back in the RM's pending list; regenerating gives a new slip. | | |
+| **O-07** | Store users (`opstore@`, `dtstore@`, `ristore@rms.local` 📱) | Each: Acknowledge Transfer Slips → open own slip (try "Show other items") → **Report discrepancy** on one → **Acknowledge receipt** → **Confirm receipt**. | Each store sees only its own slip. Discrepancy alerts the RM + Management. After acknowledgement the goods are in that store's location. | | |
+| **O-08** | Each store user 📱 | Department Routing → open A (own item only) → send pieces to a work department → **Save routing** → **Save & issue** → print the DIN. Save an "Issue to Store" line on B and **Undo** it (reason). | Routing starts right after the store's own acknowledgement. DIN prints with the store as source. Undo returns the pieces to routing. | | |
+| **O-09** | Each store user 📱 | Receive from Departments → **Receive** 1 pc (partial) → receive the rest; on one line choose **Return for Re-routing** and route it again. | Partial receipt keeps the DIN open. Re-routing puts the pieces back in Department Routing. When all is back the GS is ready for analysis. | | |
+| **O-10** | Each store user 📱 | Analysis: A — DT **Dispatch New**, OP **Dispatch Repaired**, RI **Not Allowed**, the last store ticks **Also send for Management approval** (reason); B — Dispatch New / Dispatch Repaired; C — Not Allowed. | No "Issue CN" for stores. A waits for Management; B goes to Accounts; C becomes "On Hold – Not Allowed" (Accounts → On hold tab). | | |
+| **O-11** | Management 📱 | Management Approval → A → change DT's line to **Issue CN** (reason) → **Save changes** → **Approve** → **Verify** → open the GS page. | Stamp "Digitally approved by Management" with name, time and reference; Verify says Valid; GS goes to Accounts. | | |
+| **O-12** | Accounts (`deepak@rms.local`) | Accounts Entry → B: Challan No. + Date only → Save → Complete. A: Challan + CN No. + Date + Value → Save → Complete. Try a future date and a duplicate CN no. | B shows no CN fields. Future date and duplicate CN refused. Completing generates the Dispatch Slip; GS "Pending Dispatch". Replacement Slip PDF shows the stamp on A. | | |
+| **O-13** | Dispatch (`dispatch@rms.local`) | Dispatch → open A's and B's slips → dispatch (date, transporter, docket). | Slips list Challan / CN and stamp; stock moves per decision (old piece of Dispatch New → Non-Functional Store, Not Allowed → Rejected Hold). | | |
+| **O-14** | Every role 📱 | Sign in as each role and open My Work. | Menus match `docs/USER_GUIDE.md` §1.3; counts match the lists; store users see only their store's work; no retired menu (RM Review, Final Actions, Approvals, Inspection, Store Acceptance, Department Issue / Receiving) is shown. | | |
 
 ---
 

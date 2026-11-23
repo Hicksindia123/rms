@@ -5,7 +5,7 @@
  * (backend/app/modules/department_routing/schemas.py StoreReceiving* / DepartmentRoutingOut); only
  * the HTTP layer is mocked.
  */
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const apiRequest = vi.fn<(path: string, options?: Record<string, unknown>) => Promise<unknown>>();
@@ -137,6 +137,9 @@ function route(path: string): Promise<unknown> {
 }
 
 afterEach(() => {
+  // Unmount first: a page still mounted from the previous test must not call the reset mock
+  // (it returns undefined → "reading 'then'"; seen only under load).
+  cleanup();
   apiRequest.mockReset();
 });
 

@@ -153,7 +153,8 @@ async def test_deny_override_removes_widgets_from_layout_and_data(
     codes = {w["code"] for w in body["widgets"]}
     gs_widgets = {w.code for w in WIDGETS if ("goods_slips", "view") in w.requires}
     assert not codes & gs_widgets
-    assert body["hidden_widget_count"] >= 4  # pendencies, inspections, pipeline, trend
+    # pendencies, pipeline, trend (DEC-72: INSPECTIONS_PENDING left the RM layout)
+    assert body["hidden_widget_count"] >= 3
     res = await client.get(f"{API}/dashboard/widgets/GS_PIPELINE", headers=_h(token))
     assert res.status_code == 403
 

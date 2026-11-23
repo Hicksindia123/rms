@@ -430,14 +430,17 @@ $$;
 -- actionable widgets first. Each layout only lists widgets the role's default permissions allow
 -- (the API filters by permission anyway). Admins edit them in Admin → Dashboard layouts.
 -- Never overwrites an admin's edit (ON CONFLICT DO NOTHING).
+-- DEC-72 (P12): the RM / RE layouts no longer list CSR_APPROVALS_PENDING / INSPECTIONS_PENDING
+-- (legacy steps only; the widgets stay in the catalogue). Snippet
+-- release_20261123_p12_hide_legacy_menus.sql removes them from existing layouts.
 -- -----------------------------------------------------------------------------
 insert into public.role_dashboard_layouts (role_id, widgets)
 select r.id, l.widgets::jsonb
   from (values
     ('SUPER_ADMIN', '[{"code":"ADMIN_HEALTH","size":"L"},{"code":"MY_TASKS","size":"M"},{"code":"TRANSFERS_ATTENTION","size":"M"},{"code":"GS_PIPELINE","size":"L"},{"code":"OPEN_PENDENCIES","size":"S"},{"code":"HAZARD_QUARANTINE","size":"S"},{"code":"CONTAINER_AUDIT","size":"M"},{"code":"CN_PIPELINE","size":"M"},{"code":"TECHNICIAN_WIP","size":"M"},{"code":"GS_TREND","size":"L"}]'),
     ('GATE_INWARD', '[{"code":"MY_TASKS","size":"M"},{"code":"GATE_INWARDS_TODAY","size":"S"},{"code":"GS_PIPELINE","size":"L"},{"code":"GS_TREND","size":"L"}]'),
-    ('INWARD_VERIFIER', '[{"code":"MY_TASKS","size":"M"},{"code":"EVIDENCE_PENDING","size":"S"},{"code":"INSPECTIONS_PENDING","size":"S"},{"code":"CONTAINER_AUDIT","size":"M"},{"code":"TRANSFERS_ATTENTION","size":"M"},{"code":"GATE_INWARDS_TODAY","size":"S"},{"code":"OPEN_PENDENCIES","size":"S"},{"code":"GS_PIPELINE","size":"L"}]'),
-    ('REPLACEMENT_MANAGER', '[{"code":"MY_TASKS","size":"M"},{"code":"CSR_APPROVALS_PENDING","size":"S"},{"code":"OPEN_PENDENCIES","size":"S"},{"code":"TRANSFERS_ATTENTION","size":"M"},{"code":"INSPECTIONS_PENDING","size":"S"},{"code":"HAZARD_QUARANTINE","size":"S"},{"code":"CONTAINER_AUDIT","size":"M"},{"code":"CN_PIPELINE","size":"M"},{"code":"TECHNICIAN_WIP","size":"M"},{"code":"FUNCTIONAL_STOCK","size":"M"},{"code":"GS_PIPELINE","size":"L"},{"code":"GS_TREND","size":"L"}]'),
+    ('INWARD_VERIFIER', '[{"code":"MY_TASKS","size":"M"},{"code":"EVIDENCE_PENDING","size":"S"},{"code":"CONTAINER_AUDIT","size":"M"},{"code":"TRANSFERS_ATTENTION","size":"M"},{"code":"GATE_INWARDS_TODAY","size":"S"},{"code":"OPEN_PENDENCIES","size":"S"},{"code":"GS_PIPELINE","size":"L"}]'),
+    ('REPLACEMENT_MANAGER', '[{"code":"MY_TASKS","size":"M"},{"code":"OPEN_PENDENCIES","size":"S"},{"code":"TRANSFERS_ATTENTION","size":"M"},{"code":"HAZARD_QUARANTINE","size":"S"},{"code":"CONTAINER_AUDIT","size":"M"},{"code":"CN_PIPELINE","size":"M"},{"code":"TECHNICIAN_WIP","size":"M"},{"code":"FUNCTIONAL_STOCK","size":"M"},{"code":"GS_PIPELINE","size":"L"},{"code":"GS_TREND","size":"L"}]'),
     ('INTERMEDIATE_STORE_MANAGER', '[{"code":"MY_TASKS","size":"M"},{"code":"TRANSFERS_ATTENTION","size":"M"},{"code":"TECHNICIAN_WIP","size":"M"},{"code":"FUNCTIONAL_STOCK","size":"M"},{"code":"NON_FUNCTIONAL_STOCK","size":"M"},{"code":"BATTERY_STOCK","size":"M"},{"code":"HAZARD_QUARANTINE","size":"S"}]'),
     ('TECHNICIAN_COORDINATOR', '[{"code":"MY_TASKS","size":"M"},{"code":"TECHNICIAN_WIP","size":"M"},{"code":"TRANSFERS_ATTENTION","size":"M"},{"code":"BATTERY_STOCK","size":"M"},{"code":"FUNCTIONAL_STOCK","size":"M"}]'),
     ('TECHNICIAN', '[{"code":"MY_TASKS","size":"M"},{"code":"TECHNICIAN_WIP","size":"M"}]'),
@@ -683,6 +686,14 @@ update public.journey_steps set is_active = false
 -- to the store's routing, not the RM's (label only; code RE_ROUTE unchanged, G-18).
 -- Same block in supabase/snippets/release_20261121_p8_store_receiving.sql.
 update public.journey_steps set is_active = false where code = 'DEPT_RECEIVING' and is_active;
+-- DEC-72 (P12 clean-up): the last menus that only serve legacy goods slips are hidden (rows kept):
+-- RM "Final Actions" (DEC-57; the stores analyse now, DEC-69), RM "Approvals" (Complete Sales
+-- Return approval + line corrections, CSR_APPROVAL_PENDING / INSPECTION only; CSR now parks in
+-- SALES_RETURN_HOLD, DEC-64) and RE "Inspection & Grading" (INSPECTION, unreachable since DEC-64).
+-- Same block, conditional on no legacy goods slip, in
+-- supabase/snippets/release_20261123_p12_hide_legacy_menus.sql.
+update public.journey_steps set is_active = false
+ where code in ('FINAL_ACTIONS', 'APPROVALS', 'INSPECTION') and is_active;
 update public.department_outcome_heads
    set label = 'Return for Re-routing',
        description = 'Returned to the store for re-evaluation and routing again'

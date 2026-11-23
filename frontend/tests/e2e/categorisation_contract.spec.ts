@@ -14,310 +14,170 @@ import {
 } from './support/stack';
 
 /**
- * Regression: "e.allowed_counts is not iterable" (CLIENT_ERROR) on the Categorisation screen right
- * after a successful count (reported on GS/2026-27/00001, ENCLOSED SCALE OVAL THERMOMETER
- * ITM-00180, 6 of 6). Drives the real UI against the real API (no mocks) for Counting →
- * Categorisation: exact / partial / excess / multi-product, malformed payload handling, an
- * existing (pre-saved) record, and both whole-GS options (CSR → approval, RO → inspection).
+ * Regression: "e.allowed_counts is not iterable" (CLIENT_ERROR) on the Categorisation screen
+ * (2026-11-16, GS/2026-27/00001, ENCLOSED SCALE OVAL THERMOMETER ITM-00180, 6 of 6). Ported in P12
+ * to the DEC-64 screen: items → "Replacement" → categorisation (split editor per line, fed by
+ * GET /itemization/lookups/products/{id}/fields) → Lock. Real UI against the real API, no mocks:
+ * exact / partial / excess receipt, a multi-product GS and the reload of a saved split.
  */
-
-const EO = 'ITM-00180'; // ENCLOSED_OVAL — the product of the report
+const EO = 'ITM-00180'; // ENCLOSED_OVAL: the product of the report
 const DMT = 'ITM-00165';
 const PRS = 'ITM-00167';
 
-interface CatField {
+interface Field {
   field_id: string;
   field_code: string;
   field_label: string;
   sort_order: number;
 }
-interface CatItem {
-  item_id: string;
-  received_qty: number;
-  allowed_buckets: CatField[];
-  allowed_counts: CatField[];
-  buckets: Array<{ field_code: string; qty: number }>;
-}
-interface CatState {
-  items: CatItem[];
-  can_submit: boolean;
-  all_conserved: boolean;
+interface Fields {
+  allowed_buckets: Field[];
+  allowed_counts: Field[];
 }
 
-test.beforeAll(async () => {
+test.beforeEach(async ({ browserName }, testInfo) => {
+  testInfo.annotations.push({ type: 'browser', description: browserName });
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Real-stack contract check (one project)');
   const down = await apiAvailable();
   test.skip(down !== null, `RMS stack not available: ${down ?? ''}`);
 });
 
-/** GS through gate + carton opening with the given lines (document qty, received qty). */
-async function countedLines(tag: string, lines: Array<[string, number, number]>) {
+/** A GS at CATEGORISATION (items counted, "Replacement" chosen) with the given lines. */
+async function atCategorisation(tag: string, lines: Array<[string, number, number]>) {
   const gs = await createGs(tag);
   await unboxed(gs);
-  const itemIds: string[] = [];
-  for (const [code, doc, recv] of lines) {
-    itemIds.push(await addItem(gs.id, await productId(code), doc, recv));
-  }
-  return { gs, itemIds };
-}
-
-/** Put the GS in CATEGORISATION (as after an RM send-back, DEC-53: the screen's own submit goes
- * straight to RM Review) and return the categorisation payload the screen received. */
-async function submitCountInUi(page: Page, gsId: string): Promise<CatState> {
-  await expect(page.getByRole('button', { name: /^Submit to / })).toBeVisible();
-  await api(USERS.aman, 'POST', `/gs/${gsId}/counting/submit`, {}, true);
-  const catResponse = page.waitForResponse(
-    (r) => r.url().endsWith(`/gs/${gsId}/categorisation`) && r.request().method() === 'GET',
+  for (const [code, doc, recv] of lines) await addItem(gs.id, await productId(code), doc, recv);
+  await api(
+    USERS.aman,
+    'POST',
+    `/gs/${gs.id}/itemization/return-choice`,
+    { category_code: 'RO' },
+    true,
   );
-  await page.reload();
-  const res = await catResponse;
-  expect(res.status()).toBe(200);
-  return (await res.json()) as CatState;
+  expect(await gsStatus(gs.id)).toBe('CATEGORISATION');
+  return gs;
 }
 
-/** The categorisation section loaded without the contract crash. */
-async function expectCategorisationLoaded(page: Page): Promise<void> {
-  await expect(page.getByRole('heading', { name: /Item Categorisation/ })).toBeVisible();
-  await expect(page.getByText('Item categorisation could not be loaded')).toHaveCount(0);
+function expectContract(f: Fields): void {
+  expect(Array.isArray(f.allowed_buckets), 'allowed_buckets is an array').toBe(true);
+  expect(Array.isArray(f.allowed_counts), 'allowed_counts is an array').toBe(true);
+  for (const x of [...f.allowed_buckets, ...f.allowed_counts]) {
+    expect(Object.keys(x).sort()).toEqual(['field_code', 'field_id', 'field_label', 'sort_order']);
+  }
+}
+
+/** Opens "Edit line N" and returns the field payload the split editor received. */
+async function openLine(page: Page, lineNo: number): Promise<Fields> {
+  const res = page.waitForResponse(
+    (r) => /\/itemization\/lookups\/products\/[^/]+\/fields$/.test(r.url()) && r.ok(),
+  );
+  await page.getByRole('button', { name: `Edit line ${String(lineNo)}` }).click();
+  const fields = (await (await res).json()) as Fields;
+  expectContract(fields);
+  const editor = page.getByTestId('line-split-editor');
+  await expect(editor).toBeVisible();
   await expect(page.getByText(/is not iterable/)).toHaveCount(0);
   await expect(page.getByText('CLIENT_ERROR')).toHaveCount(0);
-}
-
-function expectContract(state: CatState): void {
-  for (const it of state.items) {
-    expect(Array.isArray(it.allowed_buckets), 'allowed_buckets is an array').toBe(true);
-    expect(Array.isArray(it.allowed_counts), 'allowed_counts is an array').toBe(true);
-    for (const f of [...it.allowed_buckets, ...it.allowed_counts]) {
-      expect(Object.keys(f).sort()).toEqual([
-        'field_code',
-        'field_id',
-        'field_label',
-        'sort_order',
-      ]);
-    }
+  // Every bucket and count of the payload is rendered with its configured label.
+  for (const f of [...fields.allowed_buckets, ...fields.allowed_counts]) {
+    await expect(editor.getByLabel(f.field_label, { exact: true })).toBeVisible();
   }
+  return fields;
 }
 
-async function fillBucket(page: Page, itemId: string, code: string, qty: number): Promise<void> {
-  await page.locator(`[id="b-${itemId}-${code}"]`).fill(String(qty));
+async function split(page: Page, label: string, qty: number): Promise<void> {
+  await page.getByTestId('line-split-editor').getByLabel(label, { exact: true }).fill(String(qty));
 }
 
-async function saveLine(page: Page, lineNo: number, gsId: string): Promise<void> {
-  const saved = page.waitForResponse(
-    (r) => r.url().includes(`/gs/${gsId}/items/`) && r.request().method() === 'PUT',
-  );
-  await page.getByRole('button', { name: `Save Line ${String(lineNo)}` }).click();
-  const res = await saved;
-  expect(res.status(), await res.text()).toBe(200);
-  expect(res.request().headers()['idempotency-key']).toMatch(/^web-/);
+async function saveLine(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Save line' }).click();
+  await expect(page.getByTestId('line-split-editor')).toHaveCount(0, { timeout: 20_000 });
 }
 
-async function submitCategorisation(page: Page, gsId: string): Promise<void> {
-  const button = page.getByRole('button', { name: /Submit Categorisation to RM Review/ });
-  await expect(button).toBeEnabled();
-  await button.click();
-  await expect.poll(() => gsStatus(gsId)).toBe('RM_REVIEW');
-}
-
-test.describe('Counting → Categorisation (allowed_counts contract)', () => {
-  // DEC-64 (P4): the separate categorisation section was replaced by the split editor on the categorisation screen (covered by p4_categorisation_lock.spec.ts). Port the allowed_counts contract checks in P12.
-  test.fixme(true, 'DEC-64 (P4): flow retired; rebuild in P5 / P12');
-  test('Scenario 1: 6 of 6 (ITM-00180) loads, saves, submits to RM review; RM review loads', async ({
-    browser,
-  }) => {
-    const { gs, itemIds } = await countedLines('cat-exact', [[EO, 6, 6]]);
-    const itemId = itemIds[0] ?? '';
+test.describe('Categorisation (allowed_counts contract, DEC-64 screen)', () => {
+  test('6 of 6 (ITM-00180) loads, splits, locks', async ({ browser }) => {
+    const gs = await atCategorisation('cat-exact', [[EO, 6, 6]]);
     const aman = await asUser(browser, USERS.aman, `/gs/${gs.id}/itemization`);
     const { page } = aman;
-
-    const state = await submitCountInUi(page, gs.id);
-    expectContract(state);
-    await expectCategorisationLoaded(page);
-    // Both whole-GS options are still offered alongside.
-    await expect(
-      page.locator('.category-option', { hasText: 'Complete Sales Return' }),
-    ).toContainText('Requires approval');
-    await expect(page.locator('.category-option', { hasText: 'Replacement Only' })).toBeVisible();
-
-    const item = state.items[0];
-    expect(item?.received_qty).toBe(6);
-    const codes = item?.allowed_buckets.map((b) => b.field_code) ?? [];
-    expect(codes.length).toBeGreaterThan(1);
-    for (const b of item?.allowed_buckets ?? []) {
-      await expect(page.locator(`label[for="b-${itemId}-${b.field_code}"]`)).toHaveText(
-        b.field_label,
-      );
-    }
-    await expect(page.getByText(/SKU: ITM-00180/)).toBeVisible();
     await expect(page.getByText(/ENCLOSED SCALE OVAL THERMOMETER/).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: /Submit Categorisation/ })).toBeDisabled();
-
-    await fillBucket(page, itemId, codes[0] ?? '', 5);
-    await fillBucket(page, itemId, codes[1] ?? '', 1);
-    await expect(page.getByText('Conserved (6/6)')).toBeVisible();
-    await saveLine(page, 1, gs.id);
-    await expect(page.getByText(/G-19 Conserved: All items/)).toBeVisible();
+    await expect(page.getByTestId('lock-categorisation')).toBeDisabled();
+    const fields = await openLine(page, 1);
+    const [first, second] = fields.allowed_buckets;
+    expect(second, 'ENCLOSED_OVAL offers more than one condition').toBeTruthy();
+    await split(page, first?.field_label ?? '', 5);
+    await expect(page.getByTestId('split-total')).toHaveText('Split 5 / Physical 6');
+    await split(page, second?.field_label ?? '', 1);
+    await expect(page.getByTestId('split-total')).toHaveText('Split 6 / Physical 6');
+    await saveLine(page);
+    await expect(page.getByTestId('lock-categorisation')).toBeEnabled();
     await expectNoHorizontalOverflow(page);
-    await submitCategorisation(page, gs.id);
+    await page.getByTestId('lock-categorisation').click();
+    await page.getByTestId('lock-confirm').click();
+    await expect(page.getByTestId('categorisation-locked')).toBeVisible({ timeout: 20_000 });
+    await expect.poll(() => gsStatus(gs.id)).toBe('PENDING_TRANSFER_SLIP');
     expect(aman.errors, aman.errors.join('\n')).toEqual([]);
     await aman.context.close();
-
-    const rm = await asUser(browser, USERS.rm, `/gs/${gs.id}/rm-review`);
-    await expect(rm.page.getByText(/ENCLOSED SCALE OVAL THERMOMETER/).first()).toBeVisible();
-    await expect(
-      rm.page.getByText(`${item?.allowed_buckets[0]?.field_label ?? ''}:`),
-    ).toBeVisible();
-    await expectNoHorizontalOverflow(rm.page);
-    expect(rm.errors, rm.errors.join('\n')).toEqual([]);
-    await rm.context.close();
   });
 
   for (const [name, doc, recv] of [
-    ['Scenario 2: partial receipt 4 of 6', 6, 4],
-    ['Scenario 3: excess receipt 8 of 6', 6, 8],
+    ['partial receipt 4 of 6', 6, 4],
+    ['excess receipt 8 of 6', 6, 8],
   ] as const) {
-    test(`${name} conserves the received qty (G-19)`, async ({ browser }) => {
-      const { gs, itemIds } = await countedLines('cat-qty', [[EO, doc, recv]]);
-      const itemId = itemIds[0] ?? '';
+    test(`${name}: the split must equal the physical qty (G-19)`, async ({ browser }) => {
+      const gs = await atCategorisation('cat-qty', [[EO, doc, recv]]);
       const aman = await asUser(browser, USERS.aman, `/gs/${gs.id}/itemization`);
       const { page } = aman;
-      const state = await submitCountInUi(page, gs.id);
-      expectContract(state);
-      await expectCategorisationLoaded(page);
-      const code = state.items[0]?.allowed_buckets[0]?.field_code ?? '';
-
-      // The documented qty is not the categorised total: mismatch, submit stays disabled.
-      await fillBucket(page, itemId, code, doc);
-      const diff = doc - recv;
-      await expect(
-        page.getByText(
-          `Mismatch: ${String(doc)}/${String(recv)} (${diff > 0 ? '+' : ''}${String(diff)})`,
-        ),
-      ).toBeVisible();
-      await saveLine(page, 1, gs.id);
-      await expect(page.getByRole('button', { name: /Submit Categorisation/ })).toBeDisabled();
-
-      await fillBucket(page, itemId, code, recv);
-      await expect(page.getByText(`Conserved (${String(recv)}/${String(recv)})`)).toBeVisible();
-      await saveLine(page, 1, gs.id);
-      await submitCategorisation(page, gs.id);
+      const fields = await openLine(page, 1);
+      const label = fields.allowed_buckets[0]?.field_label ?? '';
+      // The document qty is not the categorised total.
+      await split(page, label, doc);
+      await expect(page.getByTestId('split-total')).toHaveText(
+        `Split ${String(doc)} / Physical ${String(recv)}`,
+      );
+      await split(page, label, recv);
+      await expect(page.getByTestId('split-total')).toHaveText(
+        `Split ${String(recv)} / Physical ${String(recv)}`,
+      );
+      await saveLine(page);
+      await expect(page.getByTestId('lock-categorisation')).toBeEnabled();
       expect(aman.errors, aman.errors.join('\n')).toEqual([]);
       await aman.context.close();
     });
   }
 
-  test('Scenario 4: multi-product GS — each line gets its own buckets and quantities', async ({
+  test('multi-product GS: each line gets its own buckets; a saved split reloads', async ({
     browser,
   }) => {
-    const { gs, itemIds } = await countedLines('cat-multi', [
-      [EO, 6, 6],
-      [DMT, 6, 4],
-      [PRS, 2, 3],
+    const gs = await atCategorisation('cat-multi', [
+      [EO, 2, 2],
+      [DMT, 3, 3],
+      [PRS, 1, 1],
     ]);
     const aman = await asUser(browser, USERS.aman, `/gs/${gs.id}/itemization`);
     const { page } = aman;
-    const state = await submitCountInUi(page, gs.id);
-    expectContract(state);
-    await expectCategorisationLoaded(page);
-
-    expect(state.items.map((i) => i.item_id)).toEqual(itemIds);
-    expect(state.items.map((i) => i.received_qty)).toEqual([6, 4, 3]);
-    const sets = state.items.map((i) => i.allowed_buckets.map((b) => b.field_code).join(','));
-    expect(new Set(sets).size, 'three categories, three different bucket sets').toBe(3);
-
-    for (const [idx, it] of state.items.entries()) {
-      for (const b of it.allowed_buckets) {
-        await expect(page.locator(`[id="b-${it.item_id}-${b.field_code}"]`)).toBeVisible();
-      }
-      await fillBucket(page, it.item_id, it.allowed_buckets[0]?.field_code ?? '', it.received_qty);
-      await saveLine(page, idx + 1, gs.id);
+    const qty = [2, 3, 1];
+    const codes: string[][] = [];
+    for (const [i, q] of qty.entries()) {
+      const fields = await openLine(page, i + 1);
+      codes.push(fields.allowed_buckets.map((b) => b.field_code));
+      await split(page, fields.allowed_buckets[0]?.field_label ?? '', q);
+      await saveLine(page);
     }
-    await expect(page.getByText(/G-19 Conserved: All items/)).toBeVisible();
+    // DMT, EO and Prismatic come with their own condition lists.
+    expect(new Set(codes.map((c) => c.join(','))).size).toBe(3);
+    await expect(page.getByTestId('lock-categorisation')).toBeEnabled();
+
+    // Reload: the saved split is shown again in the editor.
+    await page.reload();
+    const again = await openLine(page, 2);
+    await expect(
+      page
+        .getByTestId('line-split-editor')
+        .getByLabel(again.allowed_buckets[0]?.field_label ?? '', { exact: true }),
+    ).toHaveValue('3');
+    await expect(page.getByTestId('split-total')).toHaveText('Split 3 / Physical 3');
     await expectNoHorizontalOverflow(page);
-    await submitCategorisation(page, gs.id);
     expect(aman.errors, aman.errors.join('\n')).toEqual([]);
     await aman.context.close();
   });
-
-  test('Scenario 5: a malformed payload shows an actionable error with retry, not a crash', async ({
-    browser,
-  }) => {
-    const { gs } = await countedLines('cat-bad', [[EO, 6, 6]]);
-    await api(USERS.aman, 'POST', `/gs/${gs.id}/counting/submit`, {}, true);
-    const aman = await asUser(browser, USERS.aman, `/gs/${gs.id}/itemization`);
-    const { page } = aman;
-    await expectCategorisationLoaded(page);
-
-    // Corrupt the real response: allowed_counts null / object / missing.
-    const url = `**/api/v1/gs/${gs.id}/categorisation`;
-    for (const bad of [null, { PACKAGING: 1 }, undefined]) {
-      await page.route(url, async (route) => {
-        const response = await route.fetch();
-        const body = (await response.json()) as CatState;
-        const items = body.items.map((i) => ({ ...i, allowed_counts: bad }));
-        await route.fulfill({ response, json: { ...body, items } });
-      });
-      await page.reload();
-      await expect(page.getByText('Item categorisation could not be loaded')).toBeVisible();
-      await expect(page.getByText(/items\.0\.allowed_counts/)).toBeVisible();
-      await expect(page.getByText(/is not iterable/)).toHaveCount(0);
-      // The rest of the page (whole-GS options) is still usable.
-      await expect(page.getByRole('button', { name: 'Categorise GS' })).toBeVisible();
-      await page.unroute(url);
-      await page.getByRole('button', { name: /retry/i }).click();
-      await expectCategorisationLoaded(page);
-    }
-    // Only the deliberately injected payloads may have produced console output.
-    expect(aman.errors.filter((e) => !/categorisation/i.test(e))).toEqual([]);
-    await aman.context.close();
-  });
-
-  test('Scenario 6: an existing GS with saved categorisation reloads its values', async ({
-    browser,
-  }) => {
-    const { gs, itemIds } = await countedLines('cat-existing', [[EO, 6, 6]]);
-    const itemId = itemIds[0] ?? '';
-    await api(USERS.aman, 'POST', `/gs/${gs.id}/counting/submit`, {}, true);
-    const before = await api<CatState>(USERS.aman, 'GET', `/gs/${gs.id}/categorisation`);
-    const code = before.items[0]?.allowed_buckets[0]?.field_code ?? '';
-    // Saved earlier (e.g. before this fix) through the API.
-    await api(
-      USERS.aman,
-      'PUT',
-      `/gs/${gs.id}/items/${itemId}/categorisation`,
-      { buckets: [{ field_code: code, qty: 6 }], counts: [] },
-      true,
-    );
-
-    const aman = await asUser(browser, USERS.aman, `/gs/${gs.id}/itemization`);
-    const { page } = aman;
-    await expectCategorisationLoaded(page);
-    await expect(page.locator(`[id="b-${itemId}-${code}"]`)).toHaveValue('6');
-    await expect(page.getByText('Conserved (6/6)')).toBeVisible();
-    await submitCategorisation(page, gs.id);
-    expect(aman.errors, aman.errors.join('\n')).toEqual([]);
-    await aman.context.close();
-  });
-
-  for (const [option, status] of [
-    ['Complete Sales Return', 'CSR_APPROVAL_PENDING'],
-    ['Replacement Only', 'INSPECTION'],
-  ] as const) {
-    test(`whole-GS option "${option}" still works after counting → ${status}`, async ({
-      browser,
-    }) => {
-      const { gs } = await countedLines('cat-opt', [[EO, 6, 6]]);
-      const aman = await asUser(browser, USERS.aman, `/gs/${gs.id}/itemization`);
-      const { page } = aman;
-      expectContract(await submitCountInUi(page, gs.id));
-      await expectCategorisationLoaded(page);
-      await page.locator('.category-option', { hasText: option }).click();
-      await page.getByRole('button', { name: 'Categorise GS' }).click();
-      await expect.poll(() => gsStatus(gs.id)).toBe(status);
-      if (status === 'CSR_APPROVAL_PENDING') {
-        await expect(page.getByText(/Waiting for the Replacement Manager/)).toBeVisible();
-      }
-      expect(aman.errors, aman.errors.join('\n')).toEqual([]);
-      await aman.context.close();
-    });
-  }
 });
