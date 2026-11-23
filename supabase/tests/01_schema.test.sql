@@ -81,7 +81,7 @@ select tables_are('public', array[
   -- Phase P1 20-11-2026 (DEC-61): Intermediate Stores + category mapping
   'intermediate_stores','intermediate_store_category_map',
   -- DEC-65 (P5): transfer slips + edit requests
-  'transfer_slips','transfer_slip_gs','transfer_slip_lines','gs_edit_requests','transfer_slip_discrepancies','gs_store_analyses','gs_management_approval_requests','gs_management_revisions','gs_management_approvals',
+  'transfer_slips','transfer_slip_gs','transfer_slip_lines','gs_edit_requests','transfer_slip_discrepancies','gs_store_analyses','gs_management_approval_requests','gs_management_revisions','gs_management_approvals','ac_gs_entries',
   -- gap plan G3 (DEC-56): current condition per item
   'gs_item_conditions'
 ],'public schema holds foundation, inward and inventory ledger tables');

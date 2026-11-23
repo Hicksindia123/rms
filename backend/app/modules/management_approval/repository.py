@@ -12,7 +12,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 # Goods slips Management may open "between analysis and Accounts" (P11 adds the Accounts states).
-OPEN_STATUSES = ("ANALYSIS_COMPLETED",)
+# DEC-71: Management also finds goods slips at Accounts or on hold (it may still change them).
+OPEN_STATUSES = ("ANALYSIS_COMPLETED", "ACCOUNTS_PENDING", "NOT_ALLOWED_HOLD")
 
 
 def _rows(session: Session, sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:

@@ -39,6 +39,7 @@ from app.core.errors import (
 from app.core.idempotency import IdempotencyKey, IdempotentResult, run_idempotent
 from app.core.permissions import EffectivePermissions
 from app.core.security import CurrentUser
+from app.modules.ac_entry import service as ac_entry_service
 from app.modules.attachments.service import signed_url_ttl
 from app.modules.department_routing.service import department_routing_service
 from app.modules.final_actions import repository as repo
@@ -1103,6 +1104,14 @@ class FinalActionsService:
 # 20261123000100); the checks here give the clear 4xx answers first.
 
 STORE_ANALYSIS_STATUSES = ("STORE_PROCESSING", "ANALYSIS_COMPLETED")
+# DEC-71 (P11): a store still sees its analysed goods slips (read-only) at Accounts, on hold and
+# pending dispatch ("All" list); requests stay limited to the two statuses above (DB guard too).
+STORE_ANALYSIS_LIST_STATUSES = (
+    *STORE_ANALYSIS_STATUSES,
+    "ACCOUNTS_PENDING",
+    "NOT_ALLOWED_HOLD",
+    "DISPATCH_PENDING",
+)
 ANALYSIS_STATUS = "STORE_PROCESSING"
 ANALYSIS_DONE_STATUS = "ANALYSIS_COMPLETED"
 ANALYSIS_TASK_STEP = "STORE_ANALYSIS"
@@ -1154,7 +1163,7 @@ class StoreAnalysisService:
             scope = self._scope(session, actor)
             cache: dict[UUID, bool] = {}
             out: list[StoreAnalysisQueueRowOut] = []
-            for row in repo.store_analysis_queue(session, STORE_ANALYSIS_STATUSES):
+            for row in repo.store_analysis_queue(session, STORE_ANALYSIS_LIST_STATUSES):
                 stores = [
                     s
                     for s in self._stores(session, actor, row["gs_id"], cache)
@@ -1269,18 +1278,34 @@ class StoreAnalysisService:
         gs_id: UUID,
         payload: StoreAnalysisSubmitIn,
         idem: IdempotencyKey,
+        storage: StorageService,
     ) -> IdempotentResult:
-        """DEC-69: one transaction; a duplicate Idempotency-Key returns the first result (G-16)."""
-        with self._uow.transaction(actor.id) as session:
-            return run_idempotent(
-                session,
-                idem,
-                actor.id,
-                lambda: (
-                    200,
-                    self._submit(session, actor, gs_id, payload).model_dump(mode="json"),
-                ),
-            )
+        """DEC-69: one transaction; a duplicate Idempotency-Key returns the first result (G-16).
+        DEC-71: the last store's submission may route the goods slip to Accounts, which stores
+        the Replacement Slip PDF (removed again if the transaction rolls back)."""
+        uploaded: list[str] = []
+        try:
+            with self._uow.transaction(actor.id) as session:
+                return run_idempotent(
+                    session,
+                    idem,
+                    actor.id,
+                    lambda: (
+                        200,
+                        self._submit(
+                            session, actor, gs_id, payload, storage, uploaded.append
+                        ).model_dump(mode="json"),
+                    ),
+                )
+        except Exception:
+            for path in uploaded:
+                try:
+                    storage.delete(Bucket.DOCUMENTS, path)
+                except ServiceUnavailable:
+                    log.error(
+                        "replacement_slip_orphan_pdf_not_removed", gs_id=str(gs_id), path=path
+                    )
+            raise
 
     @staticmethod
     def _store_for(
@@ -1298,7 +1323,13 @@ class StoreAnalysisService:
         return store
 
     def _submit(
-        self, session: Session, actor: CurrentUser, gs_id: UUID, payload: StoreAnalysisSubmitIn
+        self,
+        session: Session,
+        actor: CurrentUser,
+        gs_id: UUID,
+        payload: StoreAnalysisSubmitIn,
+        storage: StorageService,
+        on_uploaded: Callable[[str], None],
     ) -> StoreAnalysisGsOut:
         # 1. Lock the GS (serialises with the other stores' submissions and receipts).
         gs = repo.get_gs_header(session, gs_id, lock=True)
@@ -1468,6 +1499,18 @@ class StoreAnalysisService:
         repo.validate_store_analysis(session, gs_id)
         repo.validate_reconciliation(session, gs_id)
 
+        # DEC-71 / Q36: the submission is recorded; its request (if any) is recorded now,
+        # before the Accounts gate below, so the goods slip waits for Management.
+        if payload.management_approval_reason:
+            self._request_approval(
+                session,
+                actor,
+                gs_id,
+                ManagementApprovalRequestIn(
+                    store_id=payload.store_id, reason=payload.management_approval_reason
+                ),
+            )
+
         # 4. The store's analysis task closes; the last store completes the GS.
         gs_service.sync_step_task(
             session,
@@ -1511,6 +1554,8 @@ class StoreAnalysisService:
                 data={"gs_no": gs["gs_no"]},
                 dedupe_key=f"gs-analysis-completed:{gs_id}",
             )
+            # DEC-71 (P11): with the Management gate passing, straight on to Accounts / hold.
+            ac_entry_service.route_to_accounts(session, gs_id, actor, storage, on_uploaded)
         log.info(
             "store_analysis_submitted",
             gs_id=str(gs_id),

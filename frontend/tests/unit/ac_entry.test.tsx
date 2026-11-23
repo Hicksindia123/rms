@@ -171,7 +171,7 @@ describe('Phase 8 Accounts screens', () => {
       ),
     );
     const onOpen = vi.fn();
-    render(<AccountsEntryQueuePage onOpen={onOpen} />);
+    render(<AccountsEntryQueuePage onOpen={onOpen} onOpenGs={vi.fn()} />);
     expect(screen.getByText('Loading the Accounts queue…')).toBeInTheDocument();
     expect(await screen.findByText('1 / 3 lines entered')).toBeInTheDocument();
     fireEvent.click(screen.getByText('GS/2026-27/00042'));

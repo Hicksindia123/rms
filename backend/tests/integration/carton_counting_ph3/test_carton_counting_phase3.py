@@ -65,7 +65,8 @@ async def test_status_and_step_labels_come_from_config(
     assert labels["HELD_AT_INTERMEDIATE_STORE"] == "Held at Intermediate Store"
     # + PENDING_TRANSFER_SLIP, SALES_RETURN_HOLD (DEC-64), TRANSFER_SLIP_GENERATED (DEC-65),
     # STORE_ACKNOWLEDGED (DEC-66), STORE_PROCESSING (DEC-67)
-    assert len(labels) == 19  # + ANALYSIS_COMPLETED (DEC-69)
+    # + ANALYSIS_COMPLETED (DEC-69); + ACCOUNTS_PENDING, NOT_ALLOWED_HOLD, DISPATCH_PENDING (DEC-71)
+    assert len(labels) == 22
     assert labels["STORE_ACKNOWLEDGED"] == "Acknowledged by Store"
     assert labels["STORE_PROCESSING"] == "In Store Processing"
 

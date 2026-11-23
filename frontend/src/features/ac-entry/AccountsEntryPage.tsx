@@ -12,13 +12,19 @@ import { acEntryApi, dispatchSlipsApi } from './api';
 import {
   draftComplete,
   draftIssues,
+  gsDraftComplete,
+  gsDraftDirty,
+  gsDraftIssues,
   initialDrafts,
   isDirty,
   localToday,
   toDraft,
+  toGsDraft,
+  toGsEntryBody,
   toSaveLines,
+  type GsEntryDraft,
 } from './rules';
-import type { AcEntryLine, AcEntryState, Drafts, LineDraft } from './types';
+import type { AcEntryLine, AcEntryState, AcGsEntry, Drafts, LineDraft } from './types';
 
 interface Props {
   gsId: string;
@@ -32,13 +38,18 @@ interface Props {
  * Accounts entry per action line (change plan Phase 8; AMD-18, AMD-19; DEC-22; G-22).
  * Each line shows only the fields its action flags require. Completing generates the Dispatch Slip
  * PDF for the lines that ship goods and notifies Dispatch.
+ *
+ * DEC-71 (P11): a goods slip of the Intermediate Store flow takes ONE Challan (only if goods ship)
+ * and ONE Credit Note (only if it has Issue CN) for the whole goods slip; its Replacement Slip lines
+ * are read-only here.
  */
 export function AccountsEntryPage({ gsId, onBack, onOpenGs, onOpenPartyNotification }: Props) {
   const { can } = useAuth();
   const [data, setData] = useState<AcEntryState | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [drafts, setDrafts] = useState<Drafts>({});
-  const [busy, setBusy] = useState<'save' | 'complete' | 'print' | null>(null);
+  const [gsDraft, setGsDraft] = useState<GsEntryDraft | null>(null);
+  const [busy, setBusy] = useState<'save' | 'complete' | 'print' | 'print-slip' | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [completeOpen, setCompleteOpen] = useState(false);
@@ -49,6 +60,7 @@ export function AccountsEntryPage({ gsId, onBack, onOpenGs, onOpenPartyNotificat
   const apply = useCallback((state: AcEntryState) => {
     setData(state);
     setDrafts(initialDrafts(state.lines));
+    setGsDraft(state.gs_entry ? toGsDraft(state.gs_entry) : null);
   }, []);
 
   const load = useCallback(() => {
@@ -71,15 +83,21 @@ export function AccountsEntryPage({ gsId, onBack, onOpenGs, onOpenPartyNotificat
     };
   }, [gsId, apply, reloadKey]);
 
-  const dirty = useMemo(() => (data ? isDirty(data.lines, drafts) : false), [data, drafts]);
+  const gsEntry = data?.per_gs && data.gs_entry ? data.gs_entry : null;
+  const dirty = useMemo(() => {
+    if (!data) return false;
+    if (gsEntry) return gsDraft ? gsDraftDirty(gsEntry, gsDraft) : false;
+    return isDirty(data.lines, drafts);
+  }, [data, drafts, gsEntry, gsDraft]);
   const issues = useMemo(() => {
     if (!data) return [];
+    if (gsEntry) return gsDraft ? gsDraftIssues(gsEntry, gsDraft, today) : [];
     return data.lines.flatMap((l) =>
       draftIssues(l, drafts[l.id] ?? toDraft(l), today).map(
         (m) => `Line ${String(l.line_no)} ${l.action_label}: ${m}`,
       ),
     );
-  }, [data, drafts, today]);
+  }, [data, drafts, today, gsEntry, gsDraft]);
 
   const back = (
     <Button type="button" variant="ghost" onClick={onBack}>
@@ -120,12 +138,19 @@ export function AccountsEntryPage({ gsId, onBack, onOpenGs, onOpenPartyNotificat
     setBusy('save');
     setActionError(null);
     setNotice(null);
-    acEntryApi
-      .save(
-        gsId,
-        { ac_action_slip_id: data.ac_action_slip_id, lines: toSaveLines(data.lines, drafts) },
-        newIdempotencyKey(),
-      )
+    const request =
+      gsEntry && gsDraft
+        ? acEntryApi.saveGsEntry(
+            gsId,
+            { ac_action_slip_id: data.ac_action_slip_id, ...toGsEntryBody(gsEntry, gsDraft) },
+            newIdempotencyKey(),
+          )
+        : acEntryApi.save(
+            gsId,
+            { ac_action_slip_id: data.ac_action_slip_id, lines: toSaveLines(data.lines, drafts) },
+            newIdempotencyKey(),
+          );
+    request
       .then((state) => {
         apply(state);
         setNotice('Saved.');
@@ -191,9 +216,36 @@ export function AccountsEntryPage({ gsId, onBack, onOpenGs, onOpenPartyNotificat
       });
   };
 
+  const printReplacementSlip = () => {
+    const win = window.open('', '_blank');
+    setBusy('print-slip');
+    setActionError(null);
+    acEntryApi
+      .printReplacementSlip(gsId)
+      .then((out) => {
+        if (win) {
+          win.opener = null;
+          win.location.href = out.url;
+        } else {
+          window.location.assign(out.url);
+        }
+      })
+      .catch((err: unknown) => {
+        win?.close();
+        setActionError(toApiError(err));
+      })
+      .finally(() => {
+        setBusy(null);
+      });
+  };
+
   const editable = data.can_edit;
-  const allDraftsComplete = data.lines.every((l) => draftComplete(l, drafts[l.id] ?? toDraft(l)));
+  const allDraftsComplete =
+    gsEntry && gsDraft
+      ? gsDraftComplete(gsEntry, gsDraft)
+      : data.lines.every((l) => draftComplete(l, drafts[l.id] ?? toDraft(l)));
   const dslip = data.dispatch_slip;
+  const slipTitle = data.slip_title ?? 'Replacement Slip';
 
   return (
     <div className="page">
@@ -207,6 +259,7 @@ export function AccountsEntryPage({ gsId, onBack, onOpenGs, onOpenPartyNotificat
           {data.party_name ? <span className="text-sm">{data.party_name}</span> : null}
           {data.slip_no ? (
             <Badge variant="neutral">
+              {data.per_gs ? `${slipTitle} ` : ''}
               {data.slip_no} v{data.version_no}
             </Badge>
           ) : null}
@@ -277,13 +330,43 @@ export function AccountsEntryPage({ gsId, onBack, onOpenGs, onOpenPartyNotificat
       {data.ac_action_slip_id === null ? (
         <div className="mt-3">
           <ErrorState
-            title="No finalised A/c Actions slip"
+            title={data.per_gs ? `No ${slipTitle} at Accounts` : 'No finalised A/c Actions slip'}
             error={{
               message:
+                data.complete_blockers[0] ??
                 'The Replacement Manager has not finalised the actions of this goods slip, or is revising them.',
             }}
             onRetry={load}
           />
+        </div>
+      ) : null}
+
+      {data.per_gs && data.ac_action_slip_id ? (
+        <div className="mt-3 flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4 text-sm sm:flex-row sm:items-center sm:justify-between dark:border-slate-800 dark:bg-slate-900">
+          <div className="min-w-0">
+            <p className="m-0 font-semibold">
+              {slipTitle} {data.slip_no} v{data.version_no}
+            </p>
+            {data.management_stamp ? (
+              <p
+                className="m-0 mt-1 text-xs text-emerald-800 dark:text-emerald-300"
+                style={{ wordBreak: 'break-word' }}
+                data-testid="ac-stamp"
+              >
+                {data.management_stamp}
+              </p>
+            ) : null}
+          </div>
+          {can('ac_entry', 'export') ? (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy !== null}
+              onClick={printReplacementSlip}
+            >
+              <Printer size={16} aria-hidden="true" /> Print {slipTitle}
+            </Button>
+          ) : null}
         </div>
       ) : null}
 
@@ -301,7 +384,20 @@ export function AccountsEntryPage({ gsId, onBack, onOpenGs, onOpenPartyNotificat
         </div>
       ) : null}
 
-      {data.lines.length > 0 ? (
+      {gsEntry && gsDraft ? (
+        <>
+          <GsEntryCard
+            entry={gsEntry}
+            draft={gsDraft}
+            editable={editable}
+            today={today}
+            onChange={(field, value) => {
+              setGsDraft((prev) => (prev ? { ...prev, [field]: value } : prev));
+            }}
+          />
+          <ReadOnlyLines lines={data.lines} />
+        </>
+      ) : data.lines.length > 0 ? (
         <>
           <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
             {data.lines_complete} of {data.lines_needing_data} line(s) needing data are entered
@@ -332,8 +428,12 @@ export function AccountsEntryPage({ gsId, onBack, onOpenGs, onOpenPartyNotificat
               : dirty
                 ? 'Unsaved changes.'
                 : data.can_complete
-                  ? 'Every line is entered. Complete to generate the Dispatch Slip.'
-                  : 'Partial saves are fine; complete once every line is entered (G-22).'}
+                  ? gsEntry
+                    ? 'Everything is entered. Complete the goods slip.'
+                    : 'Every line is entered. Complete to generate the Dispatch Slip.'
+                  : gsEntry
+                    ? 'Partial saves are fine; complete once everything is entered (G-22).'
+                    : 'Partial saves are fine; complete once every line is entered (G-22).'}
           </p>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -395,8 +495,9 @@ export function AccountsEntryPage({ gsId, onBack, onOpenGs, onOpenPartyNotificat
         }
       >
         <p className="text-sm">
-          The entries, the A/c Actions slip and the Replacement Manager&apos;s actions are frozen
-          after completion.
+          {data.per_gs
+            ? `The Challan / Credit Note and the ${slipTitle} are frozen after completion.`
+            : 'The entries, the A/c Actions slip and the Replacement Manager\u2019s actions are frozen after completion.'}
           {data.shipping_lines > 0
             ? ' A numbered Dispatch Slip PDF is generated for the lines that ship goods and Dispatch is notified.'
             : ' No line ships goods; the goods slip moves on to closure.'}
@@ -501,5 +602,108 @@ function EntryLineCard({
         </p>
       ) : null}
     </article>
+  );
+}
+
+function GsEntryCard({
+  entry,
+  draft,
+  editable,
+  today,
+  onChange,
+}: {
+  entry: AcGsEntry;
+  draft: GsEntryDraft;
+  editable: boolean;
+  today: string;
+  onChange: (field: keyof GsEntryDraft, value: string) => void;
+}) {
+  const field = (f: keyof GsEntryDraft, label: string, type: 'text' | 'date' | 'decimal') => (
+    <div className="flex flex-col gap-1">
+      <label
+        htmlFor={`ac-gs-${f}`}
+        className="text-xs font-medium text-slate-600 dark:text-slate-300"
+      >
+        {label}
+      </label>
+      <Input
+        id={`ac-gs-${f}`}
+        type={type === 'date' ? 'date' : 'text'}
+        inputMode={type === 'decimal' ? 'decimal' : undefined}
+        max={type === 'date' ? today : undefined}
+        maxLength={type === 'text' ? 60 : undefined}
+        className="h-11"
+        value={draft[f]}
+        disabled={!editable}
+        onChange={(e) => {
+          onChange(f, e.target.value);
+        }}
+      />
+    </div>
+  );
+  const complete = gsDraftComplete(entry, draft);
+  return (
+    <article
+      className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+      aria-label="Accounts entry of the goods slip"
+    >
+      <header className="flex flex-wrap items-start justify-between gap-2">
+        <p className="m-0 font-semibold">Accounts entry (whole goods slip)</p>
+        <Badge variant={complete ? 'success' : 'warning'}>
+          {complete ? 'Entered' : 'Needs data'}
+        </Badge>
+      </header>
+      {entry.requires_challan ? (
+        <fieldset className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <legend className="mb-1 text-sm font-semibold">Challan (goods to ship)</legend>
+          {field('challan_no', 'Challan No.', 'text')}
+          {field('challan_date', 'Challan Date', 'date')}
+        </fieldset>
+      ) : null}
+      {entry.requires_cn ? (
+        <fieldset className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <legend className="mb-1 text-sm font-semibold">Credit Note (Issue CN)</legend>
+          {field('cn_no', 'CN No.', 'text')}
+          {field('cn_date', 'CN Date', 'date')}
+          {field('cn_value', 'CN Value (₹)', 'decimal')}
+        </fieldset>
+      ) : null}
+      {entry.entered_at ? (
+        <p className="m-0 mt-2 text-xs text-slate-500">
+          Last entered {formatDateTime(entry.entered_at)}
+          {entry.entered_by_name ? ` · ${entry.entered_by_name}` : ''}
+        </p>
+      ) : null}
+    </article>
+  );
+}
+
+/** DEC-71: the Replacement Slip lines of a store-flow goods slip (read-only). */
+function ReadOnlyLines({ lines }: { lines: AcEntryLine[] }) {
+  if (lines.length === 0) return null;
+  return (
+    <section className="mt-4" aria-label="Replacement Slip lines">
+      <h2 className="m-0 text-sm font-semibold text-slate-700 dark:text-slate-200">Lines</h2>
+      <ul className="m-0 mt-2 flex list-none flex-col gap-2 p-0">
+        {lines.map((l) => (
+          <li
+            key={l.id}
+            className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-slate-800 dark:bg-slate-900"
+          >
+            <div className="min-w-0">
+              <p className="m-0 font-medium" style={{ wordBreak: 'break-word' }}>
+                #{l.line_no} {l.product_name}
+              </p>
+              <p className="m-0 text-xs text-slate-500">
+                {l.product_code ? `${l.product_code} · ` : ''}
+                {l.condition_label ? `${l.condition_label} · ` : ''}
+                {l.action_label}
+              </p>
+            </div>
+            <span className="shrink-0 font-semibold">{l.qty} pc</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

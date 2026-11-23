@@ -21,7 +21,9 @@ Commands run in one transaction and are idempotent on `Idempotency-Key` (G-16).
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from datetime import UTC, datetime
+from types import ModuleType
 from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -30,7 +32,13 @@ import structlog
 from sqlalchemy.orm import Session
 
 from app.core.db import UnitOfWork
-from app.core.errors import Conflict, NotFound, SystemGuardViolation, ValidationFailed
+from app.core.errors import (
+    Conflict,
+    NotFound,
+    ServiceUnavailable,
+    SystemGuardViolation,
+    ValidationFailed,
+)
 from app.core.idempotency import IdempotencyKey, IdempotentResult, run_idempotent
 from app.core.permissions import EffectivePermissions
 from app.core.security import CurrentUser
@@ -56,10 +64,24 @@ from app.modules.management_approval.schemas import (
     VerifyOut,
 )
 from app.modules.notifications import service as notifications
+from app.shared.storage import Bucket, StorageService
 
 log = structlog.get_logger(__name__)
 
+
+def ac_entry() -> ModuleType:
+    """The Accounts service module (DEC-71 gate / reopen). Imported on use: ac_entry imports this
+    module (stamp, gate), so a top-level import would be circular."""
+    from app.modules.ac_entry import service
+
+    return service
+
+
 EDIT_STATUS = "ANALYSIS_COMPLETED"
+# DEC-71 (P11): Management may also change a goods slip at Accounts (entry not completed) or on
+# hold (all Not Allowed); the change reopens it (Replacement Slip withdrawn) and its next approval
+# routes it to Accounts again.
+REOPEN_STATUSES = frozenset({"ACCOUNTS_PENDING", "NOT_ALLOWED_HOLD"})
 # DEC-69: Pending is not used on the Intermediate Store flow (single round); every other action of
 # the product's profile is open to Management (DEC-70, incl. ISSUE_CN).
 RETIRED_ACTIONS = frozenset({"PENDING_BP"})
@@ -142,6 +164,13 @@ def stamp_for_print(session: Session, gs_id: UUID) -> str | None:
         return None
     latest = repo.latest_approval(session, gs_id)
     return _stamp_text(session, latest) if latest else None
+
+
+def accounts_gate_problem(session: Session, gs_id: UUID) -> str | None:
+    """DEC-70 / Q18: why the goods slip may not reach Accounts yet (None = the gate passes).
+    Same rule as rms_private.gs_management_gate_problem. Service-to-service API for ac_entry."""
+    problem = repo.gate_problem(session, gs_id)
+    return str(problem) if problem else None
 
 
 def assert_accounts_gate(session: Session, gs_id: UUID) -> None:
@@ -302,7 +331,8 @@ class ManagementApprovalService:
             station_name=gs["station_name"],
             stores=stores,
             items=list(items.values()),
-            can_edit=may_approve and gs["status"] == EDIT_STATUS,
+            can_edit=may_approve
+            and (gs["status"] == EDIT_STATUS or gs["status"] in REOPEN_STATUSES),
             can_approve=may_approve and gs["status"] == EDIT_STATUS,
             blocked_reason=blocked,
             open_request=open_request,
@@ -311,16 +341,27 @@ class ManagementApprovalService:
             approvals=[_approval_out(a) for a in repo.list_approvals(session, gs_id)],
             stamp=_stamp(session, gs),
             accounts_gate=AccountsGateOut(passes=problem is None, problem=problem),
+            reopen_notice=(
+                "The goods slip is at Accounts: saving a change withdraws its Replacement Slip "
+                "until you approve it again."
+                if gs["status"] == "ACCOUNTS_PENDING"
+                else "The goods slip is on hold (every decision Not Allowed): saving a change "
+                "reopens it; approve it to send it on."
+                if gs["status"] == "NOT_ALLOWED_HOLD"
+                else None
+            ),
         )
 
-    def _editable(self, session: Session, gs_id: UUID) -> dict[str, Any]:
+    def _editable(
+        self, session: Session, gs_id: UUID, *, reopenable: bool = False
+    ) -> dict[str, Any]:
         gs = self._load_gs(session, gs_id, lock=True)
         if not gs["on_store_flow"]:
             raise Conflict(
                 f"Goods slip {gs['gs_no']} is not on the Intermediate Store flow",
                 code="GS_NOT_ON_STORE_FLOW",
             )
-        if gs["status"] != EDIT_STATUS:
+        if gs["status"] != EDIT_STATUS and not (reopenable and gs["status"] in REOPEN_STATUSES):
             waiting = [
                 s["store_code"]
                 for s in repo.store_progress(session, gs_id)
@@ -366,7 +407,7 @@ class ManagementApprovalService:
         gs_id: UUID,
         payload: ChangesIn,
     ) -> ManagementGsOut:
-        gs = self._editable(session, gs_id)
+        gs = self._editable(session, gs_id, reopenable=True)
         version_id = gs["item_field_profile_version_id"]
         groups = {
             (g["gs_item_id"], g["condition_field_id"]): g for g in repo.groups(session, gs_id)
@@ -444,6 +485,11 @@ class ManagementApprovalService:
             planned.append((grp, sorted(new), reason, before))
         if not planned:
             raise ValidationFailed("Nothing changed", code="NO_CHANGES")
+        if gs["status"] in REOPEN_STATUSES:
+            # DEC-71: withdraw the Replacement Slip / leave the hold first (one transaction).
+            ac_entry().reopen_for_management(
+                session, gs_id, actor, "; ".join(sorted({p[2] for p in planned}))
+            )
 
         revision_no = repo.max_revision(session, gs_id) + 1
         history: list[dict[str, Any]] = []
@@ -500,17 +546,32 @@ class ManagementApprovalService:
         gs_id: UUID,
         payload: ApproveIn,
         idem: IdempotencyKey,
+        storage: StorageService,
     ) -> IdempotentResult:
-        with self._uow.transaction(actor.id) as session:
-            return run_idempotent(
-                session,
-                idem,
-                actor.id,
-                lambda: (
-                    200,
-                    self._approve(session, actor, perms, gs_id, payload).model_dump(mode="json"),
-                ),
-            )
+        uploaded: list[str] = []
+        try:
+            with self._uow.transaction(actor.id) as session:
+                return run_idempotent(
+                    session,
+                    idem,
+                    actor.id,
+                    lambda: (
+                        200,
+                        self._approve(
+                            session, actor, perms, gs_id, payload, storage, uploaded.append
+                        ).model_dump(mode="json"),
+                    ),
+                )
+        except Exception:
+            # Rolled back: the Replacement Slip PDF stored by the routing has no row; remove it.
+            for path in uploaded:
+                try:
+                    storage.delete(Bucket.DOCUMENTS, path)
+                except ServiceUnavailable:
+                    log.error(
+                        "replacement_slip_orphan_pdf_not_removed", gs_id=str(gs_id), path=path
+                    )
+            raise
 
     def _approve(
         self,
@@ -519,6 +580,8 @@ class ManagementApprovalService:
         perms: EffectivePermissions,
         gs_id: UUID,
         payload: ApproveIn,
+        storage: StorageService,
+        on_uploaded: Callable[[str], None],
     ) -> ManagementGsOut:
         gs = self._editable(session, gs_id)
         requests = repo.list_requests(session, gs_id)
@@ -551,8 +614,11 @@ class ManagementApprovalService:
             data={"gs_no": gs["gs_no"], "ref": ref},
             dedupe_key=f"mgmt-approved:{approval_id}",
         )
+        # DEC-71 (P11): with the gate passing, the goods slip goes on to Accounts (or on hold).
+        routed = ac_entry().route_to_accounts(session, gs_id, actor, storage, on_uploaded)
         log.info(
             "management_approved",
+            routed_to=routed,
             gs_id=str(gs_id),
             approval_no=approval["approval_no"],
             ref=ref,

@@ -132,18 +132,22 @@ test.describe('P9 store analysis', () => {
       await submit.click();
       await expect(dialog.getByText('Submit the analysis?')).toBeVisible();
       await dialog.getByLabel('Remarks (optional)').fill('Checked on the bench');
-      await dialog.getByRole('button', { name: 'Submit', exact: true }).click();
+      // Q36 + DEC-71 (P11): the only store's submission would send the GS on to Accounts, so the
+      // request for Management approval (reason) goes with the submission.
+      await dialog.getByLabel('Also send for Management approval').check();
+      const send = dialog.getByRole('button', { name: 'Submit & send for approval' });
+      await expect(send).toBeDisabled(); // a reason is required
+      await dialog
+        .getByLabel('Reason for Management (required)')
+        .fill('Party asks for a credit note');
+      expect((await send.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+      await expectNoHorizontalOverflow(dt.page);
+      await dt.page.screenshot({ path: `test-results/p9/${vp.name}-approval.png`, fullPage: true });
+      await send.click();
       await expect(page.getByText(/Analysis submitted for/)).toBeVisible({ timeout: 20_000 });
       await expect(page).toContainText('Every store has submitted');
       await expect(page.getByRole('button', { name: 'Submit analysis' })).toHaveCount(0);
       await expect.poll(() => gsStatus(gs.id)).toBe('ANALYSIS_COMPLETED');
-
-      // Q36: after its submission the store may send the GS for Management approval (reason).
-      await page.getByRole('button', { name: /Send for Management Approval/ }).click();
-      await dialog.getByLabel('Reason (required)').fill('Party asks for a credit note');
-      await expectNoHorizontalOverflow(dt.page);
-      await dt.page.screenshot({ path: `test-results/p9/${vp.name}-approval.png`, fullPage: true });
-      await dialog.getByRole('button', { name: 'Send' }).click();
       await expect(page.getByTestId('approval-request')).toContainText(
         'Party asks for a credit note',
         { timeout: 20_000 },

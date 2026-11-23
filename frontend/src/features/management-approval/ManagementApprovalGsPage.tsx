@@ -310,6 +310,15 @@ export const ManagementApprovalGsPage: React.FC<Props> = ({ gsId, onBack, onOpen
           {data.blocked_reason}
         </p>
       ) : null}
+      {data.reopen_notice && data.can_edit ? (
+        <p
+          className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+          role="note"
+          data-testid="reopen-notice"
+        >
+          {data.reopen_notice}
+        </p>
+      ) : null}
       {!data.accounts_gate.passes && data.accounts_gate.problem ? (
         <p className="text-xs text-slate-500 dark:text-slate-400" data-testid="accounts-gate">
           Before Accounts: {data.accounts_gate.problem.replace(/^DEC-70( \(Q18\))?: /, '')}
@@ -472,17 +481,19 @@ export const ManagementApprovalGsPage: React.FC<Props> = ({ gsId, onBack, onOpen
               >
                 Save changes
               </Button>
-              <Button
-                type="button"
-                className="min-h-[44px]"
-                disabled={changed.length > 0 || alreadyValid || !data.can_approve}
-                onClick={() => {
-                  setApproveError(null);
-                  setApproveOpen(true);
-                }}
-              >
-                Approve
-              </Button>
+              {data.can_approve ? (
+                <Button
+                  type="button"
+                  className="min-h-[44px]"
+                  disabled={changed.length > 0 || alreadyValid}
+                  onClick={() => {
+                    setApproveError(null);
+                    setApproveOpen(true);
+                  }}
+                >
+                  Approve
+                </Button>
+              ) : null}
             </div>
           </div>
           {saveError ? <ErrorState error={saveError} title="The changes were not saved" /> : null}

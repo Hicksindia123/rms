@@ -130,6 +130,8 @@ export interface ManagementGs {
   approvals: Approval[];
   stamp: Stamp;
   accounts_gate: { passes: boolean; problem?: string | null };
+  /** DEC-71 (P11): saving a change reopens a goods slip at Accounts / on hold. */
+  reopen_notice?: string | null;
 }
 
 export interface QueueRow {

@@ -13,8 +13,8 @@ import { lockedGs, productOf } from './support/transfer_slips';
 /**
  * Phase P10 (docs/RMS_PHASE_PROMPTS_20-11-2026.md; DEC-70) against the REAL local stack, at 360 px
  * and 1280 px. Setup through the API: one locked Replacement GS with a DT (DMT) line of 3; the DT
- * store acknowledges, routes everything "Issue to Store", decides "Dispatch New Piece", submits
- * (the GS is Analysis Completed) and sends it for Management approval with a reason. In the
+ * store acknowledges, routes everything "Issue to Store", decides "Dispatch New Piece" and submits
+ * together with a request for Management approval (reason; the GS stays Analysis Completed). In the
  * browser, Management opens "Management Approval", changes the first condition to Issue CN with a
  * reason, saves, approves (e-approval stamp) and verifies it; the goods slip page shows the stamp.
  * No console errors, no horizontal scroll, touch targets ≥ 44 px.
@@ -98,17 +98,13 @@ async function analysedAndSent(tag: string): Promise<{ id: string; gs_no: string
               decisions: [{ action_code: 'SEND_NEW', qty: g.qty }],
             })),
         ),
+      // DEC-71 (P11): the only store's submission would route the GS to Accounts at once, so the
+      // request goes with the submission (Q36: after its own analysis, same transaction).
+      management_approval_reason: 'Party asks for a credit note',
     },
     true,
   );
   await expect.poll(() => gsStatus(gs.id)).toBe('ANALYSIS_COMPLETED');
-  await api(
-    DT_STORE,
-    'POST',
-    `/store-analysis/gs/${gs.id}/management-approval`,
-    { store_id: dtSlip.store.id, reason: 'Party asks for a credit note' },
-    true,
-  );
   return gs;
 }
 

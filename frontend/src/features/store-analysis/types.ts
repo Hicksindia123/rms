@@ -112,4 +112,6 @@ export interface StoreAnalysisSubmitIn {
   store_id: string;
   lines: StoreAnalysisLineIn[];
   remarks?: string | null;
+  /** DEC-71 / Q36: submit and send for Management approval in one step (reason). */
+  management_approval_reason?: string | null;
 }

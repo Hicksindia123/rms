@@ -1834,6 +1834,9 @@ function Shell() {
                       onOpen={(id: string) => {
                         navigate(`/accounts-entry/${id}`);
                       }}
+                      onOpenGs={(id: string) => {
+                        navigate(`/gs/${id}`);
+                      }}
                     />
                   )
                 ) : (

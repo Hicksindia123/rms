@@ -163,6 +163,8 @@ class ManagementGsOut(BaseModel):
     approvals: list[ApprovalOut] = Field(default_factory=list)
     stamp: StampOut
     accounts_gate: AccountsGateOut
+    # DEC-71 (P11): set when saving a change reopens a goods slip at Accounts / on hold.
+    reopen_notice: str | None = None
 
 
 class QueueRowOut(BaseModel):

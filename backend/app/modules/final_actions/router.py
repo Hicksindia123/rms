@@ -114,11 +114,13 @@ def submit_store_analysis(
     user: AnalysisUser,
     uow: UowDep,
     idem: IdempotencyKeyDep,
+    storage: StorageDep,
 ) -> JSONResponse:
     """DEC-69 / G-21: submit the store's decisions for its part of the GS (every item + condition
     exactly; Issue CN and Pending are refused). The last store moves the GS to
-    ANALYSIS_COMPLETED. `Idempotency-Key` required (G-16)."""
-    return StoreAnalysisService(uow).submit(user, gs_id, payload, idem).to_response()
+    ANALYSIS_COMPLETED and, when the Management gate passes, on to Accounts (DEC-71).
+    `Idempotency-Key` required (G-16)."""
+    return StoreAnalysisService(uow).submit(user, gs_id, payload, idem, storage).to_response()
 
 
 @store_analysis_router.post("/gs/{gs_id}/management-approval", response_model=StoreAnalysisGsOut)

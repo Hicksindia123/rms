@@ -285,6 +285,10 @@ class StoreAnalysisSubmitIn(BaseModel):
     store_id: UUID
     lines: list[StoreAnalysisLineIn] = Field(..., min_length=1, max_length=500)
     remarks: str | None = Field(None, max_length=500)
+    # DEC-71 (P11) / Q36: "Submit and send for Management approval" in one transaction. The last
+    # store's submission routes the goods slip to Accounts at once, so its request must be recorded
+    # with the submission (after it, before the Accounts gate).
+    management_approval_reason: str | None = Field(None, min_length=3, max_length=500)
 
 
 class ManagementApprovalRequestIn(BaseModel):

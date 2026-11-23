@@ -48,9 +48,16 @@ class FakeStorage:
     objects: dict[tuple[str, str], tuple[int, str]] = field(default_factory=dict)
     deleted: list[tuple[str, str]] = field(default_factory=list)
     signed_urls: list[tuple[str, str, int]] = field(default_factory=list)
+    uploads: dict[tuple[str, str], bytes] = field(default_factory=dict)
 
     def put(self, bucket: str, path: str, size: int, content_type: str) -> None:
         self.objects[(bucket, path)] = (size, content_type)
+
+    def upload(self, bucket: Bucket, path: str, data: bytes, content_type: str) -> None:
+        """Server-side upload of a generated PDF (e.g. the DEC-71 Replacement Slip at the
+        Accounts gate, reached from the store-analysis / Management tests)."""
+        self.uploads[(bucket.value, path)] = data
+        self.put(bucket.value, path, len(data), content_type)
 
     def create_signed_upload_url(self, bucket: Bucket, path: str) -> SignedUpload:
         return SignedUpload(bucket.value, path, f"http://storage.test/up/{path}?token=t", "tok")

@@ -16,11 +16,14 @@ from app.core.security import CurrentUser
 from app.modules.ac_entry.schemas import (
     AcEntryQueueItem,
     AcEntryState,
+    AcHoldItem,
     CompleteAcEntryIn,
     DispatchIn,
     DispatchSlipOut,
     DispatchSlipPrintOut,
+    ReplacementSlipPrintOut,
     SaveAcEntryIn,
+    SaveGsEntryIn,
 )
 from app.modules.ac_entry.service import AcEntryService, DispatchSlipService
 from app.shared.storage import StorageService, get_storage
@@ -47,6 +50,13 @@ def get_queue(
     return AcEntryService(uow).queue(user, completed=completed)
 
 
+@router.get("/hold", response_model=list[AcHoldItem])
+def get_hold(user: ViewUser, uow: UowDep) -> list[AcHoldItem]:
+    """DEC-71 (Q21): goods slips on hold because every decision is Not Allowed (no Accounts
+    entry; read-only)."""
+    return AcEntryService(uow).hold(user)
+
+
 @router.get("/gs/{gs_id}", response_model=AcEntryState)
 def get_entry(
     gs_id: UUID, user: ViewUser, perms: EffectivePermissionsDep, uow: UowDep
@@ -67,6 +77,28 @@ def save_entry(
     """AMD-18 / G-22: save CN / Challan data (partial saves allowed). `Idempotency-Key` required
     (G-16)."""
     return AcEntryService(uow).save(gs_id, payload, user, perms, idem).to_response()
+
+
+@router.put("/gs/{gs_id}/entry", response_model=AcEntryState)
+def save_gs_entry(
+    gs_id: UUID,
+    payload: SaveGsEntryIn,
+    user: EditUser,
+    perms: EffectivePermissionsDep,
+    uow: UowDep,
+    idem: IdempotencyKeyDep,
+) -> JSONResponse:
+    """DEC-71 / G-22: the goods slip's one Challan (only if goods ship) and one Credit Note (only
+    if it has Issue CN); partial saves allowed. `Idempotency-Key` required (G-16)."""
+    return AcEntryService(uow).save_gs_entry(gs_id, payload, user, perms, idem).to_response()
+
+
+@router.post("/gs/{gs_id}/replacement-slip/print", response_model=ReplacementSlipPrintOut)
+def print_replacement_slip(
+    gs_id: UUID, user: ExportUser, uow: UowDep, storage: StorageDep
+) -> ReplacementSlipPrintOut:
+    """DEC-71: print / re-print the current Replacement Slip PDF (logged in print_logs)."""
+    return AcEntryService(uow).print_replacement_slip(gs_id, user, storage)
 
 
 @router.post("/gs/{gs_id}/complete", response_model=AcEntryState)

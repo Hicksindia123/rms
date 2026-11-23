@@ -20,6 +20,16 @@ AMD-18, AMD-19; DEC-22, DEC-26, DEC-41, DEC-47; G-15, G-16, G-18, G-22).
   intermediate store; later rounds while it is open after that stage, moving stock out of the
   Pending Hold. The screen shows the latest round's CURRENT slip.
 
+Intermediate Store flow (Phase P11, DEC-71): when every store submitted its analysis and the
+Management gate passes (DEC-70), `route_to_accounts` moves the goods slip to ACCOUNTS_PENDING with
+one Replacement Slip (the A/c Actions slip, ac_action_slips round 1) - or to NOT_ALLOWED_HOLD when
+no decision needs a Challan or a Credit Note (Q21). Accounts enters ONE Challan (goods ship) and ONE
+Credit Note (Issue CN) per goods slip (ac_gs_entries). Completion generates the Dispatch Slip
+(DISPATCH_PENDING) or settles the pieces and hands the goods slip to closure; the returned pieces
+leave each item's Intermediate Store location. `reopen_for_management` withdraws the Replacement
+Slip when Management changes a goods slip at Accounts (or on hold); its next approval routes it
+again (Replacement Slip v+1).
+
 Each command runs in one transaction and is idempotent on `Idempotency-Key` (G-16). The DB enforces
 G-22 again with triggers, so no path can bypass it.
 """
@@ -53,13 +63,17 @@ from app.modules.ac_entry.schemas import (
     AcEntryLine,
     AcEntryQueueItem,
     AcEntryState,
+    AcGsEntry,
+    AcHoldItem,
     CompleteAcEntryIn,
     DispatchIn,
     DispatchSlipLine,
     DispatchSlipOut,
     DispatchSlipPrintOut,
     DispatchSlipSummary,
+    ReplacementSlipPrintOut,
     SaveAcEntryIn,
+    SaveGsEntryIn,
 )
 from app.modules.attachments.service import signed_url_ttl
 from app.modules.closure import service as closure_service
@@ -92,6 +106,12 @@ PENDING_HOLD_LOCATION = "PENDING_HOLD"
 # DB guards (G-22) check the same list.
 OPEN_AFTER_HOLD = frozenset({"IN_PROCESS", "COMMERCIAL_RESOLUTION", "AWAITING_NOTIFICATION"})
 RETURNED_GOODS_SETTING = "dispatch.returned_goods_location_by_action"
+# DEC-71 (P11): Intermediate Store flow statuses.
+ANALYSIS_DONE_STATUS = "ANALYSIS_COMPLETED"
+ACCOUNTS_STATUS = "ACCOUNTS_PENDING"
+HOLD_STATUS = "NOT_ALLOWED_HOLD"
+DISPATCH_STATUS = "DISPATCH_PENDING"
+TO_CLOSURE_FROM = frozenset({HELD_STATUS, ACCOUNTS_STATUS, DISPATCH_STATUS})
 PDF_MIME = "application/pdf"
 
 # rms_move_stock movement type per destination location class (stock_movements CHECK).
@@ -198,15 +218,22 @@ def _dslip_out(session: Session, row: dict[str, Any]) -> DispatchSlipOut:
 # --- shared commercial-completion steps (service-level; used by both services below) -----------
 
 
-def _stage_ok(gs_status: str, round_no: int) -> bool:
+def _stage_ok(
+    gs_status: str, round_no: int, *, per_gs: bool = False, dispatch: bool = False
+) -> bool:
     """DEC-57: round 1 is handled while the goods slip is held at the intermediate store; a
-    re-action round while it is open after that stage."""
+    re-action round while it is open after that stage. DEC-71: a store-flow goods slip is entered
+    while ACCOUNTS_PENDING and dispatched while DISPATCH_PENDING."""
+    if per_gs:
+        return gs_status == (DISPATCH_STATUS if dispatch else ACCOUNTS_STATUS)
     if round_no == 1:
         return gs_status == HELD_STATUS
     return gs_status in OPEN_AFTER_HOLD
 
 
-def _stage_text(round_no: int) -> str:
+def _stage_text(round_no: int, *, per_gs: bool = False, dispatch: bool = False) -> str:
+    if per_gs:
+        return "pending dispatch" if dispatch else "at Accounts"
     return (
         "held at the intermediate store"
         if round_no == 1
@@ -246,6 +273,7 @@ def _settle_returned_goods(
     reference_id: UUID,
     reason: str,
     actor_id: UUID,
+    source_by_item: dict[UUID, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Move the returned pieces of each action line out of `source_code` (the intermediate store,
     or the Pending Hold for a re-action round) to the location the setting names (DEC-47, DEC-57:
@@ -260,11 +288,20 @@ def _settle_returned_goods(
     mapping = _returned_goods_map(session)
     if not mapping:
         return []
-    store = ledger_service.get_location_by_code(session, source_code)
-    if not store:
-        raise Conflict(
-            f"Inventory location {source_code} is not configured", code="LOCATION_NOT_FOUND"
-        )
+    sources: dict[str, dict[str, Any]] = {}
+
+    def source_of(ln: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        # DEC-71: on the store flow the pieces wait in their item's Intermediate Store location.
+        code = (source_by_item or {}).get(ln["gs_item_id"], source_code)
+        if code not in sources:
+            loc = ledger_service.get_location_by_code(session, code)
+            if not loc:
+                raise Conflict(
+                    f"Inventory location {code} is not configured", code="LOCATION_NOT_FOUND"
+                )
+            sources[code] = loc
+        return code, sources[code]
+
     targets: dict[str, dict[str, Any]] = {}
     for ln in lines:
         loc_code = mapping.get(ln["action_code"])
@@ -287,7 +324,8 @@ def _settle_returned_goods(
     ordered = sorted(lines, key=lambda ln: (not ships(ln), ln["line_no"]))
     for ln in ordered:
         loc_code = mapping.get(ln["action_code"])
-        if not loc_code or loc_code == source_code:
+        from_code, store = source_of(ln)
+        if not loc_code or loc_code == from_code:
             continue  # pieces stay where they are; the closure checklist shows them.
         target = targets[loc_code]
         lot_id = repo.find_lot_for_item(session, ln["gs_item_id"])
@@ -325,7 +363,7 @@ def _to_closure(session: Session, gs: dict[str, Any], *, reason: str, by: UUID) 
     """AMD-19 / G-15: the goods slip leaves the intermediate store stage for the closure engine,
     which decides the next status from its single checklist (DB guards still apply). DEC-57: after
     a re-action round the goods slip is already past the store stage; the engine re-evaluates."""
-    if gs["status"] != HELD_STATUS:
+    if gs["status"] not in TO_CLOSURE_FROM:
         return closure_service.sync_status(session, gs["id"], by) or str(gs["status"])
     gs_service.change_status(
         session,
@@ -337,6 +375,382 @@ def _to_closure(session: Session, gs: dict[str, Any], *, reason: str, by: UUID) 
         by=by,
     )
     return closure_service.sync_status(session, gs["id"], by) or CLOSURE_ENTRY_STATUS
+
+
+# =================================================================================================
+# DEC-71 (Phase P11): the Accounts gate and the Replacement Slip of a store-flow goods slip
+# =================================================================================================
+
+
+def _template_name(session: Session) -> str | None:
+    template = repo.published_template(session, repo.AC_SLIP_TEMPLATE)
+    return str(template["name"]) if template else None
+
+
+def route_to_accounts(
+    session: Session,
+    gs_id: UUID,
+    actor: CurrentUser,
+    storage: StorageService,
+    on_uploaded: Callable[[str], None],
+) -> str | None:
+    """DEC-71: a store-flow goods slip in ANALYSIS_COMPLETED reaches Accounts once every store
+    submitted its analysis and the Management gate passes (DEC-70 / Q18). Called in the same
+    transaction by the last store submission (P9) and by a Management approval (P10).
+
+    Returns the new status (ACCOUNTS_PENDING with its Replacement Slip, or NOT_ALLOWED_HOLD when no
+    decision needs a Challan or a Credit Note, Q21), or None while the gate does not pass yet. The
+    DB checks the same on the status change (G-03) and on the slip insert."""
+    gs = repo.get_gs_header(session, gs_id, lock=True)
+    if not gs or gs["status"] != ANALYSIS_DONE_STATUS or not repo.gs_on_store_flow(session, gs_id):
+        return None
+    if not repo.gs_store_analysis_complete(session, gs_id):
+        return None
+    problem = management_approval.accounts_gate_problem(session, gs_id)
+    if problem is not None:
+        log.info("accounts_gate_waiting", gs_id=str(gs_id), problem=problem)
+        return None
+    management_approval.assert_accounts_gate(session, gs_id)  # DEC-70 / Q18 (service guard)
+
+    if not repo.gs_needs_accounts(session, gs_id):
+        gs_service.change_status(
+            session,
+            gs_id=gs_id,
+            from_status=ANALYSIS_DONE_STATUS,
+            to_status=HOLD_STATUS,
+            step_code=ACCOUNTS_STEP,
+            reason="Every decision is Not Allowed: no Challan, no Credit Note (DEC-71, Q21)",
+            by=actor.id,
+        )
+        notifications.publish(
+            session,
+            "GS_NOT_ALLOWED_HOLD",
+            title=f"{gs['gs_no']}: on hold - every decision Not Allowed",
+            body=(
+                f"{gs['party_name'] or 'Goods slip'}: nothing to ship and no credit note, so the "
+                "goods slip stays open on hold (no Accounts entry). Management may change it."
+            ),
+            entity_type="goods_slips",
+            entity_id=gs_id,
+            gs_id=gs_id,
+            data={"gs_no": gs["gs_no"]},
+            dedupe_key=f"gs-not-allowed-hold:{gs_id}:{repo.max_revision(session, gs_id)}",
+        )
+        log.info("accounts_gate_hold", gs_id=str(gs_id))
+        return HOLD_STATUS
+
+    gs_service.change_status(
+        session,
+        gs_id=gs_id,
+        from_status=ANALYSIS_DONE_STATUS,
+        to_status=ACCOUNTS_STATUS,
+        step_code=ACCOUNTS_STEP,
+        reason="Every store analysed the goods slip; Management gate passed (DEC-71)",
+        by=actor.id,
+    )
+    slip_id, slip_no, version_no = _create_replacement_slip(
+        session, gs, actor, storage, on_uploaded
+    )
+    # Item 5: Accounts in-app alert (rule AC_ACTIONS_SLIP_READY → ACCOUNTS; email deferred, Q22).
+    title = _template_name(session) or "Replacement Slip"
+    notifications.publish(
+        session,
+        "AC_ACTIONS_SLIP_READY",
+        title=f"{gs['gs_no']}: {title} {slip_no} v{version_no} at Accounts",
+        body=(
+            f"{gs['party_name'] or 'Goods slip'}: every Intermediate Store analysed it. Enter the "
+            "Challan and / or the Credit Note of the goods slip."
+        ),
+        entity_type=repo.AC_SLIP_ENTITY,
+        entity_id=slip_id,
+        gs_id=gs_id,
+        data={"gs_no": gs["gs_no"], "slip_no": slip_no, "version_no": version_no},
+        dedupe_key=f"ac-slip-ready:{slip_id}",
+    )
+    log.info("accounts_gate_passed", gs_id=str(gs_id), slip_no=slip_no, version_no=version_no)
+    return ACCOUNTS_STATUS
+
+
+def reopen_for_management(session: Session, gs_id: UUID, actor: CurrentUser, reason: str) -> bool:
+    """DEC-71: Management changes a goods slip at Accounts (entry not completed) or on hold. The
+    current Replacement Slip is withdrawn (SUPERSEDED, Accounts told) and the goods slip returns to
+    ANALYSIS_COMPLETED; the next approval routes it again (Replacement Slip v+1). Returns True when
+    it reopened the goods slip. The DB refuses the same without a withdrawn slip (G-03) and never
+    supersedes a completed one (G-22)."""
+    gs = repo.get_gs_header(session, gs_id, lock=True)
+    if not gs or gs["status"] not in (ACCOUNTS_STATUS, HOLD_STATUS):
+        return False
+    if gs["status"] == ACCOUNTS_STATUS:
+        slip = repo.current_ac_slip(session, gs_id)
+        if slip is not None:
+            if repo.get_completion(session, slip["id"]) is not None:
+                raise SystemGuardViolation(
+                    "G-22",
+                    f"G-22: Accounts completed {slip['slip_no']} v{slip['version_no']}; the goods "
+                    "slip can no longer be changed",
+                )
+            repo.supersede_ac_slip(
+                session, slip["id"], by=actor.id, reason=f"Management change: {reason}"
+            )
+            notifications.publish(
+                session,
+                "AC_ACTIONS_SLIP_SUPERSEDED",
+                title=f"{gs['gs_no']}: {slip['slip_no']} v{slip['version_no']} withdrawn",
+                body=(
+                    f"{actor.full_name} (Management) is changing the goods slip: {reason}. "
+                    "Accounts gets a new version after Management approves it."
+                ),
+                entity_type=repo.AC_SLIP_ENTITY,
+                entity_id=slip["id"],
+                gs_id=gs_id,
+                data={"gs_no": gs["gs_no"], "slip_no": slip["slip_no"]},
+                dedupe_key=f"ac-slip-superseded:{slip['id']}",
+            )
+    gs_service.change_status(
+        session,
+        gs_id=gs_id,
+        from_status=str(gs["status"]),
+        to_status=ANALYSIS_DONE_STATUS,
+        step_code=ACCOUNTS_STEP,
+        reason=f"Reopened for a Management change (DEC-71): {reason}",
+        by=actor.id,
+    )
+    log.info("accounts_reopened_for_management", gs_id=str(gs_id), from_status=gs["status"])
+    return True
+
+
+def _create_replacement_slip(
+    session: Session,
+    gs: dict[str, Any],
+    actor: CurrentUser,
+    storage: StorageService,
+    on_uploaded: Callable[[str], None],
+) -> tuple[UUID, str, int]:
+    """DEC-71 (Q19, Q20): the GS-wise Replacement Slip PDF (template AC_ACTIONS_SLIP, HICKS logo,
+    GS details, lines with store + condition + action + qty, totals per action, Management stamp)
+    stored as a new ac_action_slips version (the DB creates its lines and the per-GS entry)."""
+    template = repo.published_template(session, repo.AC_SLIP_TEMPLATE)
+    if not template:
+        raise Conflict("No published AC_ACTIONS_SLIP print template", code="TEMPLATE_NOT_PUBLISHED")
+    head = repo.get_gs_print_header(session, gs["id"])
+    if head is None:
+        raise NotFound(f"Goods slip {gs['id']} not found", code="GS_NOT_FOUND")
+    tz = _tz(session)
+    fmt = _date_fmt(session)
+    prev = repo.latest_slip_identity(session, gs["id"])
+    slip_no = str(prev["slip_no"]) if prev else repo.next_number(session, repo.AC_SLIP_SERIES)
+    version_no = int(prev["version_no"]) + 1 if prev else 1
+    revision_no = repo.max_revision(session, gs["id"])
+
+    rows = repo.store_flow_slip_lines(session, gs["id"])
+    lines = [
+        {
+            "line_no": r["line_no"],
+            "product_code": r["product_code"] or "",
+            "product_name": r["product_name"],
+            "received_qty": r["received_qty"],
+            "store_name": r["store_name"] or "",
+            "condition_code": r["condition_code"],
+            "condition_label": r["condition_label"],
+            "action_code": r["action_code"],
+            "action_label": r["action_label"],
+            "qty": r["qty"],
+            "requires_cn": bool(r["requires_cn"]),
+            "requires_challan": bool(r["requires_challan"]),
+        }
+        for r in rows
+    ]
+    by_code: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        t = by_code.setdefault(
+            r["action_code"],
+            {
+                "action_code": r["action_code"],
+                "action_label": r["action_label"],
+                "qty": 0,
+                "_sort": r["action_sort"],
+            },
+        )
+        t["qty"] += int(r["qty"])
+    by_action = [
+        {k: v for k, v in t.items() if k != "_sort"}
+        for t in sorted(by_code.values(), key=lambda t: (t["_sort"], t["action_code"]))
+    ]
+    received = {r["gs_item_id"]: int(r["received_qty"]) for r in rows}
+    totals = {
+        "total_qty": sum(int(t["qty"]) for t in by_action),
+        "counted_qty": sum(received.values()),
+        "by_action": by_action,
+    }
+    docs = [
+        " ".join(
+            x
+            for x in (d["doc_type_label"], d["doc_no"] or "", _fmt_date(d["doc_date"], fmt, tz))
+            if x
+        )
+        for d in repo.list_gate_documents(session, gs["id"])
+    ]
+    content: dict[str, Any] = {
+        "slip_no": slip_no,
+        "version_no": version_no,
+        "revision_no": revision_no,
+        "round_no": 1,
+        "per_gs": True,
+        "gs_no": head["gs_no"],
+        "gs_date": _fmt_date(head["created_at"], fmt, tz),
+        "return_type": head["return_type_label"] or head["return_type_code"] or "",
+        "carton_count": head["carton_count"],
+        "party_name": head["party_name"] or "",
+        "party_code": head["party_code"] or "",
+        "state_station": " / ".join(x for x in (head["state_name"], head["station_name"]) if x),
+        "gate_entry_no": head["gate_entry_no"] or "",
+        "gate_entry_date": _fmt_date(head["gate_entry_date"], fmt, tz),
+        "gate_documents": docs
+        or (["No document (missing documentation)"] if head["missing_documentation"] else []),
+        "lines": lines,
+        "totals": totals,
+        "prepared_by": actor.full_name,
+        "finalised_at": datetime.now(tz).strftime(f"{fmt} %H:%M"),
+        # DEC-70: the Management e-approval stamp (VALID approval only) is printed and recorded.
+        "management_stamp": management_approval.stamp_for_print(session, gs["id"]),
+    }
+    pdf = render_slip_pdf(_replacement_slip_document(session, template, content))
+    digest = hashlib.sha256(pdf).hexdigest()
+    slip_id = uuid.uuid4()
+    path = build_object_path(gs["id"], "generated_pdf", "pdf")
+    storage.upload(Bucket.DOCUMENTS, path, pdf, PDF_MIME)
+    on_uploaded(path)
+    attachment_id = repo.insert_slip_pdf(
+        session,
+        gs_id=gs["id"],
+        entity_id=slip_id,
+        bucket=Bucket.DOCUMENTS.value,
+        object_path=path,
+        size_bytes=len(pdf),
+        by=actor.id,
+    )
+    repo.insert_ac_slip(
+        session,
+        slip_id=slip_id,
+        gs_id=gs["id"],
+        slip_no=slip_no,
+        version_no=version_no,
+        revision_no=revision_no,
+        attachment_id=attachment_id,
+        template_version_no=int(template["version_no"]),
+        content=content,
+        totals=totals,
+        sha256=digest,
+        by=actor.id,
+    )
+    log.info(
+        "replacement_slip_generated",
+        gs_id=str(gs["id"]),
+        slip_no=slip_no,
+        version_no=version_no,
+        size=len(pdf),
+    )
+    return slip_id, slip_no, version_no
+
+
+def _replacement_slip_document(
+    session: Session, template: dict[str, Any], c: dict[str, Any]
+) -> SlipDocument:
+    """Map the published template layout (DEC-41: branding is configuration) + content."""
+    layout: dict[str, Any] = template["layout"] or {}
+    titles = {
+        s.get("id"): s.get("title") for s in layout.get("sections", []) if isinstance(s, dict)
+    }
+
+    def title(section_id: str, fallback: str) -> str:
+        return str(titles.get(section_id) or fallback)
+
+    signatures = [
+        SlipSignature(
+            label=str(block.get("label", "")),
+            role=str(block.get("role", "")),
+            name=c["prepared_by"] if i == 0 else None,
+        )
+        for i, block in enumerate(layout.get("signature_blocks", []))
+        if isinstance(block, dict)
+    ]
+    totals = c["totals"]
+    return SlipDocument(
+        title=str(layout.get("header_title") or template.get("name") or ""),
+        subtitle=str(layout.get("header_subtitle") or template.get("name") or ""),
+        document_ref=f"{c['slip_no']} · Version {c['version_no']} · {c['gs_no']}",
+        stamp=c.get("management_stamp"),
+        sections=[
+            SlipSection(
+                title("gs_header", "Goods Slip"),
+                [
+                    SlipField("GS No.", c["gs_no"]),
+                    SlipField("GS Date", c["gs_date"]),
+                    SlipField("Return Type", c["return_type"]),
+                    SlipField("Cartons", str(c["carton_count"] or "")),
+                    SlipField("Slip No.", f"{c['slip_no']} (v{c['version_no']})"),
+                    SlipField("Decision Revision", str(c["revision_no"])),
+                ],
+            ),
+            SlipSection(
+                title("party", "Party"),
+                [
+                    SlipField("Party", c["party_name"]),
+                    SlipField("Party Code", c["party_code"]),
+                    SlipField("State / Station", c["state_station"]),
+                ],
+            ),
+            SlipSection(
+                title("gate_entry", "Gate Entry"),
+                [
+                    SlipField("Gate Entry No.", str(c["gate_entry_no"])),
+                    SlipField("Gate Entry Date", c["gate_entry_date"]),
+                    SlipField("Documents", "\n".join(c["gate_documents"])),
+                ],
+            ),
+        ],
+        tables=[
+            SlipTable(
+                title=title("items", "Item \u00d7 Condition \u00d7 Action"),
+                columns=[
+                    SlipColumn("#", 0.4, "right"),
+                    SlipColumn("Code", 0.9),
+                    SlipColumn("Product", 2.0),
+                    SlipColumn("Store", 1.0),
+                    SlipColumn("Condition", 1.2),
+                    SlipColumn("Action", 1.4),
+                    SlipColumn("Qty", 0.5, "right"),
+                ],
+                rows=[
+                    [
+                        str(ln["line_no"]),
+                        ln["product_code"],
+                        ln["product_name"],
+                        ln["store_name"],
+                        ln.get("condition_label") or "",
+                        ln["action_label"],
+                        str(ln["qty"]),
+                    ]
+                    for ln in c["lines"]
+                ],
+                total_row=["", "", "Total", "", "", "", str(totals["total_qty"])],
+            ),
+            SlipTable(
+                title=title("totals", "Totals by Action"),
+                columns=[SlipColumn("Action", 3), SlipColumn("Qty", 1, "right")],
+                rows=[[t["action_label"], str(t["qty"])] for t in totals["by_action"]],
+                total_row=["Total", str(totals["total_qty"])],
+            ),
+        ],
+        signatures=signatures,
+        signatures_title=title("signatures", "Signatures"),
+        footer_text=str(layout.get("footer_text") or ""),
+        generated_text=f"Generated {c['finalised_at']} by {c['prepared_by']}",
+        brand_color=str(repo.get_setting(session, "branding_primary_color") or ""),
+        paper_size=str(layout.get("paper_size") or "A4"),
+        orientation=str(layout.get("orientation") or "portrait"),
+        logo=template_logo(session, layout),  # DEC-65 / Q26
+    )
 
 
 # =================================================================================================
@@ -371,19 +785,30 @@ class AcEntryService:
         dslip = repo.get_dispatch_slip_for_ac_slip(session, slip["id"]) if slip else None
         needing = [ln for ln in lines if ln.requires_cn or ln.requires_challan]
         round_no = int(slip["round_no"]) if slip else 1
-        stage_ok = _stage_ok(str(gs["status"]), round_no)
+        # DEC-71: a store-flow goods slip has one Accounts entry for the whole goods slip.
+        entry = repo.get_gs_entry(session, slip["id"]) if slip else None
+        per_gs = entry is not None or repo.gs_on_store_flow(session, gs_id)
+        stage_ok = _stage_ok(str(gs["status"]), round_no, per_gs=per_gs)
 
         blockers: list[str] = []
         if slip is None:
             blockers.append(
-                "No finalised A/c Actions slip: the Replacement Manager has not finalised the "
+                "No Replacement Slip at Accounts: the goods slip waits for the store analysis or "
+                "Management approval."
+                if per_gs
+                else "No finalised A/c Actions slip: the Replacement Manager has not finalised the "
                 "actions (or is revising them)."
             )
         elif completion is not None:
             blockers.append("The Accounts entry of this slip is already complete.")
         elif not stage_ok:
-            blockers.append(f"The goods slip is not {_stage_text(round_no)}.")
-        for ln in needing:
+            blockers.append(f"The goods slip is not {_stage_text(round_no, per_gs=per_gs)}.")
+        if entry is not None:
+            if entry["requires_challan"] and entry["challan_no"] is None:
+                blockers.append("Challan No. and Challan Date are missing.")
+            if entry["requires_cn"] and entry["cn_no"] is None:
+                blockers.append("CN No., CN Date and CN Value are missing.")
+        for ln in needing if entry is None else []:
             if not ln.is_complete:
                 missing = [
                     name
@@ -419,6 +844,12 @@ class AcEntryService:
             can_complete=editable and not blockers and perms.allows("ac_entry", "edit"),
             complete_blockers=blockers,
             dispatch_slip=_dslip_summary(dslip) if dslip else None,
+            per_gs=per_gs,
+            gs_entry=AcGsEntry(**{k: v for k, v in entry.items() if k != "id"}) if entry else None,
+            slip_title=_template_name(session),
+            management_stamp=management_approval.stamp_for_print(session, gs_id)
+            if per_gs
+            else None,
         )
 
     def _lock_current_slip(
@@ -442,12 +873,14 @@ class AcEntryService:
                 "and frozen",
             )
         round_no = int(slip["round_no"])
-        if not _stage_ok(str(gs["status"]), round_no):
+        per_gs = repo.gs_on_store_flow(session, gs_id)
+        if not _stage_ok(str(gs["status"]), round_no, per_gs=per_gs):
             raise SystemGuardViolation(
                 "G-22",
-                f"G-22: Accounts data changes only while the goods slip is {_stage_text(round_no)}"
-                f" (status {gs['status']})",
+                "G-22: Accounts data changes only while the goods slip is "
+                f"{_stage_text(round_no, per_gs=per_gs)} (status {gs['status']})",
             )
+        slip["per_gs"] = per_gs
         return gs, slip
 
     # === save (partial allowed) ===
@@ -477,6 +910,12 @@ class AcEntryService:
         perms: EffectivePermissions,
     ) -> AcEntryState:
         _gs, slip = self._lock_current_slip(session, gs_id, payload.ac_action_slip_id)
+        if slip["per_gs"]:
+            raise Conflict(
+                "This goods slip takes one Challan / Credit Note for the whole goods slip "
+                "(DEC-71); use the goods-slip entry",
+                code="PER_GS_ENTRY",
+            )
         lines = {r["id"]: r for r in repo.entry_lines(session, slip["id"])}
         today = datetime.now(_tz(session)).date()
 
@@ -559,6 +998,130 @@ class AcEntryService:
         log.info("ac_entry_saved", gs_id=str(gs_id), slip_id=str(slip["id"]), lines=len(seen))
         return self._state(session, gs_id, perms)
 
+    # === DEC-71: one Challan / Credit Note per goods slip (store flow) ===
+
+    def save_gs_entry(
+        self,
+        gs_id: UUID,
+        payload: SaveGsEntryIn,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+        idem: IdempotencyKey,
+    ) -> IdempotentResult:
+        with self._uow.transaction(user.id) as session:
+            return run_idempotent(
+                session,
+                idem,
+                user.id,
+                lambda: (200, self._save_gs_entry(session, gs_id, payload, user, perms)),
+            )
+
+    def _save_gs_entry(
+        self,
+        session: Session,
+        gs_id: UUID,
+        payload: SaveGsEntryIn,
+        user: CurrentUser,
+        perms: EffectivePermissions,
+    ) -> AcEntryState:
+        gs, slip = self._lock_current_slip(session, gs_id, payload.ac_action_slip_id)
+        entry = repo.get_gs_entry(session, slip["id"]) if slip["per_gs"] else None
+        if entry is None:
+            raise Conflict(
+                f"{gs['gs_no']} takes Accounts data per action line, not per goods slip",
+                code="NOT_PER_GS_ENTRY",
+            )
+        challan = (_clean(payload.challan_no), payload.challan_date)
+        cn = (_clean(payload.cn_no), payload.cn_date, payload.cn_value)
+        # DEC-71 / G-22: hidden fields are not sent: a group only where the goods slip needs it.
+        if not entry["requires_challan"] and any(v is not None for v in challan):
+            raise SystemGuardViolation(
+                "G-22",
+                f"G-22: {gs['gs_no']} ships no goods; it takes no Challan (DEC-71)",
+            )
+        if not entry["requires_cn"] and any(v is not None for v in cn):
+            raise SystemGuardViolation(
+                "G-22",
+                f"G-22: {gs['gs_no']} has no Issue CN; it takes no Credit Note (DEC-71)",
+            )
+        if any(v is not None for v in challan) and not all(v is not None for v in challan):
+            raise ValidationFailed(
+                "Challan No. and Challan Date are entered together",
+                code="CHALLAN_FIELDS_INCOMPLETE",
+            )
+        if any(v is not None for v in cn) and not all(v is not None for v in cn):
+            raise ValidationFailed(
+                "CN No., CN Date and CN Value are entered together", code="CN_FIELDS_INCOMPLETE"
+            )
+        today = datetime.now(_tz(session)).date()
+        for when, name in ((challan[1], "Challan Date"), (cn[1], "CN Date")):
+            if when is not None and when > today:
+                raise ValidationFailed(f"{name} cannot be in the future", code="DATE_IN_FUTURE")
+        if cn[0] is not None:
+            holder = repo.cn_no_taken_elsewhere(session, cn_no=cn[0], gs_id=gs_id)
+            if holder:
+                raise Conflict(
+                    f"CN No. {cn[0]} is already recorded on {holder} (DEC-22)",
+                    code="VOUCHER_NUMBER_TAKEN",
+                    details={"cn_no": cn[0]},
+                )
+        before = (
+            (entry["challan_no"], entry["challan_date"]),
+            (entry["cn_no"], entry["cn_date"], entry["cn_value"]),
+        )
+        if (challan, cn) != before:
+            repo.update_gs_entry(
+                session,
+                ac_slip_id=slip["id"],
+                challan_no=challan[0],
+                challan_date=challan[1],
+                cn_no=cn[0],
+                cn_date=cn[1],
+                cn_value=cn[2],
+                by=user.id,
+            )
+        log.info("ac_gs_entry_saved", gs_id=str(gs_id), slip_id=str(slip["id"]))
+        return self._state(session, gs_id, perms)
+
+    def hold(self, user: CurrentUser) -> list[AcHoldItem]:
+        """DEC-71 (Q21): goods slips on hold (every decision Not Allowed), read-only."""
+        with self._uow.transaction(user.id) as session:
+            return [AcHoldItem(**r) for r in repo.list_hold(session)]
+
+    def print_replacement_slip(
+        self, gs_id: UUID, user: CurrentUser, storage: StorageService
+    ) -> ReplacementSlipPrintOut:
+        """Print / re-print the CURRENT Replacement Slip PDF of a goods slip (logged)."""
+        with self._uow.transaction(user.id) as session:
+            current = repo.current_ac_slip(session, gs_id)
+            slip = repo.ac_slip_file(session, gs_id, current["id"]) if current else None
+            if not slip:
+                raise NotFound(
+                    f"Goods slip {gs_id} has no current Replacement Slip", code="SLIP_NOT_FOUND"
+                )
+            ttl = signed_url_ttl(session)
+            url = storage.create_signed_url(Bucket(slip["bucket"]), slip["object_path"], ttl)
+            repo.insert_ac_slip_print_log(
+                session,
+                slip_id=slip["id"],
+                version_no=slip["version_no"],
+                by=user.id,
+                metadata={
+                    "gs_id": str(gs_id),
+                    "slip_no": slip["slip_no"],
+                    "version_no": slip["version_no"],
+                    "is_reprint": int(slip["print_count"]) > 0,
+                },
+            )
+            return ReplacementSlipPrintOut(
+                ac_action_slip_id=slip["id"],
+                slip_no=slip["slip_no"],
+                version_no=slip["version_no"],
+                url=url,
+                expires_in=ttl,
+                print_count=int(slip["print_count"]) + 1,
+            )
+
     # === complete ===
 
     def complete(
@@ -607,7 +1170,24 @@ class AcEntryService:
         lines = repo.entry_lines(session, slip["id"])
         if not lines:
             raise SystemGuardViolation("G-22", "G-22: the A/c Actions slip has no action lines")
-        open_lines = [ln for ln in lines if not ln["is_complete"]]
+        per_gs = bool(slip["per_gs"])
+        entry = repo.get_gs_entry(session, slip["id"]) if per_gs else None
+        if per_gs:
+            # DEC-71: one Challan (goods ship) and one Credit Note (Issue CN) per goods slip.
+            if entry is None or not entry["is_complete"]:
+                raise SystemGuardViolation(
+                    "G-22",
+                    "G-22: the goods slip needs its Challan No. / Date (goods to ship) and / or "
+                    "CN No. / Date / Value (Issue CN) before completion (DEC-71)",
+                )
+            # The goods slip's one Challan is the challan of every shipping line.
+            lines = [
+                {**ln, "challan_no": entry["challan_no"], "challan_date": entry["challan_date"]}
+                if ln["requires_challan"]
+                else ln
+                for ln in lines
+            ]
+        open_lines = [] if per_gs else [ln for ln in lines if not ln["is_complete"]]
         if open_lines:
             raise SystemGuardViolation(
                 "G-22",
@@ -623,9 +1203,20 @@ class AcEntryService:
         shipping = [ln for ln in lines if ln["requires_challan"]]
         if shipping:
             dslip_no = self._generate_dispatch_slip(
-                session, gs, slip, shipping, user, storage, on_uploaded
+                session, gs, slip, shipping, user, storage, on_uploaded, entry=entry
             )
             outcome = f"Dispatch Slip {dslip_no} generated for {len(shipping)} line(s)."
+            if per_gs:
+                # DEC-71: the goods slip moves to the Dispatch queue.
+                gs_service.change_status(
+                    session,
+                    gs_id=gs_id,
+                    from_status=ACCOUNTS_STATUS,
+                    to_status=DISPATCH_STATUS,
+                    step_code=ACCOUNTS_STEP,
+                    reason=f"Accounts completed; Dispatch Slip {dslip_no} generated (DEC-71)",
+                    by=user.id,
+                )
         else:
             moves = _settle_returned_goods(
                 session,
@@ -636,6 +1227,7 @@ class AcEntryService:
                 reference_id=slip["id"],
                 reason=f"Accounts completed {slip['slip_no']} v{slip['version_no']} (AMD-18)",
                 actor_id=user.id,
+                source_by_item=repo.item_store_locations(session, gs_id) if per_gs else None,
             )
             new_status = _to_closure(
                 session,
@@ -678,8 +1270,11 @@ class AcEntryService:
         user: CurrentUser,
         storage: StorageService,
         on_uploaded: Callable[[str], None],
+        *,
+        entry: dict[str, Any] | None = None,
     ) -> str:
-        """AMD-19: numbered Dispatch Slip PDF of the goods-shipping lines (DEC-41 template)."""
+        """AMD-19: numbered Dispatch Slip PDF of the goods-shipping lines (DEC-41 template).
+        DEC-71: on the store flow `entry` is the goods slip's one Challan / Credit Note."""
         template = repo.published_template(session, repo.DISPATCH_SLIP_TEMPLATE)
         if not template:
             raise Conflict(
@@ -714,7 +1309,15 @@ class AcEntryService:
                 for ln in shipping
             ],
             "total_qty": sum(int(ln["qty"]) for ln in shipping),
+            "ac_slip_title": _template_name(session),
         }
+        if entry is not None:
+            content["challan_no"] = entry["challan_no"] or ""
+            content["challan_date"] = _fmt_date(entry["challan_date"], fmt, tz)
+            if entry["cn_no"]:
+                content["cn_no"] = entry["cn_no"]
+                content["cn_date"] = _fmt_date(entry["cn_date"], fmt, tz)
+                content["cn_value"] = str(entry["cn_value"])
         # DEC-70: the Management e-approval stamp (VALID approval only) is printed and recorded.
         content["management_stamp"] = management_approval.stamp_for_print(session, gs["id"])
         pdf = render_slip_pdf(self._slip_document(session, template, content))
@@ -811,8 +1414,27 @@ class AcEntryService:
                     [
                         SlipField("Dispatch Slip No.", c["slip_no"]),
                         SlipField("GS No.", c["gs_no"]),
-                        SlipField("A/c Actions Slip", f"{c['ac_slip_no']} (v{c['ac_version_no']})"),
+                        SlipField(
+                            str(c.get("ac_slip_title") or "A/c Actions Slip"),
+                            f"{c['ac_slip_no']} (v{c['ac_version_no']})",
+                        ),
                         SlipField("Generated", c["generated_at"]),
+                        # DEC-71: the goods slip's one Challan / Credit Note.
+                        *(
+                            [SlipField("Challan", f"{c['challan_no']} dt {c['challan_date']}")]
+                            if c.get("challan_no")
+                            else []
+                        ),
+                        *(
+                            [
+                                SlipField(
+                                    "Credit Note",
+                                    f"{c['cn_no']} dt {c['cn_date']} · ₹ {c['cn_value']}",
+                                )
+                            ]
+                            if c.get("cn_no")
+                            else []
+                        ),
                     ],
                 ),
                 SlipSection(
@@ -916,9 +1538,11 @@ class DispatchSlipService:
             raise NotFound("Goods slip not found", code="GS_NOT_FOUND")
         ac_slip = repo.get_ac_slip(session, locked["ac_action_slip_id"])
         round_no = int(ac_slip["round_no"]) if ac_slip else 1
-        if not _stage_ok(str(gs["status"]), round_no):
+        per_gs = repo.gs_on_store_flow(session, gs["id"])  # DEC-71
+        if not _stage_ok(str(gs["status"]), round_no, per_gs=per_gs, dispatch=True):
             raise Conflict(
-                f"Goods slip {gs['gs_no']} is not {_stage_text(round_no)} (status {gs['status']})",
+                f"Goods slip {gs['gs_no']} is not "
+                f"{_stage_text(round_no, per_gs=per_gs, dispatch=True)} (status {gs['status']})",
                 code="INVALID_GS_STATUS",
             )
         today = datetime.now(_tz(session)).date()
@@ -947,6 +1571,7 @@ class DispatchSlipService:
             reference_id=slip_id,
             reason=f"Dispatch Slip {locked['slip_no']} (AMD-19)",
             actor_id=user.id,
+            source_by_item=repo.item_store_locations(session, gs["id"]) if per_gs else None,
         )
         repo.mark_dispatched(
             session,

@@ -20,6 +20,10 @@ const STATUS_VARIANT: Record<string, BadgeVariant> = {
   TRANSFER_SLIP_GENERATED: 'info', // DEC-65: in transit to the Intermediate Stores
   STORE_ACKNOWLEDGED: 'success', // DEC-66: every slip acknowledged by its store
   STORE_PROCESSING: 'info', // DEC-67: the stores route / work on the goods
+  // DEC-71 (P11): with Accounts / Dispatch; on hold when every decision is Not Allowed (Q21).
+  ACCOUNTS_PENDING: 'warning',
+  NOT_ALLOWED_HOLD: 'danger',
+  DISPATCH_PENDING: 'warning',
   SALES_RETURN_HOLD: 'warning',
   HELD_AT_INTERMEDIATE_STORE: 'success',
   COMMERCIAL_RESOLUTION: 'warning',

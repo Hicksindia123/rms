@@ -79,8 +79,15 @@ def list_queue(session: Session, *, completed: bool | None) -> list[dict[str, An
         select gs.id as gs_id, gs.gs_no, gs.status as gs_status, p.name as party_name,
                s.id as ac_action_slip_id, s.slip_no, s.version_no, s.round_no, s.finalised_at,
                coalesce(e.lines_total, 0)::int as lines_total,
-               coalesce(e.lines_needing_data, 0)::int as lines_needing_data,
-               coalesce(e.lines_complete, 0)::int as lines_complete,
+               -- DEC-71: a store-flow goods slip has one Accounts entry for the whole GS.
+               case when ge.id is not null then 1
+                    else coalesce(e.lines_needing_data, 0)::int end as lines_needing_data,
+               case when ge.id is not null
+                    then (case when rms_private.ac_gs_entry_complete(ge) then 1 else 0 end)
+                    else coalesce(e.lines_complete, 0)::int end as lines_complete,
+               ge.id is not null as per_gs,
+               coalesce(ge.requires_challan, false) as requires_challan,
+               coalesce(ge.requires_cn, false) as requires_cn,
                c.id is not null as is_completed, c.completed_at,
                d.slip_no as dispatch_slip_no, d.status as dispatch_status
           from public.ac_action_slips s
@@ -95,6 +102,7 @@ def list_queue(session: Session, *, completed: bool | None) -> list[dict[str, An
               from public.ac_entry_lines el
              where el.ac_action_slip_id = s.id
           ) e on true
+          left join public.ac_gs_entries ge on ge.ac_action_slip_id = s.id
           left join public.ac_entry_completions c on c.ac_action_slip_id = s.id
           left join public.dispatch_slips d on d.ac_action_slip_id = s.id
          where s.status = 'CURRENT'
@@ -178,6 +186,10 @@ def cn_no_taken_elsewhere(session: Session, *, cn_no: str, gs_id: UUID) -> str |
             """
             select coalesce(
               (select g.gs_no from public.ac_entry_lines e
+                 join public.goods_slips g on g.id = e.gs_id
+                where upper(btrim(e.cn_no)) = upper(btrim(:cn_no)) and e.gs_id <> :gs_id
+                limit 1),
+              (select g.gs_no from public.ac_gs_entries e
                  join public.goods_slips g on g.id = e.gs_id
                 where upper(btrim(e.cn_no)) = upper(btrim(:cn_no)) and e.gs_id <> :gs_id
                 limit 1),
@@ -506,3 +518,338 @@ def get_setting(session: Session, key: str) -> Any:
     return session.execute(
         text("select value from public.system_settings where key = :key"), {"key": key}
     ).scalar()
+
+
+# =================================================================================================
+# DEC-71 (Phase P11): Accounts gate, Replacement Slip per goods slip, one Challan / CN per GS
+# =================================================================================================
+
+AC_SLIP_TEMPLATE = "AC_ACTIONS_SLIP"
+AC_SLIP_SERIES = "AC_ACTION_SLIP"
+
+
+def _flag(session: Session, sql: str, gs_id: UUID) -> bool:
+    return bool(session.execute(text(sql), {"g": gs_id}).scalar())
+
+
+def gs_on_store_flow(session: Session, gs_id: UUID) -> bool:
+    return _flag(session, "select rms_private.gs_on_store_flow(:g)", gs_id)
+
+
+def gs_needs_accounts(session: Session, gs_id: UUID) -> bool:
+    return _flag(session, "select rms_private.gs_needs_accounts(:g)", gs_id)
+
+
+def gs_store_analysis_complete(session: Session, gs_id: UUID) -> bool:
+    return _flag(session, "select rms_private.gs_store_analysis_complete(:g)", gs_id)
+
+
+def get_gs_print_header(session: Session, gs_id: UUID) -> dict[str, Any] | None:
+    return _row(
+        session,
+        """
+        select gs.id, gs.gs_no, gs.status, gs.created_at, gs.carton_count,
+               gs.return_type_code, rt.label as return_type_label,
+               gs.gate_entry_no, gs.gate_entry_date, gs.missing_documentation,
+               p.name as party_name, p.code as party_code,
+               st.name as station_name, s.name as state_name
+          from public.goods_slips gs
+          left join public.parties p on p.id = gs.party_id
+          left join public.stations st on st.id = gs.station_id
+          left join public.states s on s.id = gs.state_id
+          left join public.option_sets os on os.code = 'RETURN_TYPE'
+          left join public.option_items rt
+                 on rt.option_set_id = os.id and rt.code = gs.return_type_code
+         where gs.id = :gs_id
+        """,
+        {"gs_id": gs_id},
+    )
+
+
+def list_gate_documents(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
+    return _rows(
+        session,
+        """
+        select doc_type_label, doc_no, doc_date
+          from public.gs_gate_documents
+         where gs_id = :gs_id
+         order by sort_order, created_at
+        """,
+        {"gs_id": gs_id},
+    )
+
+
+def store_flow_slip_lines(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
+    """Current decisions of a store-flow goods slip per item + condition + action (DEC-69/70),
+    with the item's store, product snapshot and the ACTION library flags / order (AMD-18)."""
+    return _rows(
+        session,
+        """
+        select gi.id as gs_item_id, gi.line_no, gi.received_qty,
+               coalesce(gi.product_code_snapshot, pr.code) as product_code,
+               coalesce(gi.product_name_snapshot, pr.name, 'Item') as product_name,
+               s.code as store_code, s.name as store_name,
+               a.condition_code, a.condition_label, a.action_code,
+               coalesce(a.action_label, lib.label, a.action_code) as action_label, a.qty,
+               coalesce(lib.requires_cn, false) as requires_cn,
+               coalesce(lib.requires_challan, false) as requires_challan,
+               coalesce(lib.sort_order, 0) as action_sort
+          from public.rm_item_actions a
+          join public.gs_items gi on gi.id = a.gs_item_id
+          left join public.products pr on pr.id = gi.product_id
+          left join public.intermediate_stores s on s.id = rms_private.gs_item_store(gi.id)
+          left join public.item_field_library cl on cl.id = a.condition_field_id
+          left join public.item_field_library lib
+                 on lib.field_group = 'ACTION' and lib.code = a.action_code
+         where gi.gs_id = :gs_id and a.is_current and a.qty > 0
+         order by gi.line_no, coalesce(cl.sort_order, 0), a.condition_label nulls first,
+                  coalesce(lib.sort_order, 0), a.action_code
+        """,
+        {"gs_id": gs_id},
+    )
+
+
+def max_revision(session: Session, gs_id: UUID) -> int:
+    return int(
+        session.execute(
+            text(
+                """
+                select coalesce(max(a.revision_no), 0)
+                  from public.rm_item_actions a
+                  join public.gs_items gi on gi.id = a.gs_item_id
+                 where gi.gs_id = :gs_id
+                """
+            ),
+            {"gs_id": gs_id},
+        ).scalar_one()
+    )
+
+
+def latest_slip_identity(session: Session, gs_id: UUID) -> dict[str, Any] | None:
+    return _row(
+        session,
+        "select slip_no, version_no from public.ac_action_slips where gs_id = :gs_id "
+        "order by version_no desc limit 1",
+        {"gs_id": gs_id},
+    )
+
+
+def insert_slip_pdf(
+    session: Session,
+    *,
+    gs_id: UUID,
+    entity_id: UUID,
+    bucket: str,
+    object_path: str,
+    size_bytes: int,
+    by: UUID,
+) -> UUID:
+    """The Replacement Slip PDF (entity ac_action_slips), confirmed at once."""
+    return UUID(
+        str(
+            session.execute(
+                text(
+                    """
+                    insert into public.attachments
+                           (gs_id, entity_type, entity_id, kind, bucket, object_path, mime_type,
+                            size_bytes, status, uploaded_by, confirmed_by, confirmed_at)
+                    values (:gs_id, :entity, :entity_id, 'GENERATED_PDF', :bucket, :path,
+                            'application/pdf', :size, 'CONFIRMED', :by, :by, now())
+                    returning id
+                    """
+                ),
+                {
+                    "gs_id": gs_id,
+                    "entity": AC_SLIP_ENTITY,
+                    "entity_id": entity_id,
+                    "bucket": bucket,
+                    "path": object_path,
+                    "size": size_bytes,
+                    "by": by,
+                },
+            ).scalar_one()
+        )
+    )
+
+
+def insert_ac_slip(
+    session: Session,
+    *,
+    slip_id: UUID,
+    gs_id: UUID,
+    slip_no: str,
+    version_no: int,
+    revision_no: int,
+    attachment_id: UUID,
+    template_version_no: int,
+    content: dict[str, Any],
+    totals: dict[str, Any],
+    sha256: str,
+    by: UUID,
+) -> None:
+    session.execute(
+        text(
+            """
+            insert into public.ac_action_slips
+                   (id, gs_id, slip_no, version_no, revision_no, round_no, attachment_id,
+                    template_code, template_version_no, content, totals, sha256, finalised_by)
+            values (:id, :gs_id, :slip_no, :version_no, :revision_no, 1, :attachment_id,
+                    :template, :template_version_no, cast(:content as jsonb),
+                    cast(:totals as jsonb), :sha256, :by)
+            """
+        ),
+        {
+            "id": slip_id,
+            "gs_id": gs_id,
+            "slip_no": slip_no,
+            "version_no": version_no,
+            "revision_no": revision_no,
+            "attachment_id": attachment_id,
+            "template": AC_SLIP_TEMPLATE,
+            "template_version_no": template_version_no,
+            "content": json.dumps(content, default=str),
+            "totals": json.dumps(totals),
+            "sha256": sha256,
+            "by": by,
+        },
+    )
+
+
+def supersede_ac_slip(session: Session, slip_id: UUID, *, by: UUID, reason: str) -> None:
+    session.execute(
+        text(
+            """
+            update public.ac_action_slips
+               set status = 'SUPERSEDED', superseded_at = now(), superseded_by = :by,
+                   supersede_reason = :reason
+             where id = :id and status = 'CURRENT'
+            """
+        ),
+        {"id": slip_id, "by": by, "reason": reason},
+    )
+
+
+def ac_slip_file(session: Session, gs_id: UUID, slip_id: UUID) -> dict[str, Any] | None:
+    return _row(
+        session,
+        """
+        select s.id, s.slip_no, s.version_no, s.status, a.bucket, a.object_path,
+               (select count(*)::int from public.print_logs pl
+                 where pl.template_code = :template and pl.entity_type = :entity
+                   and pl.entity_id = s.id) as print_count
+          from public.ac_action_slips s
+          join public.attachments a on a.id = s.attachment_id
+         where s.gs_id = :gs_id and s.id = :id
+        """,
+        {"gs_id": gs_id, "id": slip_id, "template": AC_SLIP_TEMPLATE, "entity": AC_SLIP_ENTITY},
+    )
+
+
+def insert_ac_slip_print_log(
+    session: Session, *, slip_id: UUID, version_no: int, by: UUID, metadata: dict[str, Any]
+) -> None:
+    session.execute(
+        text(
+            """
+            insert into public.print_logs
+                   (template_code, entity_type, entity_id, revision_no, printed_by, metadata)
+            values (:template, :entity, :id, :version_no, :by, cast(:meta as jsonb))
+            """
+        ),
+        {
+            "template": AC_SLIP_TEMPLATE,
+            "entity": AC_SLIP_ENTITY,
+            "id": slip_id,
+            "version_no": version_no,
+            "by": by,
+            "meta": json.dumps(metadata, default=str),
+        },
+    )
+
+
+def get_gs_entry(session: Session, ac_slip_id: UUID) -> dict[str, Any] | None:
+    return _row(
+        session,
+        """
+        select e.id, e.requires_challan, e.requires_cn, e.challan_no, e.challan_date,
+               e.cn_no, e.cn_date, e.cn_value, e.entered_at,
+               rms_private.ac_gs_entry_complete(e) as is_complete,
+               pf.full_name as entered_by_name
+          from public.ac_gs_entries e
+          left join public.profiles pf on pf.id = e.entered_by
+         where e.ac_action_slip_id = :slip_id
+        """,
+        {"slip_id": ac_slip_id},
+    )
+
+
+def update_gs_entry(
+    session: Session,
+    *,
+    ac_slip_id: UUID,
+    challan_no: str | None,
+    challan_date: date | None,
+    cn_no: str | None,
+    cn_date: date | None,
+    cn_value: Decimal | None,
+    by: UUID,
+) -> None:
+    session.execute(
+        text(
+            """
+            update public.ac_gs_entries
+               set challan_no = :challan_no, challan_date = :challan_date,
+                   cn_no = :cn_no, cn_date = :cn_date, cn_value = :cn_value,
+                   entered_by = :by, entered_at = now()
+             where ac_action_slip_id = :slip_id
+            """
+        ),
+        {
+            "slip_id": ac_slip_id,
+            "challan_no": challan_no,
+            "challan_date": challan_date,
+            "cn_no": cn_no,
+            "cn_date": cn_date,
+            "cn_value": cn_value,
+            "by": by,
+        },
+    )
+
+
+def item_store_locations(session: Session, gs_id: UUID) -> dict[UUID, str]:
+    """DEC-71: per GS item, the inventory location code of its Intermediate Store (where its
+    returned pieces wait until the Accounts / dispatch settlement)."""
+    rows = _rows(
+        session,
+        """
+        select gi.id as gs_item_id, loc.code as location_code
+          from public.gs_items gi
+          join public.intermediate_stores s on s.id = rms_private.gs_item_store(gi.id)
+          join public.inventory_locations loc on loc.id = s.location_id
+         where gi.gs_id = :gs_id
+        """,
+        {"gs_id": gs_id},
+    )
+    return {r["gs_item_id"]: str(r["location_code"]) for r in rows}
+
+
+def list_hold(session: Session) -> list[dict[str, Any]]:
+    """DEC-71 (Q21): goods slips on hold because every decision is Not Allowed."""
+    return _rows(
+        session,
+        """
+        select g.id as gs_id, g.gs_no, g.status as gs_status, p.name as party_name,
+               coalesce((select max(h."at") from public.gs_status_history h
+                          where h.gs_id = g.id and h.to_status = g.status), g.created_at)
+                 as since,
+               (select coalesce(sum(a.qty), 0)::int from public.rm_item_actions a
+                  join public.gs_items gi on gi.id = a.gs_item_id
+                 where gi.gs_id = g.id and a.is_current) as total_qty
+          from public.goods_slips g
+          left join public.parties p on p.id = g.party_id
+         where g.status = 'NOT_ALLOWED_HOLD'
+         order by since
+         limit 500
+        """,
+        {},
+    )

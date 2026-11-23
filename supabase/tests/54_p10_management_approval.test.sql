@@ -183,10 +183,11 @@ select throws_like($$ update public.gs_management_approvals set remarks = 'x' wh
 select throws_like($$ delete from public.gs_management_approvals where gs_id = (select gs_id from _gs) $$,
   'DEC-70: a Management approval is immutable%', 'an approval is never deleted');
 
--- 19–20. With a valid approval the Management gate passes (P11 adds the Accounts exit itself).
+-- 19–20. With a valid approval the Management gate passes; the Accounts exit is ACCOUNTS_PENDING /
+--        NOT_ALLOWED_HOLD only (DEC-71, P11), so a jump to IN_PROCESS is still refused.
 select is(pg_temp.state(), 'VALID', 'the approval is valid');
-select throws_like($$ select pg_temp.to_accounts() $$, 'G-03: % is not reachable from ANALYSIS_COMPLETED yet%',
-  'the Management gate passes; Accounts itself is P11');
+select throws_like($$ select pg_temp.to_accounts() $$, 'G-03: ANALYSIS_COMPLETED goes to Accounts%',
+  'the Management gate passes; ANALYSIS_COMPLETED leaves only to Accounts or the hold (DEC-71)');
 
 -- 21–24. A later change invalidates the approval: Issue CN without a valid approval is blocked.
 select lives_ok($$ select pg_temp.retire(); select pg_temp.decide('ISSUE_CN', 2, 'two pieces only');

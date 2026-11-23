@@ -30,6 +30,36 @@ class AcEntryQueueItem(BaseModel):
     completed_at: datetime | None
     dispatch_slip_no: str | None
     dispatch_status: str | None
+    # DEC-71 (P11): store-flow goods slip = one Challan / CN for the whole GS.
+    per_gs: bool = False
+    requires_challan: bool = False
+    requires_cn: bool = False
+
+
+class AcHoldItem(BaseModel):
+    """DEC-71 (Q21): a goods slip on hold, every decision Not Allowed (no Accounts entry)."""
+
+    gs_id: UUID
+    gs_no: str
+    gs_status: str
+    party_name: str | None
+    since: datetime
+    total_qty: int
+
+
+class AcGsEntry(BaseModel):
+    """DEC-71: the one Challan (goods ship) and the one Credit Note (Issue CN) of a goods slip."""
+
+    requires_challan: bool
+    requires_cn: bool
+    challan_no: str | None
+    challan_date: date | None
+    cn_no: str | None
+    cn_date: date | None
+    cn_value: Decimal | None
+    is_complete: bool
+    entered_by_name: str | None
+    entered_at: datetime | None
 
 
 class AcEntryLine(BaseModel):
@@ -92,6 +122,13 @@ class AcEntryState(BaseModel):
     can_complete: bool
     complete_blockers: list[str]
     dispatch_slip: DispatchSlipSummary | None
+    # DEC-71 (P11): the store flow enters one Challan / CN per goods slip (lines are read-only).
+    per_gs: bool = False
+    gs_entry: AcGsEntry | None = None
+    # Label of the slip from the print template (configuration, "Replacement Slip").
+    slip_title: str | None = None
+    # DEC-70: the Management e-approval stamp printed on the slips (VALID approval only).
+    management_stamp: str | None = None
 
 
 class AcEntryLineIn(BaseModel):
@@ -108,6 +145,27 @@ class SaveAcEntryIn(BaseModel):
 
     ac_action_slip_id: UUID
     lines: list[AcEntryLineIn] = Field(min_length=1, max_length=500)
+
+
+class SaveGsEntryIn(BaseModel):
+    """DEC-71: the goods slip's Challan (only if goods ship) and Credit Note (only if Issue CN).
+    A group the goods slip does not need is not sent (null). Partial saves are allowed."""
+
+    ac_action_slip_id: UUID
+    challan_no: str | None = Field(default=None, max_length=60)
+    challan_date: date | None = None
+    cn_no: str | None = Field(default=None, max_length=60)
+    cn_date: date | None = None
+    cn_value: Decimal | None = Field(default=None, gt=0, max_digits=14, decimal_places=2)
+
+
+class ReplacementSlipPrintOut(BaseModel):
+    ac_action_slip_id: UUID
+    slip_no: str
+    version_no: int
+    url: str
+    expires_in: int
+    print_count: int
 
 
 class CompleteAcEntryIn(BaseModel):

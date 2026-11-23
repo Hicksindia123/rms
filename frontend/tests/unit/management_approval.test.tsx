@@ -341,6 +341,25 @@ describe('Management approval (P10, DEC-70)', () => {
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
   });
 
+  it('warns that a change reopens a goods slip at Accounts; no Approve there (DEC-71)', async () => {
+    serve({
+      '/management-approval/gs/gs-1': {
+        ...GS,
+        status: 'ACCOUNTS_PENDING',
+        can_edit: true,
+        can_approve: false,
+        reopen_notice:
+          'The goods slip is at Accounts: saving a change withdraws its Replacement Slip until you approve it again.',
+      },
+    });
+    render(<ManagementApprovalGsPage gsId="gs-1" onBack={vi.fn()} onOpenGs={vi.fn()} />);
+    expect(await screen.findByTestId('reopen-notice')).toHaveTextContent(
+      'withdraws its Replacement Slip',
+    );
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+  });
+
   it('shows the error with the request id and keeps the draft', async () => {
     serve({
       '/management-approval/gs/gs-1': GS,

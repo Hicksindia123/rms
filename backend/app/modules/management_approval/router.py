@@ -22,6 +22,7 @@ from app.modules.management_approval.schemas import (
     VerifyOut,
 )
 from app.modules.management_approval.service import ManagementApprovalService
+from app.shared.storage import StorageService, get_storage
 
 router = APIRouter(prefix="/management-approval", tags=["management-approval"])
 
@@ -29,6 +30,7 @@ ViewUser = Annotated[CurrentUser, Depends(require("management_approval", "view")
 ApproveUser = Annotated[CurrentUser, Depends(require("management_approval", "approve"))]
 # The stamp is shown wherever the goods slip is shown (GS detail page).
 GsViewUser = Annotated[CurrentUser, Depends(require("goods_slips", "view"))]
+StorageDep = Annotated[StorageService, Depends(get_storage)]
 
 
 @router.get("/queue", response_model=list[QueueRowOut])
@@ -76,10 +78,16 @@ def approve(
     perms: EffectivePermissionsDep,
     uow: UowDep,
     idem: IdempotencyKeyDep,
+    storage: StorageDep,
 ) -> JSONResponse:
     """DEC-70 (Q17): record the e-approval (DB-computed SHA-256 of the GS lines + decisions,
-    append-only) and resolve the open request. `Idempotency-Key` required (G-16)."""
-    return ManagementApprovalService(uow).approve(user, perms, gs_id, payload, idem).to_response()
+    append-only) and resolve the open request; DEC-71: the goods slip then goes on to Accounts (or
+    on hold) when the gate passes. `Idempotency-Key` required (G-16)."""
+    return (
+        ManagementApprovalService(uow)
+        .approve(user, perms, gs_id, payload, idem, storage)
+        .to_response()
+    )
 
 
 @router.get("/gs/{gs_id}/stamp", response_model=StampOut)

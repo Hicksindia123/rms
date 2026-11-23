@@ -234,14 +234,15 @@ async def test_stores_analyse_and_complete_the_gs(
     )
     assert undo.status_code == 409 and undo.json()["error"]["code"] == "G-21"
 
-    # OP: back from Grading, then submits; the GS is ANALYSIS_COMPLETED.
+    # OP: back from Grading, then submits; the GS is analysed and, with no Management request
+    # open and no Issue CN, goes straight on to Accounts (DEC-71, P11).
     await _op_back(client, stores, r)
     assert _tasks(db_conn, r.gs_id, "STORE_ANALYSIS") == ["ISTORE_OP"]
     op = _item((await _state(client, stores.op, r.gs_id)).json(), "OP")
     done = await _submit(client, stores.op, r.gs_id, r.op_store, [_decide(op, 0, NOT_ALLOWED=1)])
     assert done.status_code == 200, done.text
-    assert done.json()["status"] == "ANALYSIS_COMPLETED"
-    assert _status(db_conn, r.gs_id) == "ANALYSIS_COMPLETED"
+    assert done.json()["status"] == "ACCOUNTS_PENDING"
+    assert _status(db_conn, r.gs_id) == "ACCOUNTS_PENDING"
     assert _tasks(db_conn, r.gs_id, "STORE_ANALYSIS") == []
     events = {
         e["event_type"]

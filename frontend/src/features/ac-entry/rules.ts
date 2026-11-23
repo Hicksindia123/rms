@@ -1,4 +1,12 @@
-import type { AcEntryLine, AcEntryLineIn, DispatchIn, Drafts, LineDraft } from './types';
+import type {
+  AcEntryLine,
+  AcEntryLineIn,
+  AcGsEntry,
+  DispatchIn,
+  Drafts,
+  LineDraft,
+  SaveGsEntryIn,
+} from './types';
 
 /**
  * Pure helpers of the Accounts entry / Dispatch screens (change plan Phase 8; AMD-18; DEC-26).
@@ -111,4 +119,82 @@ export function dispatchIssue(form: DispatchIn, today: string): string | null {
     return 'Enter a docket number or a vehicle number.';
   }
   return null;
+}
+
+// --- DEC-71 (P11): one Challan / Credit Note per goods slip ---------------------------------
+
+/** Editable values of the goods slip's entry (form strings; '' = empty). */
+export interface GsEntryDraft {
+  challan_no: string;
+  challan_date: string;
+  cn_no: string;
+  cn_date: string;
+  cn_value: string;
+}
+
+export function toGsDraft(e: AcGsEntry): GsEntryDraft {
+  return {
+    challan_no: e.challan_no ?? '',
+    challan_date: e.challan_date ?? '',
+    cn_no: e.cn_no ?? '',
+    cn_date: e.cn_date ?? '',
+    cn_value: e.cn_value ?? '',
+  };
+}
+
+export function gsDraftDirty(e: AcGsEntry, d: GsEntryDraft): boolean {
+  const b = toGsDraft(e);
+  return (
+    b.challan_no.trim() !== d.challan_no.trim() ||
+    b.challan_date !== d.challan_date ||
+    b.cn_no.trim() !== d.cn_no.trim() ||
+    b.cn_date !== d.cn_date ||
+    normaliseAmount(b.cn_value) !== normaliseAmount(d.cn_value)
+  );
+}
+
+/** Problems in the goods slip's draft (empty = fine); only the groups the goods slip needs. */
+export function gsDraftIssues(e: AcGsEntry, d: GsEntryDraft, today: string): string[] {
+  const issues: string[] = [];
+  if (e.requires_challan) {
+    const parts = [d.challan_no.trim(), d.challan_date];
+    if (parts.some(Boolean) && !parts.every(Boolean)) {
+      issues.push('Challan No. and Challan Date are entered together.');
+    }
+    if (d.challan_date && d.challan_date > today)
+      issues.push('Challan Date cannot be in the future.');
+  }
+  if (e.requires_cn) {
+    const parts = [d.cn_no.trim(), d.cn_date, d.cn_value.trim()];
+    if (parts.some(Boolean) && !parts.every(Boolean)) {
+      issues.push('CN No., CN Date and CN Value are entered together.');
+    }
+    if (d.cn_value.trim() !== '') {
+      const n = Number(d.cn_value);
+      if (!Number.isFinite(n) || n <= 0) issues.push('CN Value must be a positive amount.');
+      else if (!/^\d+(\.\d{1,2})?$/.test(d.cn_value.trim())) {
+        issues.push('CN Value takes at most 2 decimals.');
+      }
+    }
+    if (d.cn_date && d.cn_date > today) issues.push('CN Date cannot be in the future.');
+  }
+  return issues;
+}
+
+export function gsDraftComplete(e: AcGsEntry, d: GsEntryDraft): boolean {
+  const ch = !e.requires_challan || (d.challan_no.trim() && d.challan_date);
+  const cn = !e.requires_cn || (d.cn_no.trim() && d.cn_date && d.cn_value.trim());
+  return Boolean(ch && cn);
+}
+
+/** The save body: a group the goods slip does not need is never sent (DEC-71). */
+export function toGsEntryBody(
+  e: AcGsEntry,
+  d: GsEntryDraft,
+): Omit<SaveGsEntryIn, 'ac_action_slip_id'> {
+  const v = (s: string) => (s.trim() === '' ? null : s.trim());
+  return {
+    ...(e.requires_challan ? { challan_no: v(d.challan_no), challan_date: v(d.challan_date) } : {}),
+    ...(e.requires_cn ? { cn_no: v(d.cn_no), cn_date: v(d.cn_date), cn_value: v(d.cn_value) } : {}),
+  };
 }

@@ -85,7 +85,8 @@ async def _analysed(
     op = _item((await _state(client, st.op, r.gs_id)).json(), "OP")
     res = await _submit(client, st.op, r.gs_id, r.op_store, [_decide(op, 0, NOT_ALLOWED=1)])
     assert res.status_code == 200, res.text
-    assert res.json()["status"] == "ANALYSIS_COMPLETED"
+    # DEC-71 (P11): without an open request the gate passes and the GS goes on to Accounts.
+    assert res.json()["status"] == ("ANALYSIS_COMPLETED" if request else "ACCOUNTS_PENDING")
     return r
 
 
@@ -138,6 +139,15 @@ def _actions(conn: Connection, gs_id: str) -> list[tuple[str, str]]:
         g=gs_id,
     )
     return [(r["store"], f"{r['action_code']}:{r['qty']}") for r in rows]
+
+
+def _slips(conn: Connection, gs_id: str) -> list[tuple[int, str]]:
+    rows = fetch_all(
+        as_admin(conn),
+        "select version_no, status from public.ac_action_slips where gs_id = :g order by 1",
+        g=gs_id,
+    )
+    return [(r["version_no"], r["status"]) for r in rows]
 
 
 # --- happy path: any-to-any, approve, verify, change after approval invalidates -----------------
@@ -269,8 +279,11 @@ async def test_management_changes_approves_and_verifies(
         g=r.gs_id,
     )
     assert len(events) == 1
+    # DEC-71 (P11): the approval routed the GS to Accounts with Replacement Slip v1.
+    assert _status(db_conn, r.gs_id) == "ACCOUNTS_PENDING"
+    assert _slips(db_conn, r.gs_id) == [(1, "CURRENT")]
     again = await _approve(client, mgmt, r.gs_id)
-    assert again.status_code == 409 and again.json()["error"]["code"] == "ALREADY_APPROVED"
+    assert again.status_code == 409 and again.json()["error"]["code"] == "INVALID_GS_STATUS"
 
     # Verify (any GS viewer, e.g. the store user): VALID, integrity intact.
     ver = (await client.get(f"{BASE}/gs/{r.gs_id}/verify", headers=_auth(stores.dt))).json()
@@ -279,7 +292,8 @@ async def test_management_changes_approves_and_verifies(
     store_stamp = await client.get(f"{BASE}/gs/{r.gs_id}/stamp", headers=_auth(stores.dt))
     assert store_stamp.status_code == 200 and store_stamp.json()["state"] == "VALID"
 
-    # Back from Issue CN: the approval is CHANGED; the gate needs a new approval.
+    # Back from Issue CN (the GS is at Accounts): the change withdraws the Replacement Slip and
+    # reopens the GS (DEC-71); the approval is CHANGED; the gate needs a new approval.
     res = await _changes(
         client, mgmt, r.gs_id, [_change(dtm, 0, "Party withdrew the CN request", SEND_NEW=2)]
     )
@@ -288,6 +302,8 @@ async def test_management_changes_approves_and_verifies(
     assert changed["stamp"]["state"] == "CHANGED" and changed["stamp"]["stamp_text"] is None
     assert changed["accounts_gate"]["passes"] is False
     assert "changed after its Management approval" in changed["accounts_gate"]["problem"]
+    assert changed["status"] == "ANALYSIS_COMPLETED"
+    assert _slips(db_conn, r.gs_id) == [(1, "SUPERSEDED")]
     ver = (await client.get(f"{BASE}/gs/{r.gs_id}/verify", headers=_auth(mgmt))).json()
     assert (ver["result"], ver["integrity_ok"]) == ("CHANGED", True)
     assert ver["stored_sha256"] != ver["current_sha256"]
@@ -296,7 +312,9 @@ async def test_management_changes_approves_and_verifies(
     assert re.json()["approvals"][0]["approval_no"] == 2
     assert re.json()["approvals"][0]["has_issue_cn"] is False
     assert re.json()["stamp"]["state"] == "VALID"
-    assert _status(db_conn, r.gs_id) == "ANALYSIS_COMPLETED"
+    # The new approval routes it again: Replacement Slip v2 (same number).
+    assert _status(db_conn, r.gs_id) == "ACCOUNTS_PENDING"
+    assert _slips(db_conn, r.gs_id) == [(1, "SUPERSEDED"), (2, "CURRENT")]
 
 
 # --- guards (service) ---------------------------------------------------------------------------
@@ -337,7 +355,7 @@ async def test_management_change_guards(
     assert (await refused([_change(dtm, 0, "  ", ISSUE_CN=2)]))[0] == 422
     assert await refused([_change(dtm, 0, "same", SEND_NEW=2)]) == (422, "NO_CHANGES")
     assert await refused([ok, ok]) == (422, "DUPLICATE_LINE")
-    # Nothing was written; approving without changes is allowed (no request open: first approval).
+    # Nothing was written (the GS is still at Accounts, DEC-71: a refused change reopens nothing).
     assert (
         fetch_all(
             as_admin(db_conn),
@@ -346,7 +364,11 @@ async def test_management_change_guards(
         )
         == []
     )
-    assert (await _approve(client, mgmt, r.gs_id)).status_code == 200
+    assert _status(db_conn, r.gs_id) == "ACCOUNTS_PENDING"
+    assert _slips(db_conn, r.gs_id) == [(1, "CURRENT")]
+    # Approval is for analysed goods slips; this one already passed the gate.
+    late = await _approve(client, mgmt, r.gs_id)
+    assert late.status_code == 409 and late.json()["error"]["code"] == "INVALID_GS_STATUS"
 
 
 # --- DB guards (non-bypassable) -----------------------------------------------------------------
@@ -459,7 +481,7 @@ async def test_db_refuses_management_bypass(
             )
         # With a valid approval the Management gate passes (P11 adds the Accounts exit itself).
         with (
-            pytest.raises(DBAPIError, match="not reachable from ANALYSIS_COMPLETED yet"),
+            pytest.raises(DBAPIError, match="ANALYSIS_COMPLETED goes to Accounts"),
             c.begin_nested(),
         ):
             to_accounts()

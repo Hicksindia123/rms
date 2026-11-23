@@ -67,6 +67,10 @@ export const StoreAnalysisGsPage: React.FC<Props> = ({ gsId, onBack, onOpenGs })
   const [qty, setQty] = useState<Record<string, number>>({});
   const [confirming, setConfirming] = useState(false);
   const [remarks, setRemarks] = useState('');
+  // DEC-71 / Q36: the last store's submission sends the goods slip on to Accounts at once,
+  // so a request for Management approval can go with the submission.
+  const [alsoSend, setAlsoSend] = useState(false);
+  const [sendReason, setSendReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState<ApiError | null>(null);
   const [submitted, setSubmitted] = useState<string | null>(null);
@@ -179,7 +183,12 @@ export const StoreAnalysisGsPage: React.FC<Props> = ({ gsId, onBack, onOpenGs })
     storeAnalysisApi
       .submit(
         gsId,
-        { store_id: activeStore.store_id, lines, remarks: remarks.trim() || null },
+        {
+          store_id: activeStore.store_id,
+          lines,
+          remarks: remarks.trim() || null,
+          management_approval_reason: alsoSend ? sendReason.trim() : null,
+        },
         submitKey.current,
       )
       .then((d) => {
@@ -187,6 +196,8 @@ export const StoreAnalysisGsPage: React.FC<Props> = ({ gsId, onBack, onOpenGs })
         setSubmitted(activeStore.store_name);
         setQty({});
         setRemarks('');
+        setAlsoSend(false);
+        setSendReason('');
         setConfirming(false);
         submitKey.current = newIdempotencyKey();
       })
@@ -277,8 +288,12 @@ export const StoreAnalysisGsPage: React.FC<Props> = ({ gsId, onBack, onOpenGs })
           </p>
           <p className="mt-1">
             {data.status === 'ANALYSIS_COMPLETED'
-              ? 'Every store has submitted: the goods slip is complete for analysis.'
-              : 'The goods slip waits for the other stores.'}
+              ? 'Every store has submitted: the goods slip waits for Management approval.'
+              : data.status === 'ACCOUNTS_PENDING'
+                ? 'Every store has submitted: the goods slip has gone to Accounts.'
+                : data.status === 'NOT_ALLOWED_HOLD'
+                  ? 'Every store has submitted: everything is Not Allowed, so the goods slip is on hold.'
+                  : 'The goods slip waits for the other stores.'}
           </p>
         </div>
       ) : null}
@@ -536,8 +551,14 @@ export const StoreAnalysisGsPage: React.FC<Props> = ({ gsId, onBack, onOpenGs })
             >
               Back
             </Button>
-            <Button type="button" className="min-h-[44px]" isLoading={busy} onClick={submit}>
-              Submit
+            <Button
+              type="button"
+              className="min-h-[44px]"
+              isLoading={busy}
+              disabled={alsoSend && sendReason.trim().length < 3}
+              onClick={submit}
+            >
+              {alsoSend ? 'Submit & send for approval' : 'Submit'}
             </Button>
           </div>
         }
@@ -570,6 +591,44 @@ export const StoreAnalysisGsPage: React.FC<Props> = ({ gsId, onBack, onOpenGs })
               setRemarks(e.target.value);
             }}
           />
+          {data.open_approval_request ? null : (
+            <>
+              <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="h-5 w-5"
+                  checked={alsoSend}
+                  onChange={(e) => {
+                    setAlsoSend(e.target.checked);
+                  }}
+                />
+                Also send for Management approval
+              </label>
+              {alsoSend ? (
+                <>
+                  <label
+                    className="block text-xs font-medium text-slate-700 dark:text-slate-300"
+                    htmlFor="analysis-approval-reason"
+                  >
+                    Reason for Management (required)
+                  </label>
+                  <Textarea
+                    id="analysis-approval-reason"
+                    value={sendReason}
+                    maxLength={500}
+                    rows={2}
+                    onChange={(e) => {
+                      setSendReason(e.target.value);
+                    }}
+                  />
+                </>
+              ) : (
+                <p className="m-0 text-xs text-slate-500">
+                  Without it, the goods slip goes on to Accounts once every store has submitted.
+                </p>
+              )}
+            </>
+          )}
           {submitError ? (
             <ErrorState error={submitError} title="The analysis was not submitted" />
           ) : null}

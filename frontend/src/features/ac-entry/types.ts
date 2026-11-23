@@ -19,6 +19,53 @@ export interface AcEntryQueueItem {
   completed_at: string | null;
   dispatch_slip_no: string | null;
   dispatch_status: string | null;
+  /** DEC-71 (P11): store-flow goods slip = one Challan / CN for the whole goods slip. */
+  per_gs?: boolean;
+  requires_challan?: boolean;
+  requires_cn?: boolean;
+}
+
+/** DEC-71 (Q21): a goods slip on hold, every decision Not Allowed (no Accounts entry). */
+export interface AcHoldItem {
+  gs_id: string;
+  gs_no: string;
+  gs_status: string;
+  party_name: string | null;
+  since: string;
+  total_qty: number;
+}
+
+/** DEC-71: the one Challan (goods ship) and one Credit Note (Issue CN) of a goods slip. */
+export interface AcGsEntry {
+  requires_challan: boolean;
+  requires_cn: boolean;
+  challan_no: string | null;
+  challan_date: string | null;
+  cn_no: string | null;
+  cn_date: string | null;
+  /** Decimal as a string (Pydantic Decimal). */
+  cn_value: string | null;
+  is_complete: boolean;
+  entered_by_name: string | null;
+  entered_at: string | null;
+}
+
+export interface SaveGsEntryIn {
+  ac_action_slip_id: string;
+  challan_no?: string | null;
+  challan_date?: string | null;
+  cn_no?: string | null;
+  cn_date?: string | null;
+  cn_value?: string | null;
+}
+
+export interface ReplacementSlipPrintOut {
+  ac_action_slip_id: string;
+  slip_no: string;
+  version_no: number;
+  url: string;
+  expires_in: number;
+  print_count: number;
 }
 
 export interface AcEntryLine {
@@ -82,6 +129,13 @@ export interface AcEntryState {
   can_complete: boolean;
   complete_blockers: string[];
   dispatch_slip: DispatchSlipSummary | null;
+  /** DEC-71 (P11): one entry for the whole goods slip (the lines are read-only). */
+  per_gs?: boolean;
+  gs_entry?: AcGsEntry | null;
+  /** Slip name from the print template (configuration), e.g. "Replacement Slip". */
+  slip_title?: string | null;
+  /** DEC-70: Management e-approval stamp text (valid approval only). */
+  management_stamp?: string | null;
 }
 
 export interface AcEntryLineIn {
