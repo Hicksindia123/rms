@@ -63,7 +63,7 @@ def lock_routing_header(session: Session, routing_id: UUID) -> dict[str, Any] | 
     row = (
         session.execute(
             text(
-                "select id, gs_id, status, location_id from public.department_routings"
+                "select id, gs_id, status, location_id, store_id from public.department_routings"
                 " where id = :id for update"
             ),
             {"id": routing_id},
@@ -871,7 +871,7 @@ def get_routing(session: Session, routing_id: UUID) -> dict[str, Any] | None:
 
 
 def list_receiving_queue(session: Session) -> list[dict[str, Any]]:
-    """List routings waiting to be received (DISPATCHED or PARTIALLY_RECEIVED)."""
+    """Legacy routings waiting to be received (DISPATCHED or PARTIALLY_RECEIVED, no store)."""
     stmt = text(
         """
         select
@@ -892,6 +892,8 @@ def list_receiving_queue(session: Session) -> list[dict[str, Any]]:
         join public.department_routing_lines rl on rl.routing_id = r.id
         left join public.profiles u on u.id = r.dispatched_by
         where r.status in ('DISPATCHED', 'PARTIALLY_RECEIVED')
+          -- DEC-68: store routings are received by their Intermediate Store (store queue).
+          and r.store_id is null
         group by r.id, r.routing_no, r.gs_id, gs.gs_no, r.department_code, r.department_label,
                  r.status, r.dispatched_at, u.full_name
         order by r.dispatched_at asc
@@ -1092,9 +1094,10 @@ def get_store(session: Session, store_id: UUID) -> dict[str, Any] | None:
             text(
                 """
                 select s.id, s.code, s.name, s.role_id, s.location_id, s.is_active,
-                       l.code as location_code
+                       l.code as location_code, r.code as role_code
                   from public.intermediate_stores s
                   join public.inventory_locations l on l.id = s.location_id
+                  left join public.roles r on r.id = s.role_id
                  where s.id = :id
                 """
             ),
@@ -1270,5 +1273,45 @@ def store_routing_queue(session: Session, statuses: tuple[str, ...]) -> list[dic
             """
         ),
         {"statuses": list(statuses)},
+    ).mappings()
+    return [dict(r) for r in rows]
+
+
+def store_receiving_dins(
+    session: Session, *, gs_id: UUID | None = None, routing_id: UUID | None = None
+) -> list[dict[str, Any]]:
+    """DEC-68: open DINs of the Intermediate Stores (store routings DISPATCHED / PARTIALLY_
+    RECEIVED) with their GS, party and sent / received / pending qty. Oldest first."""
+    rows = session.execute(
+        text(
+            """
+            select r.id, r.routing_no, r.department_code, r.department_label, r.status,
+                   r.store_id, s.code as store_code, s.name as store_name, r.dispatched_at,
+                   u.full_name as dispatched_by_name,
+                   g.id as gs_id, g.gs_no, g.status as gs_status, pa.name as party_name,
+                   st.name as station_name,
+                   coalesce(sum(rl.qty_sent), 0)::int as qty_sent,
+                   coalesce(sum(rl.qty_received), 0)::int as qty_received,
+                   coalesce(sum(rl.qty_sent - rl.qty_received), 0)::int as qty_pending
+              from public.department_routings r
+              join public.intermediate_stores s on s.id = r.store_id
+              join public.department_routing_lines rl on rl.routing_id = r.id
+              join public.goods_slips g on g.id = r.gs_id
+              left join public.parties pa on pa.id = g.party_id
+              left join public.stations st on st.id = g.station_id
+              left join public.profiles u on u.id = r.dispatched_by
+             where r.store_id is not null
+               and (cast(:routing_id as uuid) is not null
+                    or r.status in ('DISPATCHED', 'PARTIALLY_RECEIVED'))
+               and (cast(:gs_id as uuid) is null or r.gs_id = cast(:gs_id as uuid))
+               and (cast(:routing_id as uuid) is null or r.id = cast(:routing_id as uuid))
+             group by r.id, s.code, s.name, u.full_name, g.id, pa.name, st.name
+             order by r.dispatched_at, r.routing_no
+            """
+        ),
+        {
+            "gs_id": str(gs_id) if gs_id else None,
+            "routing_id": str(routing_id) if routing_id else None,
+        },
     ).mappings()
     return [dict(r) for r in rows]

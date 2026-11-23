@@ -14,6 +14,9 @@ import type {
   RoutingPlanLine,
   RoutingPlanOut,
   StoreIssueIn,
+  StoreReceiptIn,
+  StoreReceiptResult,
+  StoreReceivingGs,
   StoreRoutingGs,
   StoreRoutingIn,
   StoreRoutingQueueRow,
@@ -111,6 +114,21 @@ export const departmentRoutingApi = {
   routeStoreGoods: (gsId: string, payload: StoreRoutingIn, idempotencyKey: string) =>
     apiRequest<StoreRoutingResult>(
       `/department-routing/store/gs/${encodeURIComponent(gsId)}/route`,
+      { method: 'POST', body: payload, idempotencyKey },
+    ),
+
+  /** DEC-68: goods slips with open DINs of the user's stores, per department (optionally one GS). */
+  getStoreReceiving: (gsId?: string) =>
+    apiRequest<StoreReceivingGs[]>(
+      gsId
+        ? `/department-routing/store/receiving?gs_id=${encodeURIComponent(gsId)}`
+        : '/department-routing/store/receiving',
+    ),
+
+  /** DEC-68: the store receives a DIN back (stock department -> store). Idempotency-Key (G-16). */
+  receiveStoreDin: (routingId: string, payload: StoreReceiptIn, idempotencyKey: string) =>
+    apiRequest<StoreReceiptResult>(
+      `/department-routing/store/routings/${encodeURIComponent(routingId)}/receive`,
       { method: 'POST', body: payload, idempotencyKey },
     ),
 };

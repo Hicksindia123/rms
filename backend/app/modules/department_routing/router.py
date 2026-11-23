@@ -12,6 +12,7 @@ DEC-67 (Phase P7) store routing, permission module `store_routing`:
   view    the stores' routing queue and the routing view of a GS
   create  an Intermediate Store user routes the store's own goods (saving = the issue, DIN);
           the service and the DB check the user acts for the store
+  edit    DEC-68 (Phase P8): the store that routed the goods receives its DINs back
 """
 
 from __future__ import annotations
@@ -42,6 +43,9 @@ from app.modules.department_routing.schemas import (
     RoutingPlanLineOut,
     RoutingPlanOut,
     StoreIssueIn,
+    StoreReceiptIn,
+    StoreReceiptResultOut,
+    StoreReceivingGsOut,
     StoreRoutingGsOut,
     StoreRoutingIn,
     StoreRoutingQueueRowOut,
@@ -57,6 +61,7 @@ EditUser = Annotated[CurrentUser, Depends(require("department_routing", "edit"))
 IssueUser = Annotated[CurrentUser, Depends(require("department_routing", "approve"))]
 StoreViewUser = Annotated[CurrentUser, Depends(require("store_routing", "view"))]
 StoreRouteUser = Annotated[CurrentUser, Depends(require("store_routing", "create"))]
+StoreReceiveUser = Annotated[CurrentUser, Depends(require("store_routing", "edit"))]
 
 
 @router.get("/store/queue", response_model=list[StoreRoutingQueueRowOut])
@@ -110,6 +115,34 @@ def route_store_goods(
     no stock. One transaction, `Idempotency-Key` required (G-16)."""
     return department_routing_service.route_store_goods(
         uow, actor=user, gs_id=gs_id, payload=payload, idem=idem
+    ).to_response()
+
+
+@router.get("/store/receiving", response_model=list[StoreReceivingGsOut])
+def get_store_receiving(
+    user: StoreViewUser,
+    uow: UowDep,
+    gs_id: UUID | None = None,
+) -> list[StoreReceivingGsOut]:
+    """DEC-68: goods slips (party-wise) with open DINs of the Intermediate Stores, per
+    department, with sent / received / pending qty. A store user sees only its own stores."""
+    with uow.transaction(user.id) as session:
+        return department_routing_service.store_receiving(session, user, gs_id=gs_id)
+
+
+@router.post("/store/routings/{routing_id}/receive", response_model=StoreReceiptResultOut)
+def receive_store_din(
+    routing_id: UUID,
+    payload: StoreReceiptIn,
+    user: StoreReceiveUser,
+    uow: UowDep,
+    idem: IdempotencyKeyDep,
+) -> JSONResponse:
+    """DEC-68: the store that routed the goods receives a DIN back: per line qty + outcome +
+    condition after work (DEC-56), partial receipts allowed. Stock department -> the store's
+    location (or scrap / Non-Functional per outcome). One transaction, `Idempotency-Key` (G-16)."""
+    return department_routing_service.receive_store_din(
+        uow, actor=user, routing_id=routing_id, payload=payload, idem=idem
     ).to_response()
 
 

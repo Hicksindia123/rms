@@ -1,10 +1,10 @@
 """Integration tests for versioned forms and form builder (master plan §8.3, §10, prompt P1-07)."""
 
 from httpx import AsyncClient
-from sqlalchemy import text
+from sqlalchemy import Connection, text
 
 from tests.conftest import JwtFactory
-from tests.integration.conftest import UserFactory
+from tests.integration.conftest import UserFactory, as_admin
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -12,7 +12,7 @@ def _auth(token: str) -> dict[str, str]:
 
 
 async def test_list_seeded_forms_and_get_published(
-    client: AsyncClient, users: UserFactory, make_token: JwtFactory
+    client: AsyncClient, users: UserFactory, make_token: JwtFactory, db_conn: Connection
 ) -> None:
     admin_id = users.create(super_admin=True)
     token = make_token(admin_id)
@@ -24,8 +24,21 @@ async def test_list_seeded_forms_and_get_published(
     assert len(forms) == 20
 
     gate_form = next(f for f in forms if f["code"] == "S1_GATE_INWARD")
-    # v2 since change plan 2026-11-12 Phase 2 (AMD-01..AMD-04); v1 is RETIRED (G-18).
-    assert gate_form["latest_published_version"] == 2
+    # The gate form gets a new version per change (v2 AMD-01..04, v3, v4 DEC-62), older ones are
+    # RETIRED (G-18), and integration tests pin v3 by default (fixture use_gate_form_v3). Compare
+    # with the DB instead of a hard-coded number.
+    assert (
+        gate_form["latest_published_version"]
+        == as_admin(db_conn)
+        .execute(
+            text(
+                """select max(v.version_no) from public.form_versions v
+             join public.form_definitions d on d.id = v.form_definition_id
+            where d.code = 'S1_GATE_INWARD' and v.status = 'PUBLISHED'"""
+            )
+        )
+        .scalar_one()
+    )
     assert gate_form["has_draft"] is False
 
     # 2. Get published snapshot
@@ -35,11 +48,13 @@ async def test_list_seeded_forms_and_get_published(
     assert snap_res.status_code == 200
     snapshot = snap_res.json()
     assert snapshot["form_code"] == "S1_GATE_INWARD"
-    assert snapshot["version_no"] == 2
-    # Form v2: 17 fields; document files travel per gate document row (AMD-04), so the v1
+    assert snapshot["version_no"] == gate_form["latest_published_version"]
+    # Form v3 (pinned for integration tests): v2's 17 fields without the missing-document
+    # acknowledgement; document files travel per gate document row (AMD-04), so the v1
     # `gate_doc_image` field is not added any more.
     keys = [f["field_key"] for f in snapshot["fields"]]
-    assert len(keys) == 17
+    assert len(keys) == 16
+    assert "missing_doc_warning_acknowledged" not in keys
     assert keys[:3] == ["return_type", "gate_entry_date", "gate_entry_no"]
     assert "carton_count" in keys and "no_document" in keys
     assert "gate_doc_image" not in keys and "accompanying_doc" not in keys

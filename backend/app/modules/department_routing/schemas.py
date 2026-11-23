@@ -456,3 +456,58 @@ class StoreRoutingResultOut(BaseModel):
     store: StoreProgressOut
     dins: list[StoreDinOut]
     no_work_qty: int
+
+
+# ---------------------------------------------------------------------------
+# DEC-68 (Phase P8): receiving back from departments by the Intermediate Store user
+# ---------------------------------------------------------------------------
+class StoreReceiptIn(BaseModel):
+    """One receipt against one DIN of the user's store: per routing line one or more rows of
+    qty + outcome + condition after work (DEC-56). Partial receipts are allowed."""
+
+    lines: list[DepartmentReceiptLineIn] = Field(min_length=1)
+    remarks: str | None = Field(default=None, max_length=500)
+
+
+class StoreReceivingDinOut(BaseModel):
+    """An open DIN of a store: what is still at the department."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    routing_no: str
+    department_code: str
+    department_label: str
+    status: str
+    store_id: UUID
+    store_code: str
+    store_name: str
+    dispatched_at: datetime
+    dispatched_by_name: str | None = None
+    qty_sent: int
+    qty_received: int
+    qty_pending: int
+    # The signed-in user acts for the DIN's store (may receive it).
+    is_mine: bool = False
+
+
+class StoreReceivingGsOut(BaseModel):
+    """DEC-68: one goods slip (party-wise) with its open DINs per department."""
+
+    gs_id: UUID
+    gs_no: str
+    status: str
+    party_name: str | None = None
+    station_name: str | None = None
+    since: datetime | None = None
+    stores: list[StoreProgressOut]
+    dins: list[StoreReceivingDinOut]
+
+
+class StoreReceiptResultOut(BaseModel):
+    gs_id: UUID
+    receipt: DepartmentReceiptOut
+    din: StoreReceivingDinOut
+    # The store's progress after the receipt (READY_FOR_ANALYSIS once everything is back;
+    # ROUTING_PENDING when an outcome returned pieces to routing).
+    store: StoreProgressOut

@@ -43,6 +43,7 @@ from app.modules.department_routing.schemas import (
     CreateRoutingPlanIn,
     DepartmentLegOut,
     DepartmentOutcomeHeadOut,
+    DepartmentReceiptLineIn,
     DepartmentReceiptOut,
     DepartmentRoutingOut,
     GsReconciliationOut,
@@ -54,6 +55,10 @@ from app.modules.department_routing.schemas import (
     StoreDinOut,
     StoreIssueIn,
     StoreProgressOut,
+    StoreReceiptIn,
+    StoreReceiptResultOut,
+    StoreReceivingDinOut,
+    StoreReceivingGsOut,
     StoreRefOut,
     StoreRoutingConditionOut,
     StoreRoutingDepartmentOut,
@@ -577,10 +582,51 @@ class DepartmentRoutingService:
         header = repo.lock_routing_header(session, payload.routing_id)
         if not header:
             raise NotFound(f"Routing {payload.routing_id} not found", code="ROUTING_NOT_FOUND")
+        if header["store_id"] is not None:
+            # DEC-68: an Intermediate Store receives its own DINs back (store endpoint).
+            raise Conflict(
+                "This Department Issue Note belongs to an Intermediate Store; its store user "
+                "receives the goods back (Receive from Departments)",
+                code="STORE_ROUTING_RECEIPT",
+            )
         repo.lock_goods_slip(session, header["gs_id"])
-        routing = repo.get_routing(session, payload.routing_id)
+        receipt, routing = self._book_receipt(
+            session, actor, header, payload.lines, payload.remarks
+        )
+        updated = repo.get_routing(session, payload.routing_id)
+        if updated and updated["status"] == "COMPLETED":
+            notifications.publish(
+                session,
+                "DEPT_ROUTING_COMPLETED",
+                user_ids=[routing["dispatched_by"]],
+                role_codes=["REPLACEMENT_MANAGER"],
+                title=f"Department Routing Note {routing['routing_no']} completed",
+                body=(
+                    f"All items for routing {routing['routing_no']} "
+                    f"({routing['department_label']}) have been received."
+                ),
+                entity_type="department_routings",
+                entity_id=routing["id"],
+                gs_id=routing["gs_id"],
+            )
+        return receipt
+
+    def _book_receipt(
+        self,
+        session: Session,
+        actor: CurrentUser,
+        header: dict[str, Any],
+        payload_lines: list[DepartmentReceiptLineIn],
+        remarks: str | None,
+    ) -> tuple[DepartmentReceiptOut, dict[str, Any]]:
+        """DEC-56 receipt of one routing (the caller checked the actor and locked routing + GS):
+        validate the lines, write the receipt (the DB guards snapshot the outcome, move the
+        pieces to their condition after work and pick the destination), move the stock per line
+        and check G-20. Returns the receipt and the routing as it was before the receipt."""
+        routing_id = header["id"]
+        routing = repo.get_routing(session, routing_id)
         if not routing:
-            raise NotFound(f"Routing {payload.routing_id} not found", code="ROUTING_NOT_FOUND")
+            raise NotFound(f"Routing {routing_id} not found", code="ROUTING_NOT_FOUND")
         if routing["status"] not in OPEN_ROUTING_STATUSES:
             raise ValidationFailed(
                 f"Routing {routing['routing_no']} cannot be received (status: {routing['status']})",
@@ -596,7 +642,7 @@ class DepartmentRoutingService:
         # 3. Validate lines: belongs to routing, qty <= pending, outcome head active (DEC-43),
         #    condition after work (DEC-56 Q7). The DB guard re-checks all of it.
         lines_to_create: list[dict[str, Any]] = []
-        for line in payload.lines:
+        for line in payload_lines:
             r_line = line_items.get(line.routing_line_id)
             if not r_line:
                 raise ValidationFailed(
@@ -620,8 +666,14 @@ class DepartmentRoutingService:
                     f"Outcome head {head['label']} is inactive", code="OUTCOME_HEAD_INACTIVE"
                 )
             self._check_condition_after_work(r_line, line.condition_field_id)
-            # DEC-56 Q8 / Q17: the head's destination must exist before anything is booked.
-            self._locations(session, head["destination_location_code"])
+            # DEC-56 Q8 / Q17: the head's destination must exist before anything is booked
+            # (DEC-68: "back to the store" of a store routing is that store's location, which
+            # the store master guarantees).
+            if not (
+                header["store_id"] is not None
+                and head["destination_location_code"] == INTERMEDIATE_LOCATION
+            ):
+                self._locations(session, head["destination_location_code"])
             pending[line.routing_line_id] -= line.quantity  # duplicate lines in one payload
             lines_to_create.append(
                 {
@@ -645,15 +697,16 @@ class DepartmentRoutingService:
         receipt = repo.create_department_receipt(
             session,
             receipt_no=receipt_no,
-            routing_id=payload.routing_id,
+            routing_id=routing_id,
             received_by=actor.id,
-            remarks=payload.remarks,
+            remarks=remarks,
             lines=lines_to_create,
         )
 
         # 5. Stock per line to the destination the DB snapshotted (DEC-56): wastage ->
         #    SCRAP_DISPOSED, Mercury Extracted -> NON_FUNCTIONAL_STORE, otherwise back to the
-        #    INTERMEDIATE_STORE (Q8: no Store Manager acceptance).
+        #    INTERMEDIATE_STORE (Q8: no Store Manager acceptance) or, for a store routing, to
+        #    that Intermediate Store's own location (DEC-68).
         for idx, ld in enumerate(lines_to_create, start=1):
             dest_code = ld["destination_location_code"]
             dest = self._locations(session, dest_code)[dest_code]
@@ -674,30 +727,14 @@ class DepartmentRoutingService:
             )
 
         repo.validate_reconciliation(session, routing["gs_id"])
-
-        updated = repo.get_routing(session, payload.routing_id)
-        if updated and updated["status"] == "COMPLETED":
-            notifications.publish(
-                session,
-                "DEPT_ROUTING_COMPLETED",
-                user_ids=[routing["dispatched_by"]],
-                role_codes=["REPLACEMENT_MANAGER"],
-                title=f"Department Routing Note {routing['routing_no']} completed",
-                body=(
-                    f"All items for routing {routing['routing_no']} "
-                    f"({routing['department_label']}) have been received."
-                ),
-                entity_type="department_routings",
-                entity_id=routing["id"],
-                gs_id=routing["gs_id"],
-            )
         log.info(
             "dept_routing_received",
             receipt_no=receipt_no,
             routing_no=routing["routing_no"],
+            store_id=str(header["store_id"]) if header["store_id"] else None,
             lines=len(lines_to_create),
         )
-        return DepartmentReceiptOut.model_validate(receipt)
+        return DepartmentReceiptOut.model_validate(receipt), routing
 
     # --- DEC-67 (Phase P7): department routing by the Intermediate Store user ----------------
     #
@@ -1163,6 +1200,159 @@ class DepartmentRoutingService:
                 if d["id"] in routing_ids
             ],
             no_work_qty=no_work_qty,
+        )
+
+    # --- DEC-68 (Phase P8): receiving back from departments by the Intermediate Store user ----
+    #
+    # The store that routed the goods (department_routings.store_id) receives its DINs back per GS
+    # and department: sent vs received qty, outcome, condition after work (DEC-56 rules, partial
+    # receipts). Stock goes back to that store's location (or scrap / Non-Functional Store per
+    # outcome head). Outcomes that "return to routing" make the pieces routable again and reopen
+    # the store's STORE_ROUTING task. Once nothing of the store is at a department or still to
+    # route, its progress is READY_FOR_ANALYSIS (P9). The DB checks the same rules (migration
+    # 20261121000500).
+
+    def store_receiving(
+        self, session: Session, actor: CurrentUser, *, gs_id: UUID | None = None
+    ) -> list[StoreReceivingGsOut]:
+        """DEC-68: goods slips (party-wise) with open DINs of the stores the user sees, each with
+        its DINs per department. A store user sees only its own stores' DINs."""
+        scope = self._store_scope(session, actor)
+        cache: dict[UUID, bool] = {}
+        by_gs: dict[UUID, dict[str, Any]] = {}
+        for d in repo.store_receiving_dins(session, gs_id=gs_id):
+            if scope is not None and d["store_id"] not in scope:
+                continue
+            row = by_gs.setdefault(
+                d["gs_id"],
+                {
+                    "gs_id": d["gs_id"],
+                    "gs_no": d["gs_no"],
+                    "status": d["gs_status"],
+                    "party_name": d["party_name"],
+                    "station_name": d["station_name"],
+                    "since": d["dispatched_at"],
+                    "dins": [],
+                },
+            )
+            row["dins"].append(
+                StoreReceivingDinOut.model_validate(
+                    {**d, "is_mine": self._acts_for(session, actor, cache, d["store_id"])}
+                )
+            )
+        out: list[StoreReceivingGsOut] = []
+        for row in by_gs.values():
+            stores = [
+                p
+                for p in self._progress(session, actor, row["gs_id"], cache)
+                if scope is None or p.store_id in scope
+            ]
+            out.append(StoreReceivingGsOut.model_validate({**row, "stores": stores}))
+        return out
+
+    def receive_store_din(
+        self,
+        uow: UnitOfWork,
+        *,
+        actor: CurrentUser,
+        routing_id: UUID,
+        payload: StoreReceiptIn,
+        idem: IdempotencyKey,
+    ) -> IdempotentResult:
+        """DEC-68: one transaction; a duplicate Idempotency-Key returns the first result (G-16)."""
+        with uow.transaction(actor.id) as session:
+            return run_idempotent(
+                session,
+                idem,
+                actor.id,
+                lambda: (
+                    200,
+                    self._receive_store(session, actor, routing_id, payload).model_dump(
+                        mode="json"
+                    ),
+                ),
+            )
+
+    def _receive_store(
+        self, session: Session, actor: CurrentUser, routing_id: UUID, payload: StoreReceiptIn
+    ) -> StoreReceiptResultOut:
+        # 1. Lock the routing, then the GS (G-20 serialisation, same order as the legacy path).
+        header = repo.lock_routing_header(session, routing_id)
+        if not header:
+            raise NotFound(f"Routing {routing_id} not found", code="ROUTING_NOT_FOUND")
+        if header["store_id"] is None:
+            raise Conflict(
+                "This Department Issue Note was issued by the legacy Intermediate Store; it is "
+                "received in Department Receiving (DEC-42)",
+                code="NOT_STORE_ROUTING",
+            )
+        store = repo.get_store(session, header["store_id"])
+        if not store:  # pragma: no cover - FK
+            raise NotFound("Intermediate Store not found", code="STORE_NOT_FOUND")
+        if not repo.user_acts_for_store(session, actor.id, store["id"]):
+            raise PermissionDenied(
+                f"Only a user of {store['name']} receives its goods back from departments (DEC-68)",
+                code="NOT_STORE_USER",
+                details={"store_code": store["code"]},
+            )
+        gs_service.lock_goods_slip(session, header["gs_id"])
+        gs = repo.get_routing_gs(session, header["gs_id"])
+        if not gs or gs["status"] != PROCESSING_STATUS:
+            raise Conflict(
+                "Goods are received back while the goods slip is in store processing "
+                f"(status {gs['status'] if gs else 'missing'})",
+                code="INVALID_GS_STATUS",
+            )
+
+        # 2. The shared DEC-56 receipt: lines, receipt, stock back to the store / outcome, G-20.
+        receipt, routing = self._book_receipt(
+            session, actor, header, payload.lines, payload.remarks
+        )
+
+        # 3. The store's progress: pieces back with a "return to routing" outcome reopen its
+        #    routing task; everything back (or no work) = ready for analysis (P9).
+        cache: dict[UUID, bool] = {}
+        progress = next(
+            p for p in self._progress(session, actor, gs["id"], cache) if p.store_id == store["id"]
+        )
+        gs_service.sync_step_task(
+            session,
+            gs_id=gs["id"],
+            step_code=ROUTING_TASK_STEP,
+            role_id=store["role_id"],
+            needed=progress.status == ROUTING_PENDING,
+        )
+        din = repo.store_receiving_dins(session, routing_id=routing_id)[0]
+        if din["status"] == "COMPLETED":
+            ready = progress.status == "READY_FOR_ANALYSIS"
+            notifications.publish(
+                session,
+                "DEPT_ROUTING_COMPLETED",
+                user_ids=[routing["dispatched_by"]],
+                role_codes=[store["role_code"]] if store["role_code"] else [],
+                title=f"Department Issue Note {routing['routing_no']} received back",
+                body=(
+                    f"{gs['gs_no']}: everything sent to {routing['department_label']} is back at "
+                    f"{store['name']}."
+                    + (" The store's part is ready for analysis." if ready else "")
+                ),
+                entity_type="department_routings",
+                entity_id=routing["id"],
+                gs_id=gs["id"],
+            )
+        log.info(
+            "store_receipt_saved",
+            gs_id=str(gs["id"]),
+            store=store["code"],
+            routing_no=routing["routing_no"],
+            receipt_no=receipt.receipt_no,
+            store_status=progress.status,
+        )
+        return StoreReceiptResultOut(
+            gs_id=gs["id"],
+            receipt=receipt,
+            din=StoreReceivingDinOut.model_validate({**din, "is_mine": True}),
+            store=progress,
         )
 
 

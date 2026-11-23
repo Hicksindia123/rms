@@ -302,6 +302,12 @@ const StoreRoutingGsPage = lazy(() =>
     default: m.StoreRoutingGsPage,
   })),
 );
+// DEC-68 (P8): receiving back from departments by the Intermediate Store user.
+const StoreReceivingPage = lazy(() =>
+  import('@/features/department-routing/StoreReceivingPage').then((m) => ({
+    default: m.StoreReceivingPage,
+  })),
+);
 const DepartmentIssueNotePrintPage = lazy(() =>
   import('@/features/department-routing/DepartmentIssueNotePrintPage').then((m) => ({
     default: m.DepartmentIssueNotePrintPage,
@@ -347,6 +353,7 @@ type NavTab =
   | 'department-routing'
   | 'department-issue'
   | 'store-routing'
+  | 'store-receiving'
   | 'transfer-slips'
   | 'department-receiving'
   | 'accounts-entry'
@@ -394,6 +401,7 @@ const STATIC_TABS: ReadonlySet<string> = new Set([
   'department-routing',
   'department-issue',
   'store-routing',
+  'store-receiving',
   'transfer-slips',
   'department-receiving',
   'accounts-entry',
@@ -1608,6 +1616,13 @@ function Shell() {
                       onOpenPrint={(id: string) => {
                         navigate(`/department-routing/${id}/print`);
                       }}
+                      {...(can('store_routing', 'edit') || isSuperAdmin
+                        ? {
+                            onReceive: (id: string) => {
+                              navigate(`/store-receiving/${id}`);
+                            },
+                          }
+                        : {})}
                     />
                   ) : (
                     <StoreRoutingQueuePage
@@ -1620,6 +1635,35 @@ function Shell() {
                   <EmptyState
                     title="Access Restricted"
                     hint="You do not have permission to view Department Routing."
+                  />
+                )}
+              </RequireAuth>
+            )}
+            {activeTab === 'store-receiving' && (
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
+                {can('store_routing', 'view') || isSuperAdmin ? (
+                  // DEC-68: the store receives its DINs back (one GS when opened from My Work).
+                  <StoreReceivingPage
+                    key={second ?? 'all'}
+                    {...(second ? { gsId: second } : {})}
+                    onShowAll={() => {
+                      navigate('/store-receiving');
+                    }}
+                    onOpenGs={(id: string) => {
+                      navigate(`/store-routing/${id}`);
+                    }}
+                    onOpenPrint={(id: string) => {
+                      navigate(`/department-routing/${id}/print`);
+                    }}
+                  />
+                ) : (
+                  <EmptyState
+                    title="Access Restricted"
+                    hint="You do not have permission to view Receive from Departments."
                   />
                 )}
               </RequireAuth>

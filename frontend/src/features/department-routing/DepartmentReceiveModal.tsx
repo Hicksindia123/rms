@@ -4,6 +4,9 @@
  * Per routing line the receiver books one or more rows of qty + outcome + condition after work
  * (the categorisation list of the product). The item's current condition split is updated by the
  * DB; the stock goes where the outcome head says (labels and destinations come from the API).
+ *
+ * DEC-68 (Phase P8): with `storeMode` the Intermediate Store that routed the goods receives its
+ * own DIN back (store endpoint); "back to the store" is that store's location.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X, CheckCircle2, AlertTriangle, Plus, Trash2 } from 'lucide-react';
@@ -20,7 +23,13 @@ interface DepartmentReceiveModalProps {
   routing: DepartmentRoutingOut;
   onClose: () => void;
   onSuccess: () => void;
+  /** DEC-68: receive a store's DIN through the store endpoint (the store user). */
+  storeMode?: boolean;
 }
+
+/** DEC-56 default destination: a head without its own location sends the pieces "back to the
+ * store" (system location code, not a label). */
+const BACK_TO_STORE = 'INTERMEDIATE_STORE';
 
 interface Split {
   key: string;
@@ -52,6 +61,7 @@ export const DepartmentReceiveModal: React.FC<DepartmentReceiveModalProps> = ({
   routing,
   onClose,
   onSuccess,
+  storeMode = false,
 }) => {
   const [outcomeHeads, setOutcomeHeads] = useState<DepartmentOutcomeHead[]>([]);
   const [loadingHeads, setLoadingHeads] = useState(true);
@@ -137,8 +147,7 @@ export const DepartmentReceiveModal: React.FC<DepartmentReceiveModalProps> = ({
     }));
   };
 
-  const lineUsed = (lineId: string) =>
-    (splits[lineId] ?? []).reduce((a, s) => a + s.quantity, 0);
+  const lineUsed = (lineId: string) => (splits[lineId] ?? []).reduce((a, s) => a + s.quantity, 0);
 
   const problems = pendingLines.flatMap((ln) => {
     const out: string[] = [];
@@ -174,12 +183,15 @@ export const DepartmentReceiveModal: React.FC<DepartmentReceiveModalProps> = ({
 
     setIsSubmitting(true);
     setError(null);
-    departmentRoutingApi
-      .receiveRouting(
-        routing.id,
-        { routing_id: routing.id, lines, remarks: generalRemarks.trim() || undefined },
-        idempotencyKey.current,
-      )
+    const remarks = generalRemarks.trim() || undefined;
+    const request = storeMode
+      ? departmentRoutingApi.receiveStoreDin(routing.id, { lines, remarks }, idempotencyKey.current)
+      : departmentRoutingApi.receiveRouting(
+          routing.id,
+          { routing_id: routing.id, lines, remarks },
+          idempotencyKey.current,
+        );
+    request
       .then(() => {
         onSuccess();
       })
@@ -193,7 +205,7 @@ export const DepartmentReceiveModal: React.FC<DepartmentReceiveModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4 overflow-y-auto"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 p-3 sm:p-4 overflow-y-auto"
       role="dialog"
       aria-modal="true"
       aria-labelledby="dept-receive-title"
@@ -238,8 +250,8 @@ export const DepartmentReceiveModal: React.FC<DepartmentReceiveModalProps> = ({
           )}
 
           <p className="rounded-lg bg-slate-50 dark:bg-slate-800/40 p-3 text-xs text-slate-600 dark:text-slate-300">
-            For each line record the outcome and the condition the pieces came back in. Split a
-            line when pieces came back differently. Partial receipts are allowed.
+            For each line record the outcome and the condition the pieces came back in. Split a line
+            when pieces came back differently. Partial receipts are allowed.
           </p>
 
           {loadingHeads ? (
@@ -411,12 +423,20 @@ export const DepartmentReceiveModal: React.FC<DepartmentReceiveModalProps> = ({
                           </div>
                           {head ? (
                             <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                              {head.returns_to_routing
-                                ? 'Back to the RM routing queue. '
-                                : 'Ready for RM final actions. '}
-                              {head.destination_location_name
-                                ? `Stock goes to ${head.destination_location_name}.`
-                                : ''}
+                              {storeMode
+                                ? head.returns_to_routing
+                                  ? 'Back to your store for routing again. '
+                                  : 'Ready for analysis. '
+                                : head.returns_to_routing
+                                  ? 'Back to the RM routing queue. '
+                                  : 'Ready for RM final actions. '}
+                              {storeMode &&
+                              routing.store_name &&
+                              head.destination_location_code === BACK_TO_STORE
+                                ? `Stock goes back to ${routing.store_name}.`
+                                : head.destination_location_name
+                                  ? `Stock goes to ${head.destination_location_name}.`
+                                  : ''}
                             </p>
                           ) : null}
                         </div>

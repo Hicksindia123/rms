@@ -585,7 +585,22 @@ async def test_xlsx_export_and_limits(client: AsyncClient, db_conn: Connection, 
     assert len(rows) - 1 == _scalar(db_conn, "select count(*) from public.credit_notes")
     assert wb["Filters"]["A1"].value.startswith("R-16")
 
-    as_admin(db_conn).execute(
+    # Over the limit needs more rows than the limit (minimum 1): make sure R-03 has at least two
+    # goods slips, a freshly reset database has none (rolled back with the test).
+    c = as_admin(db_conn)
+    c.execute(
+        text(
+            """insert into public.goods_slips (gs_no, workflow_version_id, delivery_mode_code,
+                   courier_name, docket_no, box_count, status)
+               select 'GS-RPT-LIMIT-' || n, wv.id, 'COURIER_PARCEL', 'BlueDart', 'BD' || n, 1,
+                      'GATE_CREATED'
+                 from generate_series(1, 2) n,
+                      (select v.id from public.workflow_versions v
+                         join public.workflow_definitions d on d.id = v.workflow_definition_id
+                        where d.code = 'RMS_STANDARD' and v.status = 'PUBLISHED' limit 1) wv"""
+        )
+    )
+    c.execute(
         text("update public.system_settings set value = '1' where key = 'report_export_max_rows'")
     )
     big = await client.get(

@@ -74,7 +74,7 @@ async def test_inward_verifier_journey_order_steps_then_tools(
         "CARTON_OPENING",
         "COUNTING",  # DEC-53: Counting & Categorisation, one entry
         "INSPECTION",
-        "DEPT_RECEIVING",
+        # DEC-68 (P8): DEPT_RECEIVING hidden; the Intermediate Stores receive their goods back.
         "CONTAINER_AUDIT",
         "GS_LIST",
         "REPORTS",

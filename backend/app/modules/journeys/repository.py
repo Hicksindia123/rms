@@ -73,12 +73,13 @@ _QUEUES: dict[str, str] = {
           join public.goods_slips g on g.id = p.gs_id {_GS_JOINS}
          where p.status = 'PLANNED'
          group by g.id, g.gs_no, pa.name, st.name""",  # noqa: S608
-    # AMD-15: routings DISPATCHED / PARTIALLY_RECEIVED (department_routing receiving queue).
+    # AMD-15: legacy routings DISPATCHED / PARTIALLY_RECEIVED (department_routing receiving
+    # queue). DEC-68: store routings are received by their Intermediate Store (STORE_RECEIVING).
     "DEPT_RECEIVING": f"""
         select {_GS_COLS}, r.id as target_id, r.dispatched_at as since
           from public.department_routings r
           join public.goods_slips g on g.id = r.gs_id {_GS_JOINS}
-         where r.status in ('DISPATCHED', 'PARTIALLY_RECEIVED')""",  # noqa: S608
+         where r.status in ('DISPATCHED', 'PARTIALLY_RECEIVED') and r.store_id is null""",  # noqa: S608
     # AMD-16 / DEC-46 / DEC-55: held, routed or planned before (a STORE "no work" plan counts),
     # nothing at a department or waiting for the Store issue now, not finalised yet.
     "FINAL_ACTIONS": f"""
@@ -181,6 +182,16 @@ _QUEUES: dict[str, str] = {
            and exists (select 1 from rms_private.gs_store_routing_progress(g.id) p
                         where p.status = 'ROUTING_PENDING'
                           and rms_private.user_acts_for_store(cast(:uid as uuid), p.store_id))""",  # noqa: S608
+    # DEC-68: goods slips with goods of the signed-in user's Intermediate Stores still at a
+    # department (one row per GS, party-wise; department_routing store receiving). Scoped by :uid
+    # (Super Admin: all stores).
+    "STORE_RECEIVING": f"""
+        select {_GS_COLS}, g.id as target_id, min(r.dispatched_at) as since
+          from public.department_routings r
+          join public.goods_slips g on g.id = r.gs_id {_GS_JOINS}
+         where r.status in ('DISPATCHED', 'PARTIALLY_RECEIVED') and r.store_id is not null
+           and rms_private.user_acts_for_store(cast(:uid as uuid), r.store_id)
+         group by g.id, g.gs_no, pa.name, st.name""",  # noqa: S608
     # DEC-65: the RM's open edit requests on locked GSs (Management / Super Admin).
     "EDIT_REQUESTS": f"""
         select {_GS_COLS}, g.id as target_id, r.requested_at as since
@@ -234,8 +245,8 @@ def list_user_steps(session: Session, user_id: UUID) -> list[dict[str, Any]]:
 
 
 def _params(sql: str, user_id: UUID | None) -> dict[str, Any]:
-    """A user-scoped queue (DEC-66 STORE_ACK, DEC-67 STORE_ROUTING) binds :uid; the others take
-    no parameters."""
+    """A user-scoped queue (DEC-66 STORE_ACK, DEC-67 STORE_ROUTING, DEC-68 STORE_RECEIVING) binds
+    :uid; the others take no parameters."""
     return {"uid": str(user_id) if user_id else None} if ":uid" in sql else {}
 
 

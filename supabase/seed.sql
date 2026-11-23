@@ -249,9 +249,10 @@ insert into _seed_role_matrix values
   ('ISTORE_RI',                  'transfer_slips',  array['view','approve']),
   -- DEC-67 (P7): route the store's own goods (saving = issue, DIN); department_routing view opens
   -- the DIN print and the GS department legs.
-  ('ISTORE_OP',                  'store_routing',   array['view','create']),
-  ('ISTORE_DT',                  'store_routing',   array['view','create']),
-  ('ISTORE_RI',                  'store_routing',   array['view','create']),
+  -- DEC-68 (P8): store_routing edit = receive the store's goods back from departments.
+  ('ISTORE_OP',                  'store_routing',   array['view','create','edit']),
+  ('ISTORE_DT',                  'store_routing',   array['view','create','edit']),
+  ('ISTORE_RI',                  'store_routing',   array['view','create','edit']),
   ('ISTORE_OP',                  'department_routing', array['view']),
   ('ISTORE_DT',                  'department_routing', array['view']),
   ('ISTORE_RI',                  'department_routing', array['view']),
@@ -319,7 +320,7 @@ select r.id, s.id, m.ord
     ('INWARD_VERIFIER',            'COUNTING',        20),
     -- DEC-53: no separate CATEGORISATION entry; COUNTING = "Counting & Categorisation".
     ('INWARD_VERIFIER',            'INSPECTION',      35),
-    ('INWARD_VERIFIER',            'DEPT_RECEIVING',  40),   -- Q8 / DEC-42
+    ('INWARD_VERIFIER',            'DEPT_RECEIVING',  40),   -- Q8 / DEC-42 (legacy; hidden by DEC-68)
     ('INWARD_VERIFIER',            'CONTAINER_AUDIT',100),
     ('INWARD_VERIFIER',            'GS_LIST',        110),
     ('INWARD_VERIFIER',            'REPORTS',        120),
@@ -392,6 +393,9 @@ select r.id, s.id, m.ord
     ('ISTORE_OP',                  'STORE_DEPT_ROUTING', 20),   -- DEC-67
     ('ISTORE_DT',                  'STORE_DEPT_ROUTING', 20),
     ('ISTORE_RI',                  'STORE_DEPT_ROUTING', 20),
+    ('ISTORE_OP',                  'STORE_DEPT_RECEIVING', 30),   -- DEC-68
+    ('ISTORE_DT',                  'STORE_DEPT_RECEIVING', 30),
+    ('ISTORE_RI',                  'STORE_DEPT_RECEIVING', 30),
     ('ISTORE_OP',                  'GS_LIST',        100),
     ('ISTORE_DT',                  'GS_LIST',        100),
     ('ISTORE_RI',                  'GS_LIST',        100)
@@ -658,6 +662,16 @@ update public.journey_steps set is_active = false where code = 'STORE_ACCEPT' an
 -- hidden; a fresh database has no legacy goods slip held at the old Intermediate Store.
 update public.journey_steps set is_active = false
  where code in ('DEPT_ROUTING', 'DEPT_ISSUE') and is_active;
+-- DEC-68 (P8): goods come back from departments to the Intermediate Store that routed them; the
+-- Replacement Executive's legacy "Department Receiving" menu is hidden (a fresh database has no
+-- legacy routing at a department). The outcome that sends pieces back to routing now returns them
+-- to the store's routing, not the RM's (label only; code RE_ROUTE unchanged, G-18).
+-- Same block in supabase/snippets/release_20261121_p8_store_receiving.sql.
+update public.journey_steps set is_active = false where code = 'DEPT_RECEIVING' and is_active;
+update public.department_outcome_heads
+   set label = 'Return for Re-routing',
+       description = 'Returned to the store for re-evaluation and routing again'
+ where code = 'RE_ROUTE' and label = 'Return to RM Routing Queue';
 
 
 -- -----------------------------------------------------------------------------

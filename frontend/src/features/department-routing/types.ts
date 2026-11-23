@@ -429,3 +429,48 @@ export interface StoreRoutingResult {
   dins: StoreDin[];
   no_work_qty: number;
 }
+
+// --- DEC-68 (Phase P8): receiving back from departments by the Intermediate Store user -------
+
+/** An open DIN of a store (backend StoreReceivingDinOut). */
+export interface StoreReceivingDin {
+  id: string;
+  routing_no: string;
+  department_code: string;
+  department_label: string;
+  status: string;
+  store_id: string;
+  store_code: string;
+  store_name: string;
+  dispatched_at: string;
+  dispatched_by_name: string | null;
+  qty_sent: number;
+  qty_received: number;
+  qty_pending: number;
+  /** The signed-in user acts for the DIN's store (may receive it). */
+  is_mine: boolean;
+}
+
+/** One goods slip (party-wise) with its open DINs per department (StoreReceivingGsOut). */
+export interface StoreReceivingGs {
+  gs_id: string;
+  gs_no: string;
+  status: string;
+  party_name: string | null;
+  station_name: string | null;
+  since: string | null;
+  stores: StoreProgress[];
+  dins: StoreReceivingDin[];
+}
+
+export interface StoreReceiptIn {
+  lines: DepartmentReceiptLineIn[];
+  remarks?: string | undefined;
+}
+
+export interface StoreReceiptResult {
+  gs_id: string;
+  receipt: DepartmentReceiptOut;
+  din: StoreReceivingDin;
+  store: StoreProgress;
+}

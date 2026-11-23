@@ -30,7 +30,12 @@ interface Props {
   onBack: () => void;
   onOpenGs: (gsId: string) => void;
   onOpenPrint: (routingId: string) => void;
+  /** DEC-68 (P8): open "Receive from Departments" for this GS (users who may receive). */
+  onReceive?: (gsId: string) => void;
 }
+
+/** DIN statuses with pieces still at the department (system statuses, not options). */
+const OPEN_DIN = new Set(['DISPATCHED', 'PARTIALLY_RECEIVED']);
 
 interface Row {
   key: string;
@@ -147,7 +152,13 @@ const RoutedLines: React.FC<{ item: StoreRoutingItem; undo: UndoProps }> = ({ it
     </ul>
   );
 
-export const StoreRoutingGsPage: React.FC<Props> = ({ gsId, onBack, onOpenGs, onOpenPrint }) => {
+export const StoreRoutingGsPage: React.FC<Props> = ({
+  gsId,
+  onBack,
+  onOpenGs,
+  onOpenPrint,
+  onReceive,
+}) => {
   const [data, setData] = useState<StoreRoutingGs | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
@@ -562,9 +573,28 @@ export const StoreRoutingGsPage: React.FC<Props> = ({ gsId, onBack, onOpenGs, on
 
       {data.dins.length > 0 ? (
         <section className={card} aria-label="Department Issue Notes">
-          <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-            Department Issue Notes
-          </h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              Department Issue Notes
+            </h2>
+            {onReceive &&
+            data.dins.some(
+              (d) =>
+                OPEN_DIN.has(d.status) &&
+                data.stores.some((s) => s.is_mine && s.store_id === d.store_id),
+            ) ? (
+              <Button
+                type="button"
+                size="sm"
+                className="min-h-[44px]"
+                onClick={() => {
+                  onReceive(data.gs_id);
+                }}
+              >
+                Receive from departments
+              </Button>
+            ) : null}
+          </div>
           <ul className="mt-2 list-none p-0 space-y-2">
             {data.dins.map((d) => (
               <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
