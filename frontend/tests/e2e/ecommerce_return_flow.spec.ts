@@ -45,7 +45,7 @@ test.describe('E-Commerce Return gate entry → platform ticket', () => {
 
       await gate.page.getByLabel(/Platform/).selectOption({ label: 'Amazon' });
       await gate.page.getByLabel(/Order ID/).fill(orderId);
-      await gate.page.getByLabel('Company Product').check();
+      await gate.page.getByLabel('Our Product').check();
       await gate.page.getByRole('textbox', { name: 'Product' }).fill('a');
       await gate.page.getByRole('listbox').getByRole('option').first().click();
       await gate.page.getByLabel(/^Qty/).fill('2');
@@ -67,7 +67,7 @@ test.describe('E-Commerce Return gate entry → platform ticket', () => {
       await gate.page.getByLabel(/Platform/).selectOption({ label: 'Flipkart' });
       await gate.page.getByLabel(/Order ID/).fill(`${orderId}-B`);
       await gate.page.getByLabel('Different Product').check();
-      await gate.page.getByLabel(/Different Product Description/).fill('Empty box with a brick');
+      await gate.page.getByLabel(/Different Product Name/).fill('Empty box with a brick');
       await gate.page.getByLabel('Issue to Checking Department').check();
       await gate.page.locator('#ecom-video').setInputFiles(fakeFile('open2.mov', 'video/quicktime', 200));
       await gate.page.getByTestId('ecom-record').click();

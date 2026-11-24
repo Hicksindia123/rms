@@ -94,11 +94,11 @@ describe('E-Commerce gate entry (DEC-73)', () => {
 
   it('shows the product field that matches the product type', async () => {
     await renderForm();
-    expect(screen.queryByLabelText(/Different Product Description/)).toBeNull();
+    expect(screen.queryByLabelText(/Different Product Name/)).toBeNull();
     fireEvent.click(screen.getByLabelText('Different Product'));
-    expect(screen.getByLabelText(/Different Product Description/)).toBeTruthy();
+    expect(screen.getByLabelText(/Different Product Name/)).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Company Product'));
-    expect(screen.queryByLabelText(/Different Product Description/)).toBeNull();
+    expect(screen.queryByLabelText(/Different Product Name/)).toBeNull();
     expect(screen.getByLabelText('Product')).toBeTruthy();
   });
 
@@ -142,7 +142,7 @@ describe('E-Commerce gate entry (DEC-73)', () => {
     fireEvent.change(screen.getByLabelText(/Platform/), { target: { value: 'AMAZON' } });
     fireEvent.change(screen.getByLabelText(/Order ID/), { target: { value: ' 408-1234567 ' } });
     fireEvent.click(screen.getByLabelText('Different Product'));
-    fireEvent.change(screen.getByLabelText(/Different Product Description/), {
+    fireEvent.change(screen.getByLabelText(/Different Product Name/), {
       target: { value: 'Toy car' },
     });
     fireEvent.click(screen.getByLabelText('Issue to Checking Department'));

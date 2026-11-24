@@ -16,7 +16,6 @@ import {
   LoadingState,
   RadioGroup,
   Select,
-  Textarea,
 } from '@/components/ui';
 import type { ComboboxOption } from '@/components/ui';
 import { useApiQuery } from '@/hooks/useApiQuery';
@@ -189,7 +188,7 @@ function EcomForm({
     if (!productType) e.product_type_code = 'Choose the product type';
     if (productType === 'COMPANY_PRODUCT' && !productId) e.product_id = 'Choose the product';
     if (productType === 'DIFFERENT_PRODUCT' && differentDesc.trim().length < 3)
-      e.different_product_desc = 'Describe the item found in the packet';
+      e.different_product_desc = 'Enter the name of the item found in the packet';
     const n = Number(qty);
     if (!Number.isInteger(n) || n < 1) e.qty = 'Enter a whole number, at least 1';
     if (!routing) e.qc_routing_code = 'Choose the QC status';
@@ -557,14 +556,14 @@ function EcomForm({
       {productType === 'DIFFERENT_PRODUCT' ? (
         <div>
           <label htmlFor="ecom-different-desc" className="form-control__label">
-            Different Product Description <span className="text-red-600">*</span>
+            Different Product Name <span className="text-red-600">*</span>
           </label>
-          <Textarea
+          <Input
             id="ecom-different-desc"
-            rows={2}
             maxLength={500}
+            autoComplete="off"
             value={differentDesc}
-            placeholder="What was found in the packet"
+            placeholder="Name of the item found in the packet"
             error={errors.different_product_desc}
             disabled={busy}
             onChange={(e) => {
