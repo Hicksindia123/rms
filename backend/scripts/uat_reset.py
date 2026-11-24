@@ -124,6 +124,19 @@ UAT_USERS: list[dict[str, Any]] = [
         "roles": ["MANAGEMENT"],
         "is_super_admin": False,
     },
+    # DEC-73 (2026-11-24): E-Commerce Returns.
+    {
+        "email": "ecomgate@rms.local",
+        "name": "E-Commerce Gate User",
+        "roles": ["ECOM_GATE"],
+        "is_super_admin": False,
+    },
+    {
+        "email": "tickets@rms.local",
+        "name": "Ticket Handler",
+        "roles": ["TICKET_HANDLER"],
+        "is_super_admin": False,
+    },
 ]
 
 # Transactional tables to clean for zero-demo-transactions UAT baseline

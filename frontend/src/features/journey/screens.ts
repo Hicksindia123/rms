@@ -2,6 +2,8 @@ import { createElement } from 'react';
 import {
   type LucideIcon,
   ArrowLeftRight,
+  ShoppingCart,
+  Ticket,
   BarChart3,
   BatteryMedium,
   Boxes,
@@ -65,6 +67,9 @@ const SCREEN_PATHS: Record<string, string> = {
   'store-receiving': '/store-receiving', // DEC-68
   'store-analysis': '/store-analysis', // DEC-69
   'management-approval': '/management-approval', // DEC-70
+  'ecom-return-new': '/ecom-returns/new', // DEC-73
+  'ecom-returns': '/ecom-returns', // DEC-73
+  'ecom-tickets': '/ecom-tickets', // DEC-73
   'transfer-slips': '/transfer-slips',
   'transfer-slip-acks': '/transfer-slips/acknowledge', // DEC-66
   'department-receiving': '/department-receiving',
@@ -117,6 +122,8 @@ export function itemPath(
       return `/store-analysis/${item.gs_id}`;
     case 'gs-management-approval': // DEC-70: Management reviews / approves this GS
       return `/management-approval/${item.gs_id}`;
+    case 'ecom-return': // DEC-73: an E-Commerce Return (not a goods slip)
+      return `/ecom-returns/${item.target_id}`;
     case 'transfer-slip': // DEC-66: the queue item is the slip itself
       return `/transfer-slips/${item.target_id}`;
     case 'accounts-docs':
@@ -151,6 +158,9 @@ const ICONS: Record<string, LucideIcon> = {
   STORE_DEPT_RECEIVING: CheckCircle2,
   STORE_ANALYSIS: Split, // DEC-69
   MANAGEMENT_APPROVAL: BadgeCheck, // DEC-70
+  ECOM_GATE_ENTRY: ShoppingCart, // DEC-73
+  ECOM_TICKETS: Ticket, // DEC-73
+  ECOM_RETURNS: ShoppingCart, // DEC-73
   DEPT_RECEIVING: CheckCircle2,
   FINAL_ACTIONS: Split,
   ACCOUNTS_DOCS: FileSpreadsheet,

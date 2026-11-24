@@ -311,8 +311,12 @@ test.describe('Phase 2 gate scenarios (P2-08)', () => {
     // Anuj creates the GS at the gate (UI), choosing "No Document Attached" (BR-03).
     const gate = await open(browser, USERS.gate, '/gs/new');
     await expect(gate.getByRole('heading', { name: 'New Goods Slip' })).toBeVisible();
-    // Form v2 (AMD-01/06): E-Commerce return → State → Station → Distributor.
-    await gate.getByTestId('return-type-ECOMMERCE_RETURN').click();
+    // Form v2 (AMD-01/06): Offline return → gate entry → State → Station → Distributor.
+    // DEC-73: E-Commerce now has its own gate form (and is hidden for the offline gate user).
+    await expect(gate.getByTestId('return-type-ECOMMERCE_RETURN')).toHaveCount(0);
+    await gate.getByTestId('return-type-OFFLINE_RETURN').click();
+    await gate.locator('#field-gate_entry_date').fill(new Date().toISOString().slice(0, 10));
+    await gate.locator('#field-gate_entry_no').fill(String(Date.now() % 1_000_000_000));
     await gate.locator('#field-state').selectOption({ label: 'Uttar Pradesh' });
     await gate.locator('#field-station').selectOption({ label: 'Agra' });
     // Any party of the station (reset-db.ps1 removes the DEMO parties).

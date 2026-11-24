@@ -83,7 +83,9 @@ select tables_are('public', array[
   -- DEC-65 (P5): transfer slips + edit requests
   'transfer_slips','transfer_slip_gs','transfer_slip_lines','gs_edit_requests','transfer_slip_discrepancies','gs_store_analyses','gs_management_approval_requests','gs_management_revisions','gs_management_approvals','ac_gs_entries',
   -- gap plan G3 (DEC-56): current condition per item
-  'gs_item_conditions'
+  'gs_item_conditions',
+  -- DEC-73: E-Commerce Returns
+  'ecommerce_returns','ecommerce_return_media','ecommerce_tickets','ecommerce_return_events'
 ],'public schema holds foundation, inward and inventory ledger tables');
 
 select has_schema('rms_private');

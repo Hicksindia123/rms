@@ -56,7 +56,16 @@ const SUMMARY_SKIP: ReadonlySet<string> = new Set([
 interface Props {
   onOpenTag: (gsId: string) => void;
   onOpenGs: (gsId: string) => void;
+  /**
+   * DEC-73: Return Type = E-Commerce has its own gate form. A function opens it; `null` hides the
+   * E-Commerce option (user without ecommerce_returns.create). Left out, the switch behaves as
+   * before (legacy DEC-39 path; tests).
+   */
+  onEcommerce?: (() => void) | null;
 }
+
+/** DEC-73: stable RETURN_TYPE code (labels come from the option set). */
+const ECOMMERCE_RETURN = 'ECOMMERCE_RETURN';
 
 interface Created {
   result: GateInwardResult;
@@ -67,7 +76,7 @@ interface Created {
  * mobile-first GS creation at the gate. Labels, options, required rules and document types all
  * come from the published S1_GATE_INWARD form version and the document option sets.
  * "Submit & Create GS" opens a summary sheet; the GS is created only from that sheet. */
-export function NewGoodsSlipPage({ onOpenTag, onOpenGs }: Props) {
+export function NewGoodsSlipPage({ onOpenTag, onOpenGs, onEcommerce }: Props) {
   const fetcher = useCallback(async () => {
     const [form, states] = await Promise.all([gsApi.gateForm(), gsApi.states()]);
     return { form, states };
@@ -119,6 +128,7 @@ export function NewGoodsSlipPage({ onOpenTag, onOpenGs }: Props) {
         form={query.data.form}
         states={query.data.states}
         onCreated={setCreated}
+        onEcommerce={onEcommerce}
       />
     </div>
   );
@@ -162,10 +172,12 @@ function GateFormBody({
   form,
   states,
   onCreated,
+  onEcommerce,
 }: {
   form: GateForm;
   states: LookupItem[];
   onCreated: (c: Created) => void;
+  onEcommerce?: (() => void) | null | undefined;
 }) {
   const isV4 = form.snapshot.fields.some((f) => f.field_key === V4_MARKER_FIELD);
   const stations = useStationLookup();
@@ -216,22 +228,28 @@ function GateFormBody({
           id="field-return_type"
           aria-label={f.label}
         >
-          {(f.options ?? []).map((o) => (
-            <button
-              key={o.code}
-              type="button"
-              role="radio"
-              aria-checked={api.value === o.code}
-              data-testid={`return-type-${o.code}`}
-              className="gate-return-type__option"
-              disabled={submitting}
-              onClick={() => {
-                api.onChange(o.code);
-              }}
-            >
-              {o.label}
-            </button>
-          ))}
+          {(f.options ?? [])
+            .filter((o) => !(o.code === ECOMMERCE_RETURN && onEcommerce === null))
+            .map((o) => (
+              <button
+                key={o.code}
+                type="button"
+                role="radio"
+                aria-checked={api.value === o.code}
+                data-testid={`return-type-${o.code}`}
+                className="gate-return-type__option"
+                disabled={submitting}
+                onClick={() => {
+                  if (o.code === ECOMMERCE_RETURN && onEcommerce) {
+                    onEcommerce();
+                    return;
+                  }
+                  api.onChange(o.code);
+                }}
+              >
+                {o.label}
+              </button>
+            ))}
         </div>
         {api.error ? (
           <p className="form-control__error" role="alert">

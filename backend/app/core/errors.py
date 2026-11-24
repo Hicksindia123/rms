@@ -28,7 +28,8 @@ _GUARD_CODE = re.compile(r"^G-(0[1-9]|1[0-9]|2[0-2])$")
 _GUARD_IN_DB_MESSAGE = re.compile(r"\b(G-(?:0[1-9]|1[0-9]|2[0-2]))\b")  # G-22: Phase 8
 # Coded DB rule errors that are not numbered guards; returned as 409 with that code.
 # STORE_MAPPING_MISSING: rms_private.assert_store_for_products (DEC-61, Phase P1).
-_CODED_DB_MESSAGE = re.compile(r"\b(STORE_MAPPING_MISSING):")
+# ECOM_*: E-Commerce Return guards (DEC-73, migration 20261124000100), e.g. ECOM_TICKET_PENDING.
+_CODED_DB_MESSAGE = re.compile(r"\b(STORE_MAPPING_MISSING|ECOM_[A-Z_]+):")
 
 
 class DomainError(Exception):

@@ -3,6 +3,8 @@
 Jobs:
 * `cleanup_pending_uploads` (P2-03, every 30 min): deletes PENDING_UPLOAD attachments older than
   `pending_upload_retention_hours` (default 24 h) and their Storage objects.
+* `cleanup_ecommerce_pending_uploads` (DEC-73, every 30 min): same rule for the files of an
+  E-Commerce Return still in DRAFT (marked REJECTED, objects removed; the DRAFT stays).
 * `container_audit_evening_alert` (P2-06, daily at 18:00 IST): if today's DMT container audit
   is not confirmed, dispatches notification to Inward Verifier and RM.
 * `container_audit_morning_missed` (P2-06, daily at 09:00 IST): marks past unconfirmed
@@ -43,6 +45,7 @@ from app.core.job_runs import record_job_run
 from app.core.logging import configure_logging
 from app.modules.attachments.service import AttachmentService
 from app.modules.container_audit import service as container_audit_service
+from app.modules.ecommerce_returns.service import EcommerceReturnService
 from app.modules.inventory import service as inventory_service
 from app.modules.notifications import service as notification_service
 from app.modules.party_notifications import email_service as party_email_service
@@ -76,6 +79,11 @@ def _tracked(job: str, run: Callable[[], int]) -> int:
 def cleanup_pending_uploads() -> int:
     service = AttachmentService(UnitOfWork(get_session_factory()), get_storage())
     return _tracked("cleanup_pending_uploads", service.cleanup_stale_pending)
+
+
+def cleanup_ecommerce_pending_uploads() -> int:
+    service = EcommerceReturnService(UnitOfWork(get_session_factory()), get_storage())
+    return _tracked("cleanup_ecommerce_pending_uploads", service.cleanup_stale_pending)
 
 
 def container_audit_evening_alert() -> int:
@@ -132,6 +140,7 @@ def sla_escalation_check() -> int:
 
 JOBS: dict[str, Callable[[], int]] = {
     "cleanup_pending_uploads": cleanup_pending_uploads,
+    "cleanup_ecommerce_pending_uploads": cleanup_ecommerce_pending_uploads,
     "container_audit_evening_alert": container_audit_evening_alert,
     "container_audit_morning_missed": container_audit_morning_missed,
     "inventory_segregation_check": inventory_segregation_check,
@@ -150,6 +159,14 @@ def build_scheduler() -> BlockingScheduler:
         "interval",
         minutes=CLEANUP_INTERVAL_MINUTES,
         id="cleanup_pending_uploads",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        cleanup_ecommerce_pending_uploads,
+        "interval",
+        minutes=CLEANUP_INTERVAL_MINUTES,
+        id="cleanup_ecommerce_pending_uploads",
         max_instances=1,
         coalesce=True,
     )

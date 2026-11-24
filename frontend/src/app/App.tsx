@@ -330,6 +330,27 @@ const ManagementApprovalGsPage = lazy(() =>
     default: m.ManagementApprovalGsPage,
   })),
 );
+// DEC-73: E-Commerce Returns.
+const EcommerceGateEntryPage = lazy(() =>
+  import('@/features/ecommerce-returns/EcommerceGateEntryPage').then((m) => ({
+    default: m.EcommerceGateEntryPage,
+  })),
+);
+const EcommerceReturnsPage = lazy(() =>
+  import('@/features/ecommerce-returns/EcommerceReturnsPage').then((m) => ({
+    default: m.EcommerceReturnsPage,
+  })),
+);
+const EcommerceReturnDetailPage = lazy(() =>
+  import('@/features/ecommerce-returns/EcommerceReturnDetailPage').then((m) => ({
+    default: m.EcommerceReturnDetailPage,
+  })),
+);
+const TicketQueuePage = lazy(() =>
+  import('@/features/ecommerce-returns/TicketQueuePage').then((m) => ({
+    default: m.TicketQueuePage,
+  })),
+);
 const DepartmentIssueNotePrintPage = lazy(() =>
   import('@/features/department-routing/DepartmentIssueNotePrintPage').then((m) => ({
     default: m.DepartmentIssueNotePrintPage,
@@ -378,6 +399,8 @@ type NavTab =
   | 'store-receiving'
   | 'store-analysis'
   | 'management-approval'
+  | 'ecom-returns'
+  | 'ecom-tickets'
   | 'transfer-slips'
   | 'department-receiving'
   | 'accounts-entry'
@@ -428,6 +451,8 @@ const STATIC_TABS: ReadonlySet<string> = new Set([
   'store-receiving',
   'store-analysis',
   'management-approval',
+  'ecom-returns',
+  'ecom-tickets',
   'transfer-slips',
   'department-receiving',
   'accounts-entry',
@@ -585,6 +610,9 @@ function Shell() {
     if (e.screen_key === 'journey-queue') return journeyParam === e.code;
     if (e.screen_key === 'gs-new') return activeTab === 'gs-new';
     if (e.screen_key === 'gs-list') return activeTab === 'gs';
+    // DEC-73: '/ecom-returns/new' (gate entry) and '/ecom-returns' (list) share a first segment.
+    if (e.screen_key === 'ecom-return-new') return activeTab === 'ecom-returns' && second === 'new';
+    if (e.screen_key === 'ecom-returns') return activeTab === 'ecom-returns' && second !== 'new';
     // '/admin/audit' is the audit tab; every other entry's first path segment is its tab.
     return entryTab(e) === (activeTab === 'audit' ? 'admin' : activeTab);
   };
@@ -1007,6 +1035,14 @@ function Shell() {
                 }}
               >
                 <NewGoodsSlipPage
+                  // DEC-73: E-Commerce opens its own gate form; hidden without the permission.
+                  onEcommerce={
+                    can('ecommerce_returns', 'create') || isSuperAdmin
+                      ? () => {
+                          navigate('/ecom-returns/new');
+                        }
+                      : null
+                  }
                   onOpenTag={(id) => {
                     navigate(`/gs/${id}/tag`);
                   }}
@@ -1690,6 +1726,86 @@ function Shell() {
                   <EmptyState
                     title="Access Restricted"
                     hint="You do not have permission to view Receive from Departments."
+                  />
+                )}
+              </RequireAuth>
+            )}
+            {activeTab === 'ecom-returns' && (
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
+                {second === 'new' ? (
+                  can('ecommerce_returns', 'create') || isSuperAdmin ? (
+                    <EcommerceGateEntryPage
+                      onOffline={
+                        can('goods_slips', 'create') || isSuperAdmin
+                          ? () => {
+                              navigate('/gs/new');
+                            }
+                          : undefined
+                      }
+                      onOpen={(id: string) => {
+                        navigate(`/ecom-returns/${id}`);
+                      }}
+                    />
+                  ) : (
+                    <EmptyState
+                      title="Access Restricted"
+                      hint="You do not have permission to record E-Commerce Returns."
+                    />
+                  )
+                ) : can('ecommerce_returns', 'view') || isSuperAdmin ? (
+                  second ? (
+                    <EcommerceReturnDetailPage
+                      key={second}
+                      returnId={second}
+                      canCreate={can('ecommerce_returns', 'create') || isSuperAdmin}
+                      canVoid={can('ecommerce_returns', 'delete') || isSuperAdmin}
+                      onBack={() => {
+                        navigate('/ecom-returns');
+                      }}
+                    />
+                  ) : (
+                    <EcommerceReturnsPage
+                      onOpen={(id: string) => {
+                        navigate(`/ecom-returns/${id}`);
+                      }}
+                      onNew={
+                        can('ecommerce_returns', 'create') || isSuperAdmin
+                          ? () => {
+                              navigate('/ecom-returns/new');
+                            }
+                          : undefined
+                      }
+                    />
+                  )
+                ) : (
+                  <EmptyState
+                    title="Access Restricted"
+                    hint="You do not have permission to view E-Commerce Returns."
+                  />
+                )}
+              </RequireAuth>
+            )}
+            {activeTab === 'ecom-tickets' && (
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
+                {can('ecommerce_tickets', 'view') || isSuperAdmin ? (
+                  <TicketQueuePage
+                    canEdit={can('ecommerce_tickets', 'edit') || isSuperAdmin}
+                    onOpen={(id: string) => {
+                      navigate(`/ecom-returns/${id}`);
+                    }}
+                  />
+                ) : (
+                  <EmptyState
+                    title="Access Restricted"
+                    hint="You do not have permission to view Platform Tickets."
                   />
                 )}
               </RequireAuth>

@@ -49,7 +49,10 @@ insert into public.roles (code, name, description, is_system) values
   -- DEC-61: one role per Intermediate Store (the store users). Rows in public.intermediate_stores.
   ('ISTORE_OP',                  'Intermediate Store OP',      'DEC-61: users of Intermediate Store OP', true),
   ('ISTORE_DT',                  'Intermediate Store DT',      'DEC-61: users of Intermediate Store DT', true),
-  ('ISTORE_RI',                  'Intermediate Store RI',      'DEC-61: users of Intermediate Store RI', true)
+  ('ISTORE_RI',                  'Intermediate Store RI',      'DEC-61: users of Intermediate Store RI', true),
+  -- DEC-73 (2026-11-24): E-Commerce Returns.
+  ('ECOM_GATE',                  'Gate User (E-Commerce)',     'DEC-73: records E-Commerce Returns at Gate Entry', true),
+  ('TICKET_HANDLER',             'Ticket Handler',             'DEC-73: raises E-Commerce platform tickets and records the platform response', true)
 on conflict (code) do nothing;
 
 -- -----------------------------------------------------------------------------
@@ -274,7 +277,19 @@ insert into _seed_role_matrix values
   ('ISTORE_RI',                  'dashboards',      array['view']),
   ('ISTORE_RI',                  'notifications',   array['view']),
   ('ISTORE_RI',                  'goods_slips',     array['view']),
-  ('ISTORE_RI',                  'attachments',     array['view']);
+  ('ISTORE_RI',                  'attachments',     array['view']),
+  -- DEC-73: E-Commerce Returns. Management sees them and may void; Ticket Handlers work tickets.
+  ('ECOM_GATE',                  'dashboards',      array['view']),
+  ('ECOM_GATE',                  'notifications',   array['view']),
+  ('ECOM_GATE',                  'ecommerce_returns', array['view','create']),
+  ('TICKET_HANDLER',             'dashboards',      array['view']),
+  ('TICKET_HANDLER',             'notifications',   array['view']),
+  ('TICKET_HANDLER',             'ecommerce_returns', array['view']),
+  ('TICKET_HANDLER',             'ecommerce_tickets', array['view','edit']),
+  ('MANAGEMENT',                 'ecommerce_returns', array['view','delete']),
+  ('MANAGEMENT',                 'ecommerce_tickets', array['view']),
+  ('MANAGEMENT_VIEWER',          'ecommerce_returns', array['view']),
+  ('MANAGEMENT_VIEWER',          'ecommerce_tickets', array['view']);
 
 -- Fail loudly on a typo in the matrix instead of silently dropping a permission.
 do $$
@@ -409,7 +424,14 @@ select r.id, s.id, m.ord
     ('ISTORE_RI',                  'STORE_ANALYSIS', 40),
     ('ISTORE_OP',                  'GS_LIST',        100),
     ('ISTORE_DT',                  'GS_LIST',        100),
-    ('ISTORE_RI',                  'GS_LIST',        100)
+    ('ISTORE_RI',                  'GS_LIST',        100),
+    -- DEC-73: E-Commerce Returns.
+    ('ECOM_GATE',                  'ECOM_GATE_ENTRY', 10),
+    ('ECOM_GATE',                  'ECOM_RETURNS',   100),
+    ('TICKET_HANDLER',             'ECOM_TICKETS',    10),
+    ('TICKET_HANDLER',             'ECOM_RETURNS',   100),
+    ('MANAGEMENT',                 'ECOM_RETURNS',   150),
+    ('MANAGEMENT_VIEWER',          'ECOM_RETURNS',   150)
   ) as m(role_code, step_code, ord)
   join public.roles r on r.code = m.role_code
   join public.journey_steps s on s.code = m.step_code

@@ -31,6 +31,8 @@ from app.modules.department_routing.router import router as department_routing_r
 from app.modules.dismantling.router import router as dismantling_router
 from app.modules.dismantling.router import scrap_router
 from app.modules.dispatch.router import router as dispatch_router
+from app.modules.ecommerce_returns.router import router as ecommerce_returns_router
+from app.modules.ecommerce_returns.router import tickets_router as ecommerce_tickets_router
 from app.modules.final_actions.router import router as final_actions_router
 from app.modules.final_actions.router import store_analysis_router
 from app.modules.goods_slips.router import router as goods_slips_router
@@ -151,6 +153,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Phase P5 20-11-2026 (DEC-65): transfer slips + edit requests.
     app.include_router(transfer_slips_router, prefix=API_PREFIX)
     app.include_router(transfer_slips_gs_router, prefix=API_PREFIX)
+    # DEC-73 (2026-11-24): E-Commerce Returns + platform tickets.
+    app.include_router(ecommerce_returns_router, prefix=API_PREFIX)
+    app.include_router(ecommerce_tickets_router, prefix=API_PREFIX)
 
     if settings.app_env in ("test", "local"):
         from app.modules.test_support.router import router as test_router

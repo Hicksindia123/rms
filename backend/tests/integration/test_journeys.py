@@ -125,7 +125,11 @@ _FLOW_MENUS: dict[str, list[str]] = {
         "PENDENCIES",
         "REPORTS",
         "AUDIT",
+        "ECOM_RETURNS",  # DEC-73
     ],
+    # DEC-73: E-Commerce Returns.
+    "ECOM_GATE": ["ECOM_GATE_ENTRY", "ECOM_RETURNS"],
+    "TICKET_HANDLER": ["ECOM_TICKETS", "ECOM_RETURNS"],
     "ACCOUNTS": [
         "ACCOUNTS_DOCS",
         "ACCOUNTS_ENTRY",
