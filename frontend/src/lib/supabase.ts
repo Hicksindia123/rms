@@ -21,6 +21,23 @@ function resolveSupabaseUrl(): string {
 
 let client: SupabaseClient | null = null;
 
+/** Same key supabase-js derives by default (`sb-<first host label>-auth-token`), set explicitly so
+ *  existing sessions stay valid and the app can clear it when a server sign-out fails. */
+function authStorageKey(): string {
+  const firstLabel = new URL(resolveSupabaseUrl()).hostname.split('.')[0] ?? '';
+  return `sb-${firstLabel}-auth-token`;
+}
+
+/** Remove the persisted auth session from this browser only (no server call). Used when the
+ *  server-side session is already gone: auth-js 2.69 then returns AuthSessionMissingError from
+ *  signOut() and keeps the stale local session, leaving the user unable to sign out. */
+export function clearLocalAuthSession(): void {
+  const key = authStorageKey();
+  window.localStorage.removeItem(key);
+  window.localStorage.removeItem(`${key}-code-verifier`);
+  window.localStorage.removeItem(`${key}-user`);
+}
+
 export function isSupabaseConfigured(): boolean {
   return rawUrl.length > 0 && anonKey.length > 0;
 }
@@ -33,7 +50,7 @@ export function getSupabase(): SupabaseClient {
   }
   const effectiveUrl = resolveSupabaseUrl();
   client ??= createClient(effectiveUrl, anonKey, {
-    auth: { persistSession: true, autoRefreshToken: true },
+    auth: { persistSession: true, autoRefreshToken: true, storageKey: authStorageKey() },
   });
   return client;
 }

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 
 import { apiRequest, ApiError } from '@/lib/api/client';
-import { getSupabase, isSupabaseConfigured } from '@/lib/supabase';
+import { clearLocalAuthSession, getSupabase, isSupabaseConfigured } from '@/lib/supabase';
 
 import { AuthContext, type AuthState, type Me } from './useAuth';
 
@@ -61,8 +61,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    await getSupabase().auth.signOut();
-  }, []);
+    const { error: err } = await getSupabase().auth.signOut();
+    if (err) {
+      // The server could not end the session (typically 403 session_not_found: it was already
+      // revoked by a password reset, timeout or admin action). Signing out must still work on this
+      // device, so drop the local session and show the sign-in screen.
+      console.warn('Server sign-out failed; clearing the local session instead.', err);
+      clearLocalAuthSession();
+      await loadMe(null);
+    }
+  }, [loadMe]);
 
   const reloadMe = useCallback(async () => {
     await loadMe(session);
