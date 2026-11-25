@@ -30,7 +30,7 @@ import {
 
 import { parseHashQuery, useHashRoute } from '@/app/router';
 import hicksLogo from '@/assets/logo.png';
-import { Button, EmptyState, ErrorState, LoadingState } from '@/components/ui';
+import { Button, EmptyState, ErrorState, LoadingState, ToastProvider } from '@/components/ui';
 import { AuthProvider } from '@/features/auth/AuthContext';
 import { useAuth } from '@/features/auth/useAuth';
 import { useApiQuery } from '@/hooks/useApiQuery';
@@ -488,7 +488,9 @@ const ADMIN_TABS: ReadonlySet<string> = new Set([
 export function App() {
   return (
     <AuthProvider>
-      <Shell />
+      <ToastProvider>
+        <Shell />
+      </ToastProvider>
     </AuthProvider>
   );
 }

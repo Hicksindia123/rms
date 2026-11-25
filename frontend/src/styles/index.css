@@ -210,15 +210,17 @@ body {
 /* Card & Panels */
 .card {
   background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 0.5rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.03);
   overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .card-header {
   padding: 1rem 1.25rem;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid #f1f5f9;
+  background: #fafbfc;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -228,8 +230,10 @@ body {
 
 .card-title {
   margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: #0f172a;
 }
 
 .card-body {
@@ -565,28 +569,44 @@ main button {
 .dataview__table-wrap {
   display: none;
   overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05);
 }
 .dataview__table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   background: var(--color-surface);
 }
 .dataview__table th,
 .dataview__table td {
-  padding: 0.625rem 0.75rem;
-  border-bottom: 1px solid var(--color-border);
-  font-size: 0.875rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.84375rem;
+  vertical-align: middle;
+}
+.dataview__table tbody tr:last-child td {
+  border-bottom: none;
 }
 .dataview__table th {
+  font-size: 0.75rem;
   font-weight: 600;
-  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
   background: #f8fafc;
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
 .dataview__row--clickable {
   cursor: pointer;
+  transition: background-color 0.12s ease;
 }
 .dataview__row--clickable:hover {
-  background: #f8fafc;
+  background-color: #f8fafc;
 }
 .dataview__link {
   background: none;
@@ -598,6 +618,9 @@ main button {
   cursor: pointer;
   min-height: 44px;
   text-align: left;
+}
+.dataview__link:hover {
+  text-decoration: underline;
 }
 .dataview__cards {
   list-style: none;
@@ -614,13 +637,19 @@ main button {
   font: inherit;
   color: inherit;
   background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 0.5rem;
-  padding: 0.875rem 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1rem 1.125rem;
   min-height: 44px;
+  box-shadow: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
+  transition: all 0.15s ease;
 }
 button.dataview__card {
   cursor: pointer;
+}
+button.dataview__card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.06);
 }
 button.dataview__card:active {
   background: #f1f5f9;
@@ -630,9 +659,10 @@ button.dataview__card:active {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  margin-top: 1rem;
+  margin-top: 1.25rem;
   flex-wrap: wrap;
-  font-size: 0.875rem;
+  font-size: 0.84375rem;
+  color: #64748b;
 }
 @media (min-width: 768px) {
   .dataview__table-wrap {
@@ -684,24 +714,39 @@ button.dataview__card:active {
 }
 .tabs {
   display: flex;
-  gap: 0.25rem;
-  border-bottom: 1px solid var(--color-border);
-  margin-bottom: 1rem;
+  gap: 0.35rem;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 1.25rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 .tabs__tab {
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  padding: 0.5rem 0.875rem;
-  min-height: 44px;
+  padding: 0.6rem 0.95rem;
+  min-height: 42px;
   font: inherit;
-  font-weight: 600;
-  color: var(--color-muted);
+  font-weight: 500;
+  font-size: 0.875rem;
+  color: #64748b;
   cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  border-radius: 6px 6px 0 0;
+}
+.tabs__tab:hover {
+  color: #0f172a;
+  background-color: #f8fafc;
 }
 .tabs__tab[aria-selected='true'] {
-  color: var(--color-primary);
-  border-bottom-color: var(--color-primary);
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+  font-weight: 600;
+  background-color: transparent;
 }
 .kv {
   display: grid;
@@ -2357,10 +2402,11 @@ button.dataview__card:active {
 
 .filterbar {
   background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 0.875rem 1rem;
-  margin-bottom: 0.5rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 0.75rem;
+  box-shadow: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
 }
 .filterbar__grid {
   display: grid;
@@ -2373,7 +2419,14 @@ button.dataview__card:active {
 .filterbar__field .input,
 .filterbar__field .select {
   width: 100%;
-  min-height: 44px;
+  min-height: 42px;
+  border-radius: 8px;
+  border-color: #cbd5e1;
+}
+.filterbar__field .input:focus,
+.filterbar__field .select:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 .filterbar__actions,
 .filterbar__extra,
@@ -2914,16 +2967,18 @@ button.dataview__card:active {
   top: 0;
   z-index: 100;
   height: 60px;
-  background-color: #0f172a;
-  border-bottom: 1px solid #1e293b;
+  background-color: rgba(15, 23, 42, 0.96);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(51, 65, 85, 0.6);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 1.25rem;
   color: #ffffff;
   box-shadow:
-    0 1px 3px 0 rgba(0, 0, 0, 0.1),
-    0 1px 2px -1px rgba(0, 0, 0, 0.1);
+    0 1px 3px 0 rgba(0, 0, 0, 0.12),
+    0 1px 2px -1px rgba(0, 0, 0, 0.08);
 }
 
 .saas-brand {
@@ -2940,10 +2995,11 @@ button.dataview__card:active {
   justify-content: center;
   background: #ffffff;
   padding: 3px 8px;
-  border-radius: 7px;
+  border-radius: 8px;
   height: 38px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .saas-logo-img {
@@ -3010,7 +3066,7 @@ button.dataview__card:active {
   background: transparent;
   border: 1px solid #334155;
   color: #cbd5e1;
-  border-radius: 6px;
+  border-radius: 8px;
   width: 36px;
   height: 36px;
   display: flex;
@@ -3082,8 +3138,8 @@ button.dataview__card:active {
   align-items: center;
   gap: 0.65rem;
   padding: 0.55rem 0.75rem;
-  border-radius: 6px;
-  border: none;
+  border-radius: 8px;
+  border: 1px solid transparent;
   font-size: 0.8125rem;
   font-weight: 500;
   cursor: pointer;
@@ -3104,7 +3160,8 @@ button.dataview__card:active {
   background-color: #eff6ff;
   color: #1d4ed8;
   font-weight: 600;
-  box-shadow: inset 3px 0 0 #2563eb;
+  border-color: #bfdbfe;
+  box-shadow: inset 3px 0 0 #2563eb, 0 1px 2px rgba(37, 99, 235, 0.06);
 }
 
 .saas-nav-item.active svg {
@@ -3136,7 +3193,7 @@ button.dataview__card:active {
   text-transform: uppercase;
   letter-spacing: 0.075em;
   color: #94a3b8;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: background-color 0.15s ease;
 }
 
@@ -3161,22 +3218,24 @@ button.dataview__card:active {
   background-color: #1e293b;
   border: 1px solid #334155;
   padding: 0.25rem 0.75rem;
-  border-radius: 20px;
+  border-radius: 9999px;
   font-size: 0.8125rem;
   color: #f1f5f9;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
 .saas-avatar-circle {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #6366f1 0%, #3b82f6 100%);
+  background: linear-gradient(135deg, #4f46e5 0%, #2563eb 100%);
   color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 0.6875rem;
   font-weight: 700;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .saas-btn-signout {
@@ -3204,8 +3263,9 @@ button.dataview__card:active {
 .saas-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(15, 23, 42, 0.5);
-  backdrop-filter: blur(2px);
+  background-color: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   z-index: 85;
 }
 
@@ -3555,17 +3615,30 @@ button.dataview__card:active {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  align-items: flex-start;
-  gap: 0.75rem;
-  margin-bottom: 0.25rem;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.7);
 }
 .page-header .page__title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: #0f172a;
+  margin: 0;
   word-break: break-word;
+}
+.page-header .page__subtitle {
+  font-size: 0.84375rem;
+  color: #64748b;
+  margin: 0.25rem 0 0;
 }
 .page-header__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  align-items: center;
+  gap: 0.625rem;
 }
 .saas-nav-item {
   min-height: 44px;
@@ -3613,15 +3686,23 @@ button.dataview__card:active {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  padding: 0.875rem 1rem;
-  border: 1px solid var(--color-border);
-  border-top: 4px solid #cbd5e1;
-  border-radius: 8px;
+  padding: 1rem 1.125rem;
+  border: 1px solid #e2e8f0;
+  border-top: 3.5px solid #cbd5e1;
+  border-radius: 14px;
   background: var(--color-surface);
   min-width: 0;
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.journey-step:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 6px 12px -2px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
 }
 .journey-step--busy {
-  border-top-color: var(--color-primary);
+  border-top-color: #2563eb;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
 }
 .journey-step__head {
   display: flex;
