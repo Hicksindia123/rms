@@ -18,6 +18,8 @@ export interface Decision {
   action_code: string;
   label: string;
   qty: number;
+  /** DEC-74: a store's Issue CN Request (Management decides these pieces). */
+  is_cn_request?: boolean;
 }
 
 export interface MgmtGroup {
@@ -27,6 +29,8 @@ export interface MgmtGroup {
   /** G-21: pieces of this item + condition. */
   qty: number;
   decisions: Decision[];
+  /** DEC-74: pieces still on a store's Issue CN Request. */
+  cn_requested_qty?: number;
 }
 
 export interface MgmtItem {
@@ -121,6 +125,8 @@ export interface ManagementGs {
   station_name?: string | null;
   stores: StoreProgress[];
   items: MgmtItem[];
+  /** DEC-74: pieces still on a store's Issue CN Request (approval refused while > 0). */
+  cn_request_qty?: number;
   can_edit: boolean;
   can_approve: boolean;
   blocked_reason?: string | null;
@@ -148,6 +154,8 @@ export interface QueueRow {
   requested_by_name?: string | null;
   approval_state: ApprovalState;
   has_issue_cn: boolean;
+  /** DEC-74: pieces still on a store's Issue CN Request. */
+  cn_request_qty?: number;
   waiting_store_codes: string[];
 }
 

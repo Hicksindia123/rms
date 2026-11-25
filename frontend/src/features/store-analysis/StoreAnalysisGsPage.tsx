@@ -2,7 +2,8 @@
  * Phase P9 (DEC-69; Q15, Q16): the Intermediate Store user analyses ITS goods of one goods slip,
  * per item + current condition: Dispatch New Piece / Dispatch Repaired Piece / Not Allowed (labels
  * and the allowed options come from the product's field profile; Issue CN is Management's, P10).
- * The split of each item + condition must total its pieces (G-21). "Submit analysis" sends the
+ * DEC-74: the store may put pieces on "Issue CN Request" (with a qty); submitting sends them to
+ * Management, who decides the credit note. The split of each item + condition must total its pieces (G-21). "Submit analysis" sends the
  * store's part in one go; it is final. Any user of a store on the goods slip may send it for
  * Management approval with a reason.
  *
@@ -147,6 +148,21 @@ export const StoreAnalysisGsPage: React.FC<Props> = ({ gsId, onBack, onOpenGs })
     }
   }
   const totals = [...byCode.values()];
+  // DEC-74: pieces the store puts on "Issue CN Request" go to Management, who decides the CN.
+  const cnQty = editItems.reduce(
+    (sum, it) =>
+      sum +
+      it.options
+        .filter((o) => o.is_cn_request)
+        .reduce(
+          (s, o) =>
+            s + it.groups.reduce((n, g) => n + (qty[`${groupKey(it, g)}|${o.code}`] ?? 0), 0),
+          0,
+        ),
+    0,
+  );
+  const note = sendReason.trim();
+  const noteInvalid = note.length > 0 && note.length < 3;
 
   const setCell = (cellKey: string, raw: string) => {
     const n = parseInt(raw, 10);
@@ -187,7 +203,9 @@ export const StoreAnalysisGsPage: React.FC<Props> = ({ gsId, onBack, onOpenGs })
           store_id: activeStore.store_id,
           lines,
           remarks: remarks.trim() || null,
-          management_approval_reason: alsoSend ? sendReason.trim() : null,
+          // DEC-74: with an Issue CN Request the note is optional; otherwise only with "Also send".
+          management_approval_reason:
+            cnQty > 0 ? note || null : alsoSend ? sendReason.trim() : null,
         },
         submitKey.current,
       )
@@ -427,7 +445,13 @@ export const StoreAnalysisGsPage: React.FC<Props> = ({ gsId, onBack, onOpenGs })
                               Profiles).
                             </p>
                           ) : (
-                            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                            <div
+                              className={`mt-2 grid grid-cols-1 gap-2 ${
+                                it.options.length > 3
+                                  ? 'sm:grid-cols-2 lg:grid-cols-4'
+                                  : 'sm:grid-cols-3'
+                              }`}
+                            >
                               {it.options.map((o) => {
                                 const cellKey = `${gk}|${o.code}`;
                                 return (
@@ -438,12 +462,26 @@ export const StoreAnalysisGsPage: React.FC<Props> = ({ gsId, onBack, onOpenGs })
                                     <button
                                       type="button"
                                       aria-label={`All ${String(g.qty)} pcs: ${o.label}`}
+                                      title={
+                                        o.is_cn_request
+                                          ? 'Management decides the credit note for these pieces'
+                                          : undefined
+                                      }
                                       onClick={() => {
                                         fillGroup(it, g, o.code);
                                       }}
-                                      className="min-h-[44px] min-w-0 flex-1 rounded-lg px-2 text-left text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                                      className={`min-h-[44px] min-w-0 flex-1 rounded-lg px-2 text-left text-xs ${
+                                        o.is_cn_request
+                                          ? 'font-semibold text-amber-800 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-950/40'
+                                          : 'text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                                      }`}
                                     >
                                       {o.label}
+                                      {o.is_cn_request ? (
+                                        <span className="block text-[11px] font-normal text-slate-500 dark:text-slate-400">
+                                          to Management
+                                        </span>
+                                      ) : null}
                                     </button>
                                     <input
                                       aria-label={`${o.label}, ${g.condition_label ?? 'all pieces'}, item ${String(it.line_no)}`}
@@ -555,10 +593,14 @@ export const StoreAnalysisGsPage: React.FC<Props> = ({ gsId, onBack, onOpenGs })
               type="button"
               className="min-h-[44px]"
               isLoading={busy}
-              disabled={alsoSend && sendReason.trim().length < 3}
+              disabled={cnQty > 0 ? noteInvalid : alsoSend && sendReason.trim().length < 3}
               onClick={submit}
             >
-              {alsoSend ? 'Submit & send for approval' : 'Submit'}
+              {cnQty > 0
+                ? 'Submit & send CN request'
+                : alsoSend
+                  ? 'Submit & send for approval'
+                  : 'Submit'}
             </Button>
           </div>
         }
@@ -591,7 +633,41 @@ export const StoreAnalysisGsPage: React.FC<Props> = ({ gsId, onBack, onOpenGs })
               setRemarks(e.target.value);
             }}
           />
-          {data.open_approval_request ? null : (
+          {cnQty > 0 ? (
+            <>
+              <p
+                className="m-0 rounded-lg bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+                data-testid="cn-request-notice"
+              >
+                {cnQty} pc(s) go to Management as an Issue CN Request. Management decides the credit
+                note (or another action) for them; the goods slip waits for that decision before
+                Accounts.
+                {data.open_approval_request
+                  ? ' The goods slip is already waiting for Management; your request is added.'
+                  : ''}
+              </p>
+              <label
+                className="block text-xs font-medium text-slate-700 dark:text-slate-300"
+                htmlFor="analysis-cn-note"
+              >
+                Note for Management (optional)
+              </label>
+              <Textarea
+                id="analysis-cn-note"
+                value={sendReason}
+                maxLength={400}
+                rows={2}
+                onChange={(e) => {
+                  setSendReason(e.target.value);
+                }}
+              />
+              {noteInvalid ? (
+                <p className="m-0 text-xs text-rose-600">
+                  Write at least 3 characters, or leave it empty.
+                </p>
+              ) : null}
+            </>
+          ) : data.open_approval_request ? null : (
             <>
               <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm">
                 <input

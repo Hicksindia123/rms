@@ -25,7 +25,8 @@ select ok(not has_table_privilege('rms_api', 'public.item_field_library', 'DELET
 -- ---------------------------------------------------------------------------
 select set_eq(
   $$select code from public.item_field_library where field_group = 'ACTION'$$,
-  $$values ('SEND_NEW'),('SEND_REPAIRED'),('ISSUE_CN'),('NOT_ALLOWED'),('PENDING_BP')$$,
+  -- DEC-74 adds ISSUE_CN_REQUEST (store analysis only; not system-assigned to any profile).
+  $$values ('SEND_NEW'),('SEND_REPAIRED'),('ISSUE_CN'),('NOT_ALLOWED'),('PENDING_BP'),('ISSUE_CN_REQUEST')$$,
   'AMD-16: the existing action codes are ACTION library entries');
 select ok(
   (select requires_cn from public.item_field_library where field_group = 'ACTION' and code = 'ISSUE_CN')

@@ -326,3 +326,75 @@ describe('Store analysis (P9, DEC-69)', () => {
     expect(within(item).getByText('2 of 2 decided')).toBeInTheDocument();
   });
 });
+
+describe('Issue CN Request (DEC-74)', () => {
+  const CN_OPTION = {
+    code: 'ISSUE_CN_REQUEST',
+    label: 'Issue CN Request',
+    requires_cn: false,
+    requires_challan: false,
+    sort_order: 35,
+    is_cn_request: true,
+  };
+  const WITH_CN = {
+    ...GS,
+    items: GS.items.map((it) => ({ ...it, options: [...OPTIONS, CN_OPTION] })),
+  };
+
+  it('sends the requested pieces to Management with the submission (optional note)', async () => {
+    const done = {
+      ...WITH_CN,
+      stores: [OP, { ...DT, analysis_status: 'SUBMITTED', total_qty: 3 }],
+      submittable_store_ids: [],
+    };
+    serve({ '/store-analysis/gs/gs-1': WITH_CN, '/store-analysis/gs/gs-1/submit': done });
+    render(<StoreAnalysisGsPage gsId="gs-1" onBack={vi.fn()} onOpenGs={vi.fn()} />);
+    const item = await screen.findByTestId('analysis-item-1');
+    // A 4th option; Issue CN itself is still not offered.
+    expect(within(item).getAllByText('Issue CN Request')).toHaveLength(2);
+    expect(within(item).queryByText('Issue CN')).not.toBeInTheDocument();
+
+    fireEvent.change(within(item).getByLabelText('Dispatch New Piece, Working, item 1'), {
+      target: { value: '1' },
+    });
+    fireEvent.change(within(item).getByLabelText('Issue CN Request, Working, item 1'), {
+      target: { value: '1' },
+    });
+    fireEvent.click(within(item).getByRole('button', { name: 'All 1 pcs: Issue CN Request' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit analysis' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByTestId('cn-request-notice')).toHaveTextContent(
+      '2 pc(s) go to Management as an Issue CN Request',
+    );
+    // No "Also send" checkbox: the CN request goes to Management anyway.
+    expect(within(dialog).queryByLabelText('Also send for Management approval')).toBeNull();
+    const send = within(dialog).getByRole('button', { name: 'Submit & send CN request' });
+    const note = within(dialog).getByLabelText('Note for Management (optional)');
+    fireEvent.change(note, { target: { value: 'ab' } });
+    expect(send).toBeDisabled();
+    fireEvent.change(note, { target: { value: 'Party insists' } });
+    expect(send).toBeEnabled();
+    fireEvent.click(send);
+    await screen.findByText(/Analysis submitted for/);
+    expect(calls('/store-analysis/gs/gs-1/submit')[0]?.[1]).toMatchObject({
+      body: {
+        store_id: 's-dt',
+        management_approval_reason: 'Party insists',
+        lines: [
+          {
+            condition_field_id: 'c-a',
+            decisions: [
+              { action_code: 'SEND_NEW', qty: 1 },
+              { action_code: 'ISSUE_CN_REQUEST', qty: 1 },
+            ],
+          },
+          {
+            condition_field_id: 'c-b',
+            decisions: [{ action_code: 'ISSUE_CN_REQUEST', qty: 1 }],
+          },
+        ],
+      },
+    });
+  });
+});

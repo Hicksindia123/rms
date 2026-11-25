@@ -102,7 +102,8 @@ test.describe('P9 store analysis', () => {
       });
       const line = page.getByTestId('analysis-item-1');
       await expect(line).toBeVisible();
-      await expect(line).not.toContainText('Issue CN');
+      // Issue CN itself stays Management's (DEC-70); DEC-74 adds the store's Issue CN Request.
+      await expect(line).not.toContainText(/Issue CN(?! Request)/);
       const submit = page.getByRole('button', { name: 'Submit analysis' });
       await expect(submit).toBeDisabled();
       // Q36: no "Send for Management Approval" before the store's own submission.

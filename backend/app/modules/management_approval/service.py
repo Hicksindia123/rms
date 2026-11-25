@@ -85,6 +85,11 @@ REOPEN_STATUSES = frozenset({"ACCOUNTS_PENDING", "NOT_ALLOWED_HOLD"})
 # DEC-69: Pending is not used on the Intermediate Store flow (single round); every other action of
 # the product's profile is open to Management (DEC-70, incl. ISSUE_CN).
 RETIRED_ACTIONS = frozenset({"PENDING_BP"})
+# DEC-74: a store's "Issue CN Request" (stable code). Management answers it with Issue CN or another
+# action; it is never a Management option, and the goods slip neither reaches Accounts nor is
+# approved while pieces are still on it (DB: gs_management_gate_problem / approvals guard).
+CN_REQUEST_ACTION = "ISSUE_CN_REQUEST"
+NOT_MANAGEMENT_OPTIONS = RETIRED_ACTIONS | {CN_REQUEST_ACTION}
 SHORT_REF = 12
 STAMP_TITLE_SETTING = "management_approval_stamp_title"
 
@@ -277,7 +282,12 @@ class ManagementApprovalService:
         decisions: dict[tuple[UUID, UUID | None], list[DecisionOut]] = {}
         for a in repo.current_actions(session, gs_id):
             decisions.setdefault((a["gs_item_id"], a["condition_field_id"]), []).append(
-                DecisionOut(action_code=a["action_code"], label=a["label"], qty=a["qty"])
+                DecisionOut(
+                    action_code=a["action_code"],
+                    label=a["label"],
+                    qty=a["qty"],
+                    is_cn_request=a["action_code"] == CN_REQUEST_ACTION,
+                )
             )
         options: dict[UUID, list[ActionOptionOut]] = {}
         items: dict[UUID, ItemOut] = {}
@@ -288,7 +298,7 @@ class ManagementApprovalService:
                     options[g["product_id"]] = [
                         ActionOptionOut(**a)
                         for a in repo.allowed_actions(session, g["product_id"], version_id)
-                        if a["code"] not in RETIRED_ACTIONS
+                        if a["code"] not in NOT_MANAGEMENT_OPTIONS
                     ]
                 item = items[g["gs_item_id"]] = ItemOut(
                     gs_item_id=g["gs_item_id"],
@@ -300,13 +310,15 @@ class ManagementApprovalService:
                     store_name=g["store_name"],
                     options=options[g["product_id"]],
                 )
+            group_decisions = decisions.get((g["gs_item_id"], g["condition_field_id"]), [])
             item.groups.append(
                 GroupOut(
                     condition_field_id=g["condition_field_id"],
                     condition_code=g["condition_code"],
                     condition_label=g["condition_label"],
                     qty=g["available_qty"],
-                    decisions=decisions.get((g["gs_item_id"], g["condition_field_id"]), []),
+                    decisions=group_decisions,
+                    cn_requested_qty=sum(d.qty for d in group_decisions if d.is_cn_request),
                 )
             )
         requests = [RequestOut.model_validate(r) for r in repo.list_requests(session, gs_id)]
@@ -323,6 +335,7 @@ class ManagementApprovalService:
                 "analysis and Accounts."
             )
         problem = repo.gate_problem(session, gs_id)
+        item_list = list(items.values())
         return ManagementGsOut(
             gs_id=gs["id"],
             gs_no=gs["gs_no"],
@@ -330,7 +343,8 @@ class ManagementApprovalService:
             party_name=gs["party_name"],
             station_name=gs["station_name"],
             stores=stores,
-            items=list(items.values()),
+            items=item_list,
+            cn_request_qty=sum(g.cn_requested_qty for it in item_list for g in it.groups),
             can_edit=may_approve
             and (gs["status"] == EDIT_STATUS or gs["status"] in REOPEN_STATUSES),
             can_approve=may_approve and gs["status"] == EDIT_STATUS,
@@ -447,7 +461,7 @@ class ManagementApprovalService:
                 allowed[grp["product_id"]] = {
                     a["code"]: a["label"]
                     for a in repo.allowed_actions(session, grp["product_id"], version_id)
-                    if a["code"] not in RETIRED_ACTIONS
+                    if a["code"] not in NOT_MANAGEMENT_OPTIONS
                 }
             codes: set[str] = set()
             new: list[tuple[str, int]] = []
@@ -459,6 +473,13 @@ class ManagementApprovalService:
                 codes.add(d.action_code)
                 if d.qty == 0:
                     continue  # a removed line
+                if d.action_code == CN_REQUEST_ACTION:
+                    # DEC-74: Management answers a store's request; it never raises one.
+                    raise ValidationFailed(
+                        f"{where(grp)}: Issue CN Request is raised by a store; decide those pieces "
+                        "as Issue CN or another action",
+                        code="CN_REQUEST_NOT_MANAGEMENT",
+                    )
                 if d.action_code not in allowed[grp["product_id"]]:
                     raise SystemGuardViolation(
                         "G-21",
@@ -584,6 +605,15 @@ class ManagementApprovalService:
         on_uploaded: Callable[[str], None],
     ) -> ManagementGsOut:
         gs = self._editable(session, gs_id)
+        pending_cn = repo.open_cn_request_qty(session, gs_id)
+        if pending_cn > 0:
+            # DEC-74 (the DB approvals guard refuses the same).
+            raise Conflict(
+                f"{gs['gs_no']}: {pending_cn} pc(s) are still an Issue CN Request from a store; "
+                "decide them (Issue CN or another action) and save before approving",
+                code="CN_REQUEST_UNDECIDED",
+                details={"cn_request_qty": pending_cn},
+            )
         requests = repo.list_requests(session, gs_id)
         open_request = next((r for r in requests if r["status"] == "OPEN"), None)
         if repo.approval_state(session, gs_id) == "VALID" and open_request is None:

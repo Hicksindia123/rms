@@ -397,7 +397,7 @@ async function analyse(
     timeout: 20_000,
   });
   const line = page.locator('[data-testid^="analysis-item-"]').first();
-  await expect(line).not.toContainText('Issue CN'); // Issue CN is Management only (DEC-69)
+  await expect(line).not.toContainText(/Issue CN(?! Request)/); // Issue CN is Management only (DEC-69); DEC-74 Issue CN Request is the store's
   const groups = line.locator('fieldset');
   const n = await groups.count();
   for (let i = 0; i < n; i += 1) {

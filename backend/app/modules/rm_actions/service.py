@@ -22,6 +22,7 @@ from app.core.errors import (
 from app.core.permissions import EffectivePermissions
 from app.core.security import CurrentUser
 from app.modules.inventory import ledger_service
+from app.modules.management_approval.service import CN_REQUEST_ACTION
 from app.modules.notifications import service as notifications
 from app.modules.rm_actions import repository as repo
 from app.modules.rm_actions.schemas import (
@@ -53,6 +54,12 @@ EARLY_STATUSES = {
     "PENDING_TRANSFER_SLIP",  # DEC-64
     "SALES_RETURN_HOLD",  # DEC-64 / Q11
 }
+
+
+def _rm_action_options(session: Session) -> list[dict[str, Any]]:
+    """AMD-16 action catalogue for the RM item actions. DEC-74: Issue CN Request is a store-analysis
+    request for Management, never an RM action (the DB refuses it outside the store flow too)."""
+    return [o for o in repo.get_rm_action_options(session) if o["code"] != CN_REQUEST_ACTION]
 
 
 class RmActionsService:
@@ -114,7 +121,7 @@ class RmActionsService:
             items = repo.get_gs_items(session, gs_id)
             allocations = repo.get_inspection_allocations_for_gs(session, gs_id)
             rejections = repo.get_rejections_for_gs(session, gs_id)
-            options = repo.get_rm_action_options(session)
+            options = _rm_action_options(session)
             current_actions = repo.get_current_rm_actions_for_gs(session, gs_id)
             current_rev = repo.get_max_revision_no(session, gs_id)
             revision_history = repo.get_all_rm_action_revisions_for_gs(session, gs_id)
@@ -265,7 +272,7 @@ class RmActionsService:
             items = {item["id"]: item for item in repo.get_gs_items(session, gs_id)}
             # AMD-16: valid codes = active ACTION entries of the item field library (DB FK + trigger
             # re-check this; the hard-coded list is gone).
-            valid_action_codes = {o["code"] for o in repo.get_rm_action_options(session)}
+            valid_action_codes = {o["code"] for o in _rm_action_options(session)}
             rejections = repo.get_rejections_for_gs(session, gs_id)
             rej_by_item: dict[UUID, int] = {}
             for r in rejections:

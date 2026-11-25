@@ -283,6 +283,8 @@ class FinalActionsService:
                 allowed_cache[q["product_id"]] = [
                     FinalActionOption(**a)
                     for a in repo.allowed_actions(session, q["product_id"], version_id)
+                    # DEC-74: a store-analysis request, never an RM final action.
+                    if a["code"] != management_approval.CN_REQUEST_ACTION
                 ]
             item_groups = group_out.get(item_id, [])
             if rnd == 1:
@@ -527,7 +529,9 @@ class FinalActionsService:
             item = items[line.gs_item_id]
             if item["product_id"] not in allowed_cache:
                 allowed_cache[item["product_id"]] = {
-                    a["code"] for a in repo.allowed_actions(session, item["product_id"], version_id)
+                    a["code"]
+                    for a in repo.allowed_actions(session, item["product_id"], version_id)
+                    if a["code"] != management_approval.CN_REQUEST_ACTION  # DEC-74
                 }
             allowed = allowed_cache[item["product_id"]]
             alloc: dict[str, int] = {}
@@ -1118,11 +1122,30 @@ ANALYSIS_TASK_STEP = "STORE_ANALYSIS"
 READY_FOR_ANALYSIS = "READY_FOR_ANALYSIS"
 # Q15 / DEC-70: stable codes the store never picks (Issue CN = Management, Pending retired).
 STORE_RESERVED_ACTIONS = frozenset({"ISSUE_CN", PENDING_ACTION})
+# DEC-74: instead, the store may put pieces on "Issue CN Request"; Management decides them.
+CN_REQUEST_ACTION = management_approval.CN_REQUEST_ACTION
+REQUEST_REASON_MAX = 500
 
 
 class StoreAnalysisService:
     def __init__(self, uow: UnitOfWork) -> None:
         self._uow = uow
+
+    @staticmethod
+    def _store_options(
+        session: Session, product_id: UUID, version_id: UUID | None
+    ) -> list[FinalActionOption]:
+        """DEC-69 store options (profile actions minus Issue CN / Pending) + DEC-74 Issue CN
+        Request when the product may get a credit note and the option is switched on."""
+        out = [
+            FinalActionOption(**a)
+            for a in repo.allowed_actions(session, product_id, version_id)
+            if a["code"] not in STORE_RESERVED_ACTIONS and a["code"] != CN_REQUEST_ACTION
+        ]
+        cn = repo.cn_request_option(session, product_id, version_id, CN_REQUEST_ACTION)
+        if cn:
+            out.append(FinalActionOption(**cn, is_cn_request=True))
+        return out
 
     # --- scope -------------------------------------------------------------------------------
 
@@ -1214,11 +1237,9 @@ class StoreAnalysisService:
             item = items.get(g["gs_item_id"])
             if item is None:
                 if g["product_id"] not in options:
-                    options[g["product_id"]] = [
-                        FinalActionOption(**a)
-                        for a in repo.allowed_actions(session, g["product_id"], version_id)
-                        if a["code"] not in STORE_RESERVED_ACTIONS
-                    ]
+                    options[g["product_id"]] = self._store_options(
+                        session, g["product_id"], version_id
+                    )
                 item = items[g["gs_item_id"]] = StoreAnalysisItemOut(
                     gs_item_id=g["gs_item_id"],
                     line_no=g["line_no"],
@@ -1414,7 +1435,13 @@ class StoreAnalysisService:
                 allowed[grp["product_id"]] = {
                     a["code"]: a["label"]
                     for a in repo.allowed_actions(session, grp["product_id"], version_id)
+                    if a["code"] != CN_REQUEST_ACTION
                 }
+                cn = repo.cn_request_option(
+                    session, grp["product_id"], version_id, CN_REQUEST_ACTION
+                )
+                if cn:
+                    allowed[grp["product_id"]][CN_REQUEST_ACTION] = cn["label"]
             codes: set[str] = set()
             total = 0
             for d in line.decisions:
@@ -1428,9 +1455,18 @@ class StoreAnalysisService:
                 if d.action_code in STORE_RESERVED_ACTIONS:
                     raise PermissionDenied(
                         f"{where(grp)}: {d.action_code} is not a store analysis option; Issue CN "
-                        "is decided by Management (DEC-69, DEC-70)",
+                        "is decided by Management (DEC-69, DEC-70): use Issue CN Request (DEC-74)",
                         code="ACTION_RESERVED",
                         details={"action_code": d.action_code},
+                    )
+                if (
+                    d.action_code == CN_REQUEST_ACTION
+                    and d.action_code not in allowed[grp["product_id"]]
+                ):
+                    raise ValidationFailed(
+                        f"{where(grp)}: Issue CN Request is not available for this product (no "
+                        "credit-note action in its profile, or the option is switched off)",
+                        code="CN_REQUEST_NOT_AVAILABLE",
                     )
                 if d.action_code not in allowed[grp["product_id"]]:
                     raise SystemGuardViolation(
@@ -1501,7 +1537,14 @@ class StoreAnalysisService:
 
         # DEC-71 / Q36: the submission is recorded; its request (if any) is recorded now,
         # before the Accounts gate below, so the goods slip waits for Management.
-        if payload.management_approval_reason:
+        cn_lines = [(grp, qty) for grp, code, qty in new_rows if code == CN_REQUEST_ACTION]
+        if cn_lines:
+            # DEC-74: pieces on Issue CN Request go to Management (the Accounts gate waits for
+            # them in any case; the request puts the goods slip in Management's queue).
+            self._raise_cn_request(
+                session, actor, gs, store, cn_lines, payload.management_approval_reason
+            )
+        elif payload.management_approval_reason:
             self._request_approval(
                 session,
                 actor,
@@ -1565,6 +1608,57 @@ class StoreAnalysisService:
             gs_completed=completed,
         )
         return self._gs(session, actor, gs_id)
+
+    def _raise_cn_request(
+        self,
+        session: Session,
+        actor: CurrentUser,
+        gs: dict[str, Any],
+        store: dict[str, Any],
+        cn_lines: list[tuple[dict[str, Any], int]],
+        note: str | None,
+    ) -> None:
+        """DEC-74: the store's Issue CN Request (item + condition + qty) as a Management approval
+        request. One OPEN request per goods slip: if another store's request is already open, the
+        pieces are added to Management's attention by an alert (the gate waits for them anyway)."""
+        parts = []
+        for grp, qty in cn_lines:
+            cond = f" ({grp['condition_label']})" if grp["condition_label"] else ""
+            parts.append(f"#{grp['line_no']} {grp['product_name']}{cond} {qty} pc(s)")
+        reason_text = "Issue CN Request: " + "; ".join(parts)
+        note = (note or "").strip()
+        if note:
+            reason_text += f". Note: {note}"
+        if len(reason_text) > REQUEST_REASON_MAX:
+            reason_text = reason_text[: REQUEST_REASON_MAX - 1] + "…"
+        total = sum(q for _, q in cn_lines)
+        gs_id = gs["id"]
+        if any(r["status"] == "OPEN" for r in repo.list_approval_requests(session, gs_id)):
+            notifications.publish(
+                session,
+                "MANAGEMENT_APPROVAL_REQUESTED",
+                title=f"{gs['gs_no']}: Issue CN Request from {store['name']}",
+                body=f"{actor.full_name} ({store['name']}): {reason_text}",
+                entity_type="goods_slips",
+                entity_id=gs_id,
+                gs_id=gs_id,
+                data={"gs_no": gs["gs_no"], "store_code": store["code"]},
+                dedupe_key=f"cn-request:{gs_id}:{store['id']}",
+            )
+        else:
+            self._request_approval(
+                session,
+                actor,
+                gs_id,
+                ManagementApprovalRequestIn(store_id=store["id"], reason=reason_text),
+            )
+        log.info(
+            "store_cn_requested",
+            gs_id=str(gs_id),
+            store=store["code"],
+            lines=len(cn_lines),
+            qty=total,
+        )
 
     # --- send for Management approval --------------------------------------------------------
 

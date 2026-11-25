@@ -203,6 +203,23 @@ def allowed_actions(
     )
 
 
+def cn_request_option(
+    session: Session, product_id: UUID, version_id: UUID | None, code: str
+) -> dict[str, Any] | None:
+    """DEC-74: the Issue CN Request library entry when a store may use it for this product
+    (rms_private.cn_request_allowed: entry active + a credit-note action in the profile)."""
+    return _row(
+        session,
+        """
+        select l.code, l.label, l.requires_cn, l.requires_challan, l.sort_order
+          from public.item_field_library l
+         where l.field_group = 'ACTION' and l.code = :code
+           and rms_private.cn_request_allowed(:product_id, :version_id)
+        """,
+        {"code": code, "product_id": product_id, "version_id": version_id},
+    )
+
+
 def action_library_labels(session: Session) -> dict[str, dict[str, Any]]:
     rows = _rows(
         session,

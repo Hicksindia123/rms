@@ -180,6 +180,11 @@ GS** shows the other stores' items read-only.
 2. For each item and condition decide the pieces: **Dispatch New Piece**, **Dispatch Repaired Piece**
    or **Not Allowed** (you may split, e.g. 1 new + 2 repaired). The one-tap buttons put every piece of
    a condition on one decision.
+   **Issue CN Request** (DEC-74): a store cannot issue a credit note itself, but it can put pieces on
+   **Issue CN Request** (with the quantity) for Management to decide. On submit, the dialog shows how
+   many pieces go to Management and takes an optional note. The GS then waits for Management: it
+   cannot go to Accounts until Management has decided those pieces (Issue CN or another action) and
+   approved it.
 3. **Submit analysis**. A submission is final for your store (only Management can change it later).
 4. **Send for Management Approval** (optional, Step 9): after your own submission, with a reason. If
    your store is the last one to submit, tick **Also send for Management approval** in the submit
@@ -206,6 +211,10 @@ GS** shows the other stores' items read-only.
 2. Open a GS. You may change any decision to any other, including **Issue CN** (only Management sets
    Issue CN), change quantities, and add or remove decision lines. Every change needs a reason;
    **Save changes**.
+   **Issue CN Request from a store** (DEC-74): the queue marks it ("Issue CN Request · N pcs"), and each
+   condition shows "Store requests Issue CN for N pcs". Those pieces start undecided. Put them on
+   **Issue CN** (the one-tap **Issue CN N pcs** button) or on any other action, give a reason, and save.
+   **Approve** stays off until no piece is left on the request.
 3. **Approve**. The goods slip gets the **"Digitally approved by Management"** stamp (your name, role,
    time and a reference). It is a system e-approval, not a legal digital signature. **Verify** checks
    that the approved content is unchanged. The stamp prints on the Replacement Slip and Dispatch Slip.

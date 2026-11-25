@@ -27,6 +27,8 @@ export interface AnalysisOption {
   requires_cn: boolean;
   requires_challan: boolean;
   sort_order: number;
+  /** DEC-74: "Issue CN Request": the pieces go to Management, who decides the credit note. */
+  is_cn_request?: boolean;
 }
 
 export interface AnalysisDecision {

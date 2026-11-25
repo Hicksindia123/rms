@@ -396,3 +396,101 @@ describe('Management approval (P10, DEC-70)', () => {
     expect(calls('/management-approval/gs/gs-1/stamp')).toHaveLength(0);
   });
 });
+
+describe('Issue CN Request from a store (DEC-74)', () => {
+  const CN_GS = {
+    ...GS,
+    cn_request_qty: 1,
+    items: [
+      {
+        ...GS.items[0],
+        groups: [
+          {
+            condition_field_id: 'c-a',
+            condition_code: 'WORKING',
+            condition_label: 'Working',
+            qty: 2,
+            cn_requested_qty: 1,
+            decisions: [
+              {
+                action_code: 'ISSUE_CN_REQUEST',
+                label: 'Issue CN Request',
+                qty: 1,
+                is_cn_request: true,
+              },
+              { action_code: 'SEND_NEW', label: 'Dispatch New Piece', qty: 1 },
+            ],
+          },
+        ],
+      },
+    ],
+    accounts_gate: {
+      passes: false,
+      problem: 'DEC-74: a store raised an Issue CN Request; Management decides those pieces',
+    },
+  };
+
+  it('shows the request, grants the CN in one tap and blocks Approve until decided', async () => {
+    serve({
+      '/management-approval/gs/gs-1': CN_GS,
+      '/management-approval/gs/gs-1/changes': CHANGED_GS,
+    });
+    render(<ManagementApprovalGsPage gsId="gs-1" onBack={vi.fn()} onOpenGs={vi.fn()} />);
+    const item = await screen.findByTestId('mgmt-item-1');
+    expect(within(item).getByTestId('cn-request-i-1|c-a')).toHaveTextContent(
+      'Store requests Issue CN for 1 pcs',
+    );
+    // The requested piece starts undecided; Approve is off while it is pending.
+    expect(within(item).getByText('1 of 2 decided')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
+    expect(screen.getByText('1 pc(s) on Issue CN Request still to decide.')).toBeInTheDocument();
+
+    fireEvent.click(within(item).getByRole('button', { name: 'Issue CN 1 pcs' }));
+    expect(within(item).getByText('2 of 2 decided')).toBeInTheDocument();
+    expect(within(item).getByLabelText('Reason for this change (required)')).toHaveValue(
+      'Issue CN Request accepted',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText(/Changes saved/)).toBeInTheDocument();
+    expect(calls('/management-approval/gs/gs-1/changes')[0]?.[1]).toMatchObject({
+      body: {
+        changes: [
+          {
+            gs_item_id: 'i-1',
+            condition_field_id: 'c-a',
+            decisions: [
+              { action_code: 'SEND_NEW', qty: 1 },
+              { action_code: 'ISSUE_CN', qty: 1 },
+            ],
+            reason: 'Issue CN Request accepted',
+          },
+        ],
+      },
+    });
+  });
+
+  it('marks goods slips with requested pieces in the queue', async () => {
+    serve({
+      '/management-approval/queue': [
+        {
+          gs_id: 'gs-1',
+          gs_no: 'GS/2026-27/0011',
+          status: 'ANALYSIS_COMPLETED',
+          party_name: 'Acme Pharma',
+          station_name: 'Agra',
+          request_id: 'r-1',
+          request_reason: 'Issue CN Request: #1 Digital thermometer (Working) 1 pc(s)',
+          request_store_name: 'Intermediate Store DT',
+          requested_at: '2026-11-25T11:00:00Z',
+          requested_by_name: 'Dinesh',
+          approval_state: 'NONE',
+          has_issue_cn: false,
+          cn_request_qty: 1,
+          waiting_store_codes: [],
+        },
+      ],
+    });
+    render(<ManagementApprovalQueuePage onOpenGs={vi.fn()} />);
+    expect(await screen.findByText('Issue CN Request · 1 pcs')).toBeInTheDocument();
+  });
+});

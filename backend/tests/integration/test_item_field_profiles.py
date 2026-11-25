@@ -107,8 +107,18 @@ async def test_seeded_library_keeps_existing_codes(
     res = await client.get(f"{BASE}/fields", headers=_auth(token), params={"field_group": "ACTION"})
     assert res.status_code == 200
     actions = {f["code"]: f for f in res.json()}
-    assert set(actions) == {"SEND_NEW", "SEND_REPAIRED", "ISSUE_CN", "NOT_ALLOWED", "PENDING_BP"}
+    # DEC-74 adds ISSUE_CN_REQUEST (store analysis only; no Accounts flags, never system-assigned).
+    assert set(actions) == {
+        "SEND_NEW",
+        "SEND_REPAIRED",
+        "ISSUE_CN",
+        "NOT_ALLOWED",
+        "PENDING_BP",
+        "ISSUE_CN_REQUEST",
+    }
     assert actions["ISSUE_CN"]["requires_cn"] is True
+    assert not actions["ISSUE_CN_REQUEST"]["requires_cn"]
+    assert not actions["ISSUE_CN_REQUEST"]["requires_challan"]
     assert actions["SEND_NEW"]["requires_challan"] is True
     counts = await client.get(
         f"{BASE}/fields", headers=_auth(token), params={"field_group": "ITEM_COUNT"}
@@ -395,6 +405,15 @@ async def test_rm_action_options_follow_the_action_library(
     options = rm_repo.get_rm_action_options(Session(bind=as_admin(db_conn)))
     by_code = {o["code"]: o for o in options}
     assert by_code["SEND_NEW"]["label"] == "Send New Unit"
-    assert set(by_code) == {"SEND_NEW", "SEND_REPAIRED", "ISSUE_CN", "NOT_ALLOWED", "PENDING_BP"}
+    # The library holds DEC-74's ISSUE_CN_REQUEST too; the RM service filters it out (the RM
+    # action API test checks the five RM options).
+    assert set(by_code) == {
+        "SEND_NEW",
+        "SEND_REPAIRED",
+        "ISSUE_CN",
+        "NOT_ALLOWED",
+        "PENDING_BP",
+        "ISSUE_CN_REQUEST",
+    }
     # Rule texts still come from the workbook option row (WF r6).
     assert by_code["SEND_NEW"]["rule_text"]

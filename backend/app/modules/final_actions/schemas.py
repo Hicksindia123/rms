@@ -19,6 +19,8 @@ class FinalActionOption(BaseModel):
     requires_cn: bool = False
     requires_challan: bool = False
     sort_order: int = 0
+    # DEC-74: the store's "Issue CN Request" option (the pieces go to Management to decide).
+    is_cn_request: bool = False
 
 
 class FinalActionAllocation(BaseModel):

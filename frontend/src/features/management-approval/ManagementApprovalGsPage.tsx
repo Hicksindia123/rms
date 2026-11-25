@@ -5,6 +5,8 @@
  * remove one (qty 0). Each changed item + condition needs a reason; its pieces must still total
  * (G-21). "Save changes" writes one revision; "Approve" records the e-approval stamp (SHA-256 of
  * the goods slip's lines + decisions, computed by the server). A later change invalidates it.
+ * DEC-74: pieces a store put on "Issue CN Request" are shown as requested and undecided; Management
+ * decides them (Issue CN or another action) and saves before it can approve.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, CheckCircle2, ShieldCheck } from 'lucide-react';
@@ -38,12 +40,15 @@ const card =
 
 const groupKey = (it: MgmtItem, g: MgmtGroup) => `${it.gs_item_id}|${g.condition_field_id ?? ''}`;
 
-/** The current decisions as the editable draft: qty per `${groupKey}|${actionCode}`. */
+/** The current decisions as the editable draft: qty per `${groupKey}|${actionCode}`. A store's
+ * Issue CN Request (DEC-74) is not a Management option: those pieces start undecided. */
 function draftOf(d: ManagementGs): Record<string, number> {
   const out: Record<string, number> = {};
   for (const it of d.items) {
     for (const g of it.groups) {
-      for (const dec of g.decisions) out[`${groupKey(it, g)}|${dec.action_code}`] = dec.qty;
+      for (const dec of g.decisions) {
+        if (!dec.is_cn_request) out[`${groupKey(it, g)}|${dec.action_code}`] = dec.qty;
+      }
     }
   }
   return out;
@@ -127,7 +132,9 @@ export const ManagementApprovalGsPage: React.FC<Props> = ({ gsId, onBack, onOpen
     const now = it.options
       .map((o) => [o.code, qtyOf(it, g, o.code)] as const)
       .filter(([, q]) => q > 0);
-    const was = g.decisions.map((d) => [d.action_code, d.qty] as const);
+    const was = g.decisions
+      .filter((d) => !d.is_cn_request)
+      .map((d) => [d.action_code, d.qty] as const);
     const key = (xs: readonly (readonly [string, number])[]) =>
       xs
         .map(([c, q]) => `${c}:${String(q)}`)
@@ -152,6 +159,18 @@ export const ManagementApprovalGsPage: React.FC<Props> = ({ gsId, onBack, onOpen
       const rest = Object.fromEntries(Object.entries(prev).filter(([k]) => k !== cellKey));
       return isNaN(n) || n <= 0 ? rest : { ...rest, [cellKey]: n };
     });
+  };
+
+  /** DEC-74: put the store's requested pieces on the credit-note action (requires_cn flag). */
+  const grantCn = (it: MgmtItem, g: MgmtGroup, code: string) => {
+    const cellKey = `${groupKey(it, g)}|${code}`;
+    setSaved(false);
+    setDraft((prev) => ({ ...prev, [cellKey]: (prev[cellKey] ?? 0) + (g.cn_requested_qty ?? 0) }));
+    setReasons((prev) =>
+      (prev[groupKey(it, g)] ?? '').trim()
+        ? prev
+        : { ...prev, [groupKey(it, g)]: 'Issue CN Request accepted' },
+    );
   };
 
   const fillGroup = (it: MgmtItem, g: MgmtGroup, code: string) => {
@@ -230,6 +249,7 @@ export const ManagementApprovalGsPage: React.FC<Props> = ({ gsId, onBack, onOpen
   }
   const request = data.open_request ?? null;
   const alreadyValid = data.stamp.state === 'VALID' && !request;
+  const cnPending = data.cn_request_qty ?? 0;
 
   return (
     <div className="mx-auto max-w-4xl space-y-4 p-4 sm:p-6" data-testid="management-approval-gs">
@@ -321,7 +341,7 @@ export const ManagementApprovalGsPage: React.FC<Props> = ({ gsId, onBack, onOpen
       ) : null}
       {!data.accounts_gate.passes && data.accounts_gate.problem ? (
         <p className="text-xs text-slate-500 dark:text-slate-400" data-testid="accounts-gate">
-          Before Accounts: {data.accounts_gate.problem.replace(/^DEC-70( \(Q18\))?: /, '')}
+          Before Accounts: {data.accounts_gate.problem.replace(/^DEC-\d+( \([^)]*\))?: /, '')}
         </p>
       ) : null}
 
@@ -383,6 +403,34 @@ export const ManagementApprovalGsPage: React.FC<Props> = ({ gsId, onBack, onOpen
                         {dirty ? 'Was: ' : ''}
                         {decisionsText(g.decisions)}
                       </p>
+                      {(g.cn_requested_qty ?? 0) > 0 ? (
+                        <div
+                          className="mt-2 flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900 sm:flex-row sm:items-center sm:justify-between dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+                          data-testid={`cn-request-${gk}`}
+                        >
+                          <span className="font-semibold">
+                            Store requests Issue CN for {g.cn_requested_qty} pcs: decide them below.
+                          </span>
+                          {data.can_edit
+                            ? it.options
+                                .filter((o) => o.requires_cn)
+                                .slice(0, 1)
+                                .map((o) => (
+                                  <Button
+                                    key={o.code}
+                                    type="button"
+                                    variant="outline"
+                                    className="min-h-[44px]"
+                                    onClick={() => {
+                                      grantCn(it, g, o.code);
+                                    }}
+                                  >
+                                    {o.label} {g.cn_requested_qty} pcs
+                                  </Button>
+                                ))
+                            : null}
+                        </div>
+                      ) : null}
                       {data.can_edit ? (
                         <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                           {it.options.map((o) => {
@@ -452,7 +500,9 @@ export const ManagementApprovalGsPage: React.FC<Props> = ({ gsId, onBack, onOpen
             <span className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
               <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
               {changed.length === 0
-                ? 'No unsaved changes.'
+                ? cnPending > 0
+                  ? `${String(cnPending)} pc(s) on Issue CN Request still to decide.`
+                  : 'No unsaved changes.'
                 : unbalanced.length > 0
                   ? `${String(unbalanced.length)} item condition(s) do not total their pieces.`
                   : missingReason.length > 0
@@ -485,7 +535,7 @@ export const ManagementApprovalGsPage: React.FC<Props> = ({ gsId, onBack, onOpen
                 <Button
                   type="button"
                   className="min-h-[44px]"
-                  disabled={changed.length > 0 || alreadyValid}
+                  disabled={changed.length > 0 || alreadyValid || cnPending > 0}
                   onClick={() => {
                     setApproveError(null);
                     setApproveOpen(true);

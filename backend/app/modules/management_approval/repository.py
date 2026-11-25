@@ -62,6 +62,7 @@ def queue(session: Session, statuses: tuple[str, ...], q: str | None) -> list[di
                          join public.gs_items gi on gi.id = a.gs_item_id
                         where gi.gs_id = g.id and a.is_current and a.action_code = 'ISSUE_CN')
                  as has_issue_cn,
+               rms_private.gs_open_cn_request_qty(g.id) as cn_request_qty,
                coalesce((select array_agg(p.store_code order by p.store_code)
                            from rms_private.gs_store_analysis_progress(g.id) p
                           where p.analysis_status <> 'SUBMITTED'), '{}') as waiting_store_codes
@@ -365,6 +366,14 @@ def gate_problem(session: Session, gs_id: UUID) -> str | None:
         text("select rms_private.gs_management_gate_problem(:g)"), {"g": gs_id}
     ).scalar()
     return str(value) if value is not None else None
+
+
+def open_cn_request_qty(session: Session, gs_id: UUID) -> int:
+    """DEC-74: pieces of the goods slip still on a store's Issue CN Request."""
+    value = session.execute(
+        text("select rms_private.gs_open_cn_request_qty(:g)"), {"g": gs_id}
+    ).scalar()
+    return int(value or 0)
 
 
 def store_role_codes(session: Session, gs_id: UUID) -> list[str]:

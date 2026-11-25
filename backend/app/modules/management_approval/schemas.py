@@ -24,6 +24,8 @@ class DecisionOut(BaseModel):
     action_code: str
     label: str
     qty: int
+    # DEC-74: the store's "Issue CN Request" (Management decides these pieces).
+    is_cn_request: bool = False
 
 
 class GroupOut(BaseModel):
@@ -34,6 +36,7 @@ class GroupOut(BaseModel):
     condition_label: str | None = None
     qty: int = Field(description="G-21: pieces of this item + condition")
     decisions: list[DecisionOut] = Field(default_factory=list)
+    cn_requested_qty: int = Field(0, description="DEC-74: pieces still on Issue CN Request")
 
 
 class ItemOut(BaseModel):
@@ -152,6 +155,8 @@ class ManagementGsOut(BaseModel):
     station_name: str | None = None
     stores: list[StoreProgressOut] = Field(default_factory=list)
     items: list[ItemOut] = Field(default_factory=list)
+    # DEC-74: pieces still on a store's Issue CN Request (approval refused while > 0).
+    cn_request_qty: int = 0
     # The signed-in user may change decisions and approve now (ANALYSIS_COMPLETED + approve).
     can_edit: bool = False
     can_approve: bool = False
@@ -181,6 +186,8 @@ class QueueRowOut(BaseModel):
     requested_by_name: str | None = None
     approval_state: ApprovalState
     has_issue_cn: bool = False
+    # DEC-74: pieces still on a store's Issue CN Request.
+    cn_request_qty: int = 0
     waiting_store_codes: list[str] = Field(default_factory=list)
 
 

@@ -41,6 +41,9 @@ const Row: React.FC<{ r: QueueRow; onOpen: () => void }> = ({ r, onOpen }) => {
             <StatusChip status={r.status} />
             {badge ? <Badge variant={badge.variant}>{badge.text}</Badge> : null}
             {r.has_issue_cn ? <Badge variant="info">Issue CN</Badge> : null}
+            {(r.cn_request_qty ?? 0) > 0 ? (
+              <Badge variant="warning">Issue CN Request · {r.cn_request_qty} pcs</Badge>
+            ) : null}
           </div>
           <div className="break-words text-sm text-slate-600 dark:text-slate-300">
             {r.party_name ?? '—'}
