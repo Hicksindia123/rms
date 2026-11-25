@@ -103,7 +103,7 @@ export const auditApi = {
   },
 
   fetchUserActivity: async (userId: string, limit: number = 50): Promise<UserActivityResponse> => {
-    return apiRequest<UserActivityResponse>(`/users/${userId}/activity?limit=${limit}`);
+    return apiRequest<UserActivityResponse>(`/users/${userId}/activity?limit=${String(limit)}`);
   },
 
   getAuditExportUrl: (params: AuditFilterParams = {}): string => {

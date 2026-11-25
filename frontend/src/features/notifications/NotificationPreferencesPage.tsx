@@ -128,9 +128,13 @@ export function NotificationPreferencesPage() {
                       disabled={item.is_mandatory}
                       aria-describedby={`pref-${item.event_type}`}
                       onChange={(e) => {
-                        const next = { ...draft };
-                        if (e.target.checked === item.email_enabled) delete next[item.event_type];
-                        else next[item.event_type] = e.target.checked;
+                        // Unchanged-from-saved prefs are dropped from the draft; changed ones kept.
+                        const next = Object.fromEntries(
+                          Object.entries(draft).filter(([k]) => k !== item.event_type),
+                        );
+                        if (e.target.checked !== item.email_enabled) {
+                          next[item.event_type] = e.target.checked;
+                        }
                         setDraft(next);
                         setSaved(false);
                       }}

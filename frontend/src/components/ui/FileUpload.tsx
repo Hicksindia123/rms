@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Camera, Trash2 } from 'lucide-react';
 import { Button } from './Button';
 
@@ -26,22 +26,26 @@ export const FileUpload: React.FC<FileUploadProps> = ({
   disabled = false,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [localPreview, setLocalPreview] = useState<string | null>(null);
+  const previewImgRef = useRef<HTMLImageElement>(null);
 
   const isImageDataUrl =
     typeof value === 'string' &&
     (value.startsWith('data:image/') || value.startsWith('blob:') || value.startsWith('http'));
+  const isImageFile = value instanceof File && value.type.startsWith('image/');
 
+  // An image File is previewed through an object URL assigned straight to the <img> (no state),
+  // and revoked when the value changes or the component unmounts.
   useEffect(() => {
-    if (value instanceof File && value.type.startsWith('image/')) {
-      const url = URL.createObjectURL(value);
-      setLocalPreview(url);
-      return () => URL.revokeObjectURL(url);
-    }
-    setLocalPreview(null);
+    const img = previewImgRef.current;
+    if (!(value instanceof File) || !value.type.startsWith('image/') || !img) return;
+    const url = URL.createObjectURL(value);
+    img.src = url;
+    return () => {
+      URL.revokeObjectURL(url);
+    };
   }, [value]);
 
-  const previewSrc = isImageDataUrl ? (value as string) : localPreview;
+  const showPreview = isImageDataUrl || isImageFile;
   const fileName = value instanceof File ? value.name : typeof value === 'string' && !isImageDataUrl ? value : null;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -81,7 +85,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
         id={`${id ?? name}-file-input`}
       />
 
-      {previewSrc ? (
+      {showPreview ? (
         <div
           style={{
             display: 'flex',
@@ -95,7 +99,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({
           }}
         >
           <img
-            src={previewSrc}
+            ref={previewImgRef}
+            {...(isImageDataUrl ? { src: value } : {})}
             alt="Document Preview"
             style={{
               width: '54px',

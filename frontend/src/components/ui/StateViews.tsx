@@ -62,7 +62,7 @@ export const ErrorState: React.FC<{
     if (error.requestId) {
       void navigator.clipboard.writeText(error.requestId);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setTimeout(() => { setCopied(false); }, 2000);
     }
   };
 

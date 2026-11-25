@@ -258,7 +258,7 @@ export const notificationAdminApi = {
     }),
   deliveries: (filter: { status?: string; channel?: string; limit?: number; offset?: number }) => {
     const query: Record<string, string> = {};
-    for (const [k, v] of Object.entries(filter))
+    for (const [k, v] of Object.entries(filter) as [string, string | number | undefined][])
       if (v !== undefined && v !== '') query[k] = String(v);
     return apiRequest<DeliveryLog>(`${ADMIN}/deliveries`, { query });
   },

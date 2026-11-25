@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -16,6 +16,7 @@ import { Badge, Button, ErrorState, LoadingState, Modal, Textarea } from '@/comp
 import { StatusChip } from '@/features/goods-slips/display';
 import { formatDateTime } from '@/features/goods-slips/format';
 import { newIdempotencyKey } from '@/features/itemization/api';
+import { useApiQuery } from '@/hooks/useApiQuery';
 import { toApiError, type ApiError } from '@/lib/api/client';
 
 import { rmReviewApi } from './api';
@@ -31,9 +32,8 @@ interface Props {
  * edits were retired by DEC-64 (Q9); changes after the categorisation lock are made by Super Admin
  * / Management on the item screen. */
 export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
-  const [data, setData] = useState<RmReviewData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<ApiError | null>(null);
+  const fetchReviewData = useCallback(() => rmReviewApi.getReviewData(gsId), [gsId]);
+  const { data, error, loading, reload: loadData } = useApiQuery<RmReviewData>(fetchReviewData);
 
   // Send Back modal state
   const [sendBackOpen, setSendBackOpen] = useState(false);
@@ -51,29 +51,13 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
   // Show revisions accordion
   const [showRevisions, setShowRevisions] = useState(false);
 
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await rmReviewApi.getReviewData(gsId);
-      setData(res);
-    } catch (err) {
-      setError(toApiError(err));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void loadData();
-  }, [gsId]);
-
   if (loading && !data) return <LoadingState />;
   if (error) return <ErrorState error={error} onRetry={loadData} />;
   if (!data) return null;
 
   const gs = data.goods_slip;
   // DEC-54: After approval (or once transfer slip exists): read-only
+  const transferIdToOpen = data.transfer_slip?.id || approveResult?.transfer_id;
   const isReviewable = data.can_review && gs.status === 'RM_REVIEW' && !data.transfer_slip;
 
   const handleSendBack = async () => {
@@ -88,7 +72,7 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
       setSendBackError(null);
       await rmReviewApi.sendBack(gsId, { remarks: sendBackRemarks.trim() }, newIdempotencyKey());
       setSendBackOpen(false);
-      await loadData();
+      loadData();
     } catch (err) {
       setSendBackError(toApiError(err));
     } finally {
@@ -107,7 +91,7 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
       );
       setApproveResult(res);
       setApproveOpen(false);
-      await loadData();
+      loadData();
     } catch (err) {
       setApproveError(toApiError(err));
     } finally {
@@ -227,13 +211,13 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
               <Badge variant="success">{data.transfer_slip?.status || 'INITIATED'}</Badge>
             </div>
           </div>
-          {onOpenTransfer && (data.transfer_slip?.id || approveResult?.transfer_id) && (
+          {onOpenTransfer && transferIdToOpen && (
             <Button
               type="button"
               variant="outline"
-              onClick={() =>
-                onOpenTransfer((data.transfer_slip?.id || approveResult?.transfer_id)!)
-              }
+              onClick={() => {
+                onOpenTransfer(transferIdToOpen);
+              }}
             >
               <Printer size={16} style={{ marginRight: '6px' }} />
               Print Transfer Note
@@ -525,7 +509,9 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
       <div className="card" style={{ padding: '1rem', marginBottom: '1rem' }}>
         <button
           type="button"
-          onClick={() => setShowRevisions(!showRevisions)}
+          onClick={() => {
+            setShowRevisions(!showRevisions);
+          }}
           style={{
             width: '100%',
             background: 'none',
@@ -617,7 +603,9 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
       {sendBackOpen && (
         <Modal
           isOpen={true}
-          onClose={() => setSendBackOpen(false)}
+          onClose={() => {
+            setSendBackOpen(false);
+          }}
           title="Send Back to Categorisation"
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -634,7 +622,9 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
                 rows={3}
                 value={sendBackRemarks}
                 placeholder="e.g. Please verify packaging condition for remaining 2 pieces"
-                onChange={(e) => setSendBackRemarks(e.target.value)}
+                onChange={(e) => {
+                  setSendBackRemarks(e.target.value);
+                }}
               />
             </div>
             {sendBackError && (
@@ -643,7 +633,13 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
               </p>
             )}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-              <Button type="button" variant="outline" onClick={() => setSendBackOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setSendBackOpen(false);
+                }}
+              >
                 Cancel
               </Button>
               <Button
@@ -664,7 +660,9 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
       {approveOpen && (
         <Modal
           isOpen={true}
-          onClose={() => setApproveOpen(false)}
+          onClose={() => {
+            setApproveOpen(false);
+          }}
           title="Approve &amp; Generate Custody Transfer Slip"
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -682,7 +680,9 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
                 rows={2}
                 value={approveRemarks}
                 placeholder="e.g. All pieces verified and approved for Intermediate Store handover"
-                onChange={(e) => setApproveRemarks(e.target.value)}
+                onChange={(e) => {
+                  setApproveRemarks(e.target.value);
+                }}
               />
             </div>
             {approveError && (
@@ -691,7 +691,13 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
               </p>
             )}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-              <Button type="button" variant="outline" onClick={() => setApproveOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setApproveOpen(false);
+                }}
+              >
                 Cancel
               </Button>
               <Button

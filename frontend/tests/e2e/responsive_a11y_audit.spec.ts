@@ -135,7 +135,7 @@ test.describe('Responsive, Accessibility & Visual Regression Audit (P4-06)', () 
               const rect = b.getBoundingClientRect();
               if (rect.width > 0 && rect.height > 0) {
                 if (rect.height < 40 || rect.width < 40) {
-                  bad.push(`${b.className} [${rect.width}x${rect.height}]`);
+                  bad.push(`${b.className} [${String(rect.width)}x${String(rect.height)}]`);
                 }
               }
             }
@@ -146,7 +146,7 @@ test.describe('Responsive, Accessibility & Visual Regression Audit (P4-06)', () 
 
         // 5. Visual regression baseline capture at 390px and 1280px
         if (vp.width === 390 || vp.width === 1280) {
-          const screenshotPath = `test-results/visual-baselines/${route.id}-${vp.width}px.png`;
+          const screenshotPath = `test-results/visual-baselines/${route.id}-${String(vp.width)}px.png`;
           await page.screenshot({ path: screenshotPath, fullPage: false });
         }
 

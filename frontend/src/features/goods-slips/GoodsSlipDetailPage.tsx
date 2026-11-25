@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   ArrowLeft,
   ClipboardCheck,
@@ -65,7 +65,15 @@ interface Props {
   onNavigate?: (path: string) => void;
 }
 
-type Tab = 'overview' | 'items' | 'inspection' | 'rejections' | 'pendency' | 'closure' | 'timeline' | 'department_routing';
+type Tab =
+  | 'overview'
+  | 'items'
+  | 'inspection'
+  | 'rejections'
+  | 'pendency'
+  | 'closure'
+  | 'timeline'
+  | 'department_routing';
 
 // P3-07: closure checklist from the in-process stage on (§6.5).
 const CLOSURE_VISIBLE = new Set([
@@ -127,9 +135,6 @@ export function GoodsSlipDetailPage({
   const [cancelOpen, setCancelOpen] = useState(false);
   const statusLabel = useStatusLabels(); // AMD-08 step / status labels from configuration
 
-  const [reconData, setReconData] = useState<GsReconciliationOut | null>(null);
-  const [loadingRecon, setLoadingRecon] = useState(false);
-  const [deptLegs, setDeptLegs] = useState<DepartmentLegOut[]>([]);
   const [dispatchModalState, setDispatchModalState] = useState<GsRoutingState | null>(null);
   const [receiveModalRouting, setReceiveModalRouting] = useState<DepartmentRoutingOut | null>(null);
 
@@ -137,31 +142,44 @@ export function GoodsSlipDetailPage({
   const canViewRouting = isSuperAdmin || can('department_routing', 'view');
   // T4 / DEC-55: the RM plans (department_routing/create); the store issues (approve).
   const canPlanRouting = isSuperAdmin || can('department_routing', 'create');
+  // Department routing data is optional on this screen: a failed load shows the empty
+  // reconciliation / timeline rather than blocking the goods slip (same as before useApiQuery).
+  const reconFetcher = useCallback(async (): Promise<GsReconciliationOut | null> => {
+    if (!canViewRouting) return null;
+    try {
+      return await departmentRoutingApi.getGsReconciliation(gsId);
+    } catch {
+      return null;
+    }
+  }, [gsId, canViewRouting]);
+  const legsFetcher = useCallback(async (): Promise<DepartmentLegOut[]> => {
+    if (!canViewRouting) return [];
+    try {
+      return await departmentRoutingApi.getGsDepartmentLegs(gsId);
+    } catch {
+      return [];
+    }
+  }, [gsId, canViewRouting]);
+  const reconQuery = useApiQuery<GsReconciliationOut | null>(reconFetcher);
+  const legsQuery = useApiQuery<DepartmentLegOut[]>(legsFetcher);
+  const reconData = reconQuery.data;
+  const loadingRecon = canViewRouting && reconQuery.loading;
+  const deptLegs = legsQuery.data ?? [];
+  const reloadRecon = reconQuery.reload;
+  const reloadLegs = legsQuery.reload;
   const loadDeptData = useCallback(() => {
     if (!canViewRouting) return;
-    setLoadingRecon(true);
-    departmentRoutingApi
-      .getGsReconciliation(gsId)
-      .then(setReconData)
-      .catch(() => setReconData(null))
-      .finally(() => setLoadingRecon(false));
-
-    departmentRoutingApi
-      .getGsDepartmentLegs(gsId)
-      .then(setDeptLegs)
-      .catch(() => setDeptLegs([]));
-  }, [gsId, canViewRouting]);
-
-  useEffect(() => {
-    loadDeptData();
-  }, [loadDeptData]);
+    reloadRecon();
+    reloadLegs();
+  }, [canViewRouting, reloadRecon, reloadLegs]);
 
   const handleOpenDispatchModal = async () => {
     try {
       const state = await departmentRoutingApi.getGsRoutingState(gsId);
       setDispatchModalState(state);
-    } catch (err: any) {
-      alert(err?.message || 'Failed to open department routing modal');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '';
+      alert(message || 'Failed to open department routing modal');
     }
   };
 
@@ -325,7 +343,13 @@ export function GoodsSlipDetailPage({
             </Button>
           ) : null}
           {gs.status === 'HELD_AT_INTERMEDIATE_STORE' && canPlanRouting ? (
-            <Button type="button" variant="primary" onClick={handleOpenDispatchModal}>
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => {
+                void handleOpenDispatchModal();
+              }}
+            >
               <Send size={16} aria-hidden="true" /> Plan Routing
             </Button>
           ) : null}
@@ -628,7 +652,13 @@ export function GoodsSlipDetailPage({
                 Department Dispatches & Timeline Legs
               </h3>
               {gs.status === 'HELD_AT_INTERMEDIATE_STORE' && canPlanRouting ? (
-                <Button type="button" variant="primary" onClick={handleOpenDispatchModal}>
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={() => {
+                    void handleOpenDispatchModal();
+                  }}
+                >
                   <Send size={16} aria-hidden="true" /> Plan Routing
                 </Button>
               ) : null}
@@ -639,7 +669,7 @@ export function GoodsSlipDetailPage({
                 onNavigate?.(`/department-routing/${routingId}/print`)
               }
               onReceiveRouting={(routingId) => {
-                departmentRoutingApi.getRouting(routingId).then(setReceiveModalRouting);
+                void departmentRoutingApi.getRouting(routingId).then(setReceiveModalRouting);
               }}
               canReceive={can('department_routing', 'edit') || isSuperAdmin}
             />
@@ -674,7 +704,9 @@ export function GoodsSlipDetailPage({
         <RmRoutingPlanModal
           state={dispatchModalState}
           canPlan={canPlanRouting}
-          onClose={() => setDispatchModalState(null)}
+          onClose={() => {
+            setDispatchModalState(null);
+          }}
           onSuccess={() => {
             setDispatchModalState(null);
             load();
@@ -686,7 +718,9 @@ export function GoodsSlipDetailPage({
       {receiveModalRouting && (
         <DepartmentReceiveModal
           routing={receiveModalRouting}
-          onClose={() => setReceiveModalRouting(null)}
+          onClose={() => {
+            setReceiveModalRouting(null);
+          }}
           onSuccess={() => {
             setReceiveModalRouting(null);
             load();

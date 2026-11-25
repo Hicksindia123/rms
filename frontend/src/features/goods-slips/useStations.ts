@@ -58,8 +58,8 @@ export function useStations(statesList?: LookupItem[]): StationCache {
               stationMap.set(item.name.trim().toLowerCase(), item);
             }
             // 2. Overwrite / enrich with API rows so database UUIDs take precedence for matched records
-            for (const row of rows || []) {
-              if (row && row.name) {
+            for (const row of rows) {
+              if (row.name) {
                 stationMap.set(row.name.trim().toLowerCase(), row);
               }
             }

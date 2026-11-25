@@ -1,120 +1,13 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { CheckCircle2, AlertTriangle, AlertCircle, Info, X, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-export type ToastType = 'success' | 'error' | 'warning' | 'info' | 'loading';
-
-export interface ToastOptions {
-  id?: string | undefined;
-  title: string;
-  description?: string | undefined;
-  type?: ToastType | undefined;
-  duration?: number | undefined;
-}
-
-export interface ToastItem {
-  id: string;
-  title: string;
-  description?: string | undefined;
-  type: ToastType;
-  duration: number;
-}
-
-interface ToastContextValue {
-  toasts: ToastItem[];
-  addToast: (options: ToastOptions) => string;
-  removeToast: (id: string) => void;
-}
-
-const ToastContext = createContext<ToastContextValue | null>(null);
-
-let globalToastHandler: ((options: ToastOptions) => string) | null = null;
-
-/**
- * Imperative global toast API that can be called anywhere (even outside React render tree).
- */
-export const toast = {
-  show: (options: ToastOptions) => globalToastHandler?.(options) ?? '',
-  success: (title: string, description?: string | undefined, options?: Partial<ToastOptions> | undefined) =>
-    globalToastHandler?.({
-      title,
-      type: 'success',
-      ...(description !== undefined ? { description } : {}),
-      ...(options ?? {}),
-    }) ?? '',
-  error: (title: string, description?: string | undefined, options?: Partial<ToastOptions> | undefined) =>
-    globalToastHandler?.({
-      title,
-      type: 'error',
-      duration: 6000,
-      ...(description !== undefined ? { description } : {}),
-      ...(options ?? {}),
-    }) ?? '',
-  warning: (title: string, description?: string | undefined, options?: Partial<ToastOptions> | undefined) =>
-    globalToastHandler?.({
-      title,
-      type: 'warning',
-      ...(description !== undefined ? { description } : {}),
-      ...(options ?? {}),
-    }) ?? '',
-  info: (title: string, description?: string | undefined, options?: Partial<ToastOptions> | undefined) =>
-    globalToastHandler?.({
-      title,
-      type: 'info',
-      ...(description !== undefined ? { description } : {}),
-      ...(options ?? {}),
-    }) ?? '',
-  promise: async <T,>(
-    promise: Promise<T>,
-    msgs: {
-      loading: string;
-      success: string | ((data: T) => string);
-      error: string | ((err: unknown) => string);
-    },
-  ): Promise<T> => {
-    const id = globalToastHandler?.({
-      title: msgs.loading,
-      type: 'loading',
-      duration: 30000,
-    });
-    try {
-      const data = await promise;
-      if (id) {
-        toast.dismiss(id);
-      }
-      const title = typeof msgs.success === 'function' ? msgs.success(data) : msgs.success;
-      toast.success(title);
-      return data;
-    } catch (err) {
-      if (id) {
-        toast.dismiss(id);
-      }
-      const title = typeof msgs.error === 'function' ? msgs.error(err) : msgs.error;
-      toast.error(title);
-      throw err;
-    }
-  },
-  dismiss: (id: string) => {
-    const event = new CustomEvent('rms-toast-dismiss', { detail: { id } });
-    window.dispatchEvent(event);
-  },
-};
-
-export const useToast = () => {
-  const ctx = useContext(ToastContext);
-  if (!ctx) {
-    return {
-      toasts: [],
-      toast,
-      dismiss: toast.dismiss,
-    };
-  }
-  return {
-    toasts: ctx.toasts,
-    toast,
-    dismiss: ctx.removeToast,
-  };
-};
+import {
+  TOAST_DISMISS_EVENT,
+  ToastContext,
+  setGlobalToastHandler,
+  type ToastItem,
+  type ToastOptions,
+} from './toast-api';
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -125,7 +18,8 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const addToast = useCallback(
     (options: ToastOptions): string => {
-      const id = options.id || `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const id =
+        options.id || `toast-${String(Date.now())}-${Math.random().toString(36).slice(2, 7)}`;
       const newToast: ToastItem = {
         id,
         title: options.title,
@@ -145,17 +39,17 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   useEffect(() => {
-    globalToastHandler = addToast;
+    setGlobalToastHandler(addToast);
     const handleDismiss = (e: Event) => {
-      const customEvent = e as CustomEvent<{ id: string }>;
+      const customEvent = e as CustomEvent<{ id: string } | null>;
       if (customEvent.detail?.id) {
         removeToast(customEvent.detail.id);
       }
     };
-    window.addEventListener('rms-toast-dismiss', handleDismiss);
+    window.addEventListener(TOAST_DISMISS_EVENT, handleDismiss);
     return () => {
-      globalToastHandler = null;
-      window.removeEventListener('rms-toast-dismiss', handleDismiss);
+      setGlobalToastHandler(null);
+      window.removeEventListener(TOAST_DISMISS_EVENT, handleDismiss);
     };
   }, [addToast, removeToast]);
 
@@ -180,7 +74,7 @@ const ToasterContainer: React.FC<{
       className="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2 max-w-sm w-full pointer-events-none p-2 sm:p-0"
     >
       {toasts.map((item) => (
-        <ToastCard key={item.id} item={item} onDismiss={() => onDismiss(item.id)} />
+        <ToastCard key={item.id} item={item} onDismiss={() => { onDismiss(item.id); }} />
       ))}
     </div>
   );
@@ -195,7 +89,7 @@ const ToastCard: React.FC<{
     const timer = setTimeout(() => {
       onDismiss();
     }, item.duration);
-    return () => clearTimeout(timer);
+    return () => { clearTimeout(timer); };
   }, [item, onDismiss]);
 
   const icons = {

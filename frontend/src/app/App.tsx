@@ -557,7 +557,7 @@ function Shell() {
   const isAdminOrRm =
     isSuperAdmin || roleCodes.includes('ADMIN') || roleCodes.includes('REPLACEMENT_MANAGER');
 
-  // Bell / notification centre → the screen where the notification is acted on (P4-03 links.ts).
+  // Bell / notification centre â†’ the screen where the notification is acted on (P4-03 links.ts).
   const openNotification = (n: AppNotification): boolean => {
     const path = notificationPath(n, can);
     if (path) navigate(path);
@@ -724,7 +724,7 @@ function Shell() {
     return (
       <div className="auth-root auth-root--loading" role="status" aria-live="polite">
         <Loader2 size={22} className="auth-spin" aria-hidden="true" />
-        <span className="sr-only">Loading…</span>
+        <span className="sr-only">Loadingâ€¦</span>
       </div>
     );
   }
@@ -755,7 +755,7 @@ function Shell() {
           <button
             type="button"
             className="saas-sidebar-toggle"
-            onClick={() => setSidebarOpen((prev) => !prev)}
+            onClick={() => { setSidebarOpen((prev) => !prev); }}
             aria-label="Toggle navigation menu"
             title="Toggle menu"
           >
@@ -768,7 +768,7 @@ function Shell() {
                   src={hicksLogo}
                   alt="Hicks India"
                   className="saas-logo-img"
-                  onError={() => setLogoError(true)}
+                  onError={() => { setLogoError(true); }}
                 />
               ) : (
                 <div className="saas-logo-icon" aria-hidden="true">
@@ -789,7 +789,7 @@ function Shell() {
 
         {/* Phase 10: no global "New Goods Slip" here; Gate Entry is the gate role's journey step. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          {signedIn && me ? (
+          {me ? (
             <NotificationBell
               userId={me.profile.id}
               onOpen={(n) => {
@@ -801,7 +801,7 @@ function Shell() {
             />
           ) : null}
 
-          {signedIn && me ? (
+          {me ? (
             <div className="saas-profile-pill">
               <div className="saas-avatar-circle" title={me.profile.email ?? undefined}>
                 {userInitials}
@@ -828,7 +828,7 @@ function Shell() {
           ) : (
             <button
               type="button"
-              onClick={() => setActiveTab('login')}
+              onClick={() => { setActiveTab('login'); }}
               style={{
                 backgroundColor: '#1e293b',
                 border: '1px solid #334155',
@@ -854,7 +854,7 @@ function Shell() {
       {sidebarOpen ? (
         <div
           className="saas-backdrop no-print"
-          onClick={() => setSidebarOpen(false)}
+          onClick={() => { setSidebarOpen(false); }}
           aria-hidden="true"
         />
       ) : null}
@@ -892,7 +892,7 @@ function Shell() {
               </div>
             ) : !journey ? (
               <div className="saas-nav-group">
-                <LoadingState label="Loading menu…" />
+                <LoadingState label="Loading menuâ€¦" />
               </div>
             ) : null}
 
@@ -915,7 +915,7 @@ function Shell() {
                 <button
                   type="button"
                   className="saas-accordion-header"
-                  onClick={() => setAdminExpanded((prev) => !prev)}
+                  onClick={() => { setAdminExpanded((prev) => !prev); }}
                   aria-expanded={adminOpen}
                 >
                   <span>Administration</span>
@@ -1986,7 +1986,7 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'users' && (
-              <RequireAuth onSignIn={() => setActiveTab('login')}>
+              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
                 {can('users', 'view') || isSuperAdmin ? (
                   second && third === 'activity' ? (
                     <UserActivityPage
@@ -2026,7 +2026,7 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'permissions' && (
-              <RequireAuth onSignIn={() => setActiveTab('login')}>
+              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
                 {can('roles', 'view') || isSuperAdmin ? (
                   <PermissionMatrixView />
                 ) : (
@@ -2038,7 +2038,7 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'forms' && (
-              <RequireAuth onSignIn={() => setActiveTab('login')}>
+              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
                 {can('config', 'view') || isSuperAdmin ? (
                   <FormBuilder />
                 ) : (
@@ -2050,7 +2050,7 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'workflow' && (
-              <RequireAuth onSignIn={() => setActiveTab('login')}>
+              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
                 {can('config', 'view') || isSuperAdmin ? (
                   <WorkflowDesigner />
                 ) : (
@@ -2062,7 +2062,7 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'masters' && (
-              <RequireAuth onSignIn={() => setActiveTab('login')}>
+              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
                 {can('masters', 'view') || isSuperAdmin ? (
                   <MastersView />
                 ) : (
@@ -2074,7 +2074,7 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'options' && (
-              <RequireAuth onSignIn={() => setActiveTab('login')}>
+              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
                 {can('config', 'view') || isSuperAdmin ? (
                   <OptionSetsManager />
                 ) : (
@@ -2102,7 +2102,7 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'numbering' && (
-              <RequireAuth onSignIn={() => setActiveTab('login')}>
+              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
                 {can('config', 'view') || isSuperAdmin ? (
                   <NumberSeriesManager />
                 ) : (
@@ -2114,7 +2114,7 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'settings' && (
-              <RequireAuth onSignIn={() => setActiveTab('login')}>
+              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
                 {can('config', 'view') || isSuperAdmin ? (
                   <SystemSettingsManager />
                 ) : (
@@ -2126,7 +2126,7 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'templates' && (
-              <RequireAuth onSignIn={() => setActiveTab('login')}>
+              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
                 {can('config', 'view') || isSuperAdmin ? (
                   <PrintTemplatesManager />
                 ) : (
@@ -2138,7 +2138,7 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'history' && (
-              <RequireAuth onSignIn={() => setActiveTab('login')}>
+              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
                 {can('config', 'view') || isSuperAdmin ? (
                   <ConfigHistoryViewer />
                 ) : (
@@ -2186,7 +2186,7 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'guards' && (
-              <RequireAuth onSignIn={() => setActiveTab('login')}>
+              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
                 {can('config', 'view') || isSuperAdmin ? (
                   <SystemGuardsViewer />
                 ) : (
@@ -2216,7 +2216,7 @@ function Shell() {
         >
           <span>My Work</span>
         </button>
-        {signedIn && can('goods_slips', 'view') ? (
+        {can('goods_slips', 'view') ? (
           <button
             type="button"
             className={`mobile-bottom-bar__item ${activeTab === 'gs' ? 'mobile-bottom-bar__item--active' : ''}`}
@@ -2228,7 +2228,7 @@ function Shell() {
             <span>Goods Slips</span>
           </button>
         ) : null}
-        {signedIn && can('goods_slips', 'create') ? (
+        {can('goods_slips', 'create') ? (
           <button
             type="button"
             className={`mobile-bottom-bar__item ${activeTab === 'gs-new' ? 'mobile-bottom-bar__item--active' : ''}`}
@@ -2240,7 +2240,7 @@ function Shell() {
             <span>+ New</span>
           </button>
         ) : null}
-        {signedIn && can('dashboards', 'view') ? (
+        {can('dashboards', 'view') ? (
           <button
             type="button"
             className={`mobile-bottom-bar__item ${activeTab === 'dashboard' ? 'mobile-bottom-bar__item--active' : ''}`}
@@ -2252,18 +2252,16 @@ function Shell() {
             <span>Dashboard</span>
           </button>
         ) : null}
-        {signedIn ? (
-          <button
-            type="button"
-            className={`mobile-bottom-bar__item ${activeTab === 'notifications' ? 'mobile-bottom-bar__item--active' : ''}`}
-            onClick={() => {
-              setActiveTab('notifications');
-            }}
-            aria-label="Notifications"
-          >
-            <span>Alerts</span>
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className={`mobile-bottom-bar__item ${activeTab === 'notifications' ? 'mobile-bottom-bar__item--active' : ''}`}
+          onClick={() => {
+            setActiveTab('notifications');
+          }}
+          aria-label="Notifications"
+        >
+          <span>Alerts</span>
+        </button>
       </nav>
     </div>
   );

@@ -119,8 +119,6 @@ export function GlobalSearchBar({ onNavigate, onOpenQrScanner }: Props) {
     };
   }, []);
 
-  let currentIndex = -1;
-
   return (
     <div
       ref={containerRef}
@@ -279,8 +277,10 @@ export function GlobalSearchBar({ onNavigate, onOpenQrScanner }: Props) {
                     {group.label} ({group.count})
                   </div>
                   {group.items.map((item) => {
-                    currentIndex += 1;
-                    const isSelected = currentIndex === selectedIndex;
+                    // Position in flatItems (same object references), so keyboard and
+                    // mouse selection share one index without mutating during render.
+                    const itemIndex = flatItems.indexOf(item);
+                    const isSelected = itemIndex === selectedIndex;
                     return (
                       <div
                         key={item.id}
@@ -290,7 +290,7 @@ export function GlobalSearchBar({ onNavigate, onOpenQrScanner }: Props) {
                           handleSelect(item);
                         }}
                         onMouseEnter={() => {
-                          setSelectedIndex(currentIndex);
+                          setSelectedIndex(itemIndex);
                         }}
                         style={{
                           padding: '0.5rem 0.75rem',

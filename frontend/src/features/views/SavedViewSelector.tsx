@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState } from 'react';
 import { Bookmark } from 'lucide-react';
 import { Button, Modal, Input } from '@/components/ui';
+import { useApiQuery } from '@/hooks/useApiQuery';
 import { viewsApi, type SavedView, type SavedViewIn } from './api';
 
 interface SavedViewSelectorProps {
@@ -16,24 +17,15 @@ export function SavedViewSelector({
   onSelectView,
   selectedViewId,
 }: SavedViewSelectorProps) {
-  const [views, setViews] = useState<SavedView[]>([]);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [newViewName, setNewViewName] = useState('');
   const [isDefault, setIsDefault] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const loadViews = async () => {
-    try {
-      const data = await viewsApi.fetchSavedViews(resourceCode);
-      setViews(data);
-    } catch {
-      // ignore
-    }
-  };
-
-  useEffect(() => {
-    void loadViews();
-  }, [resourceCode]);
+  // A failed load leaves the list empty (only "Default View"), as before.
+  const fetchViews = useCallback(() => viewsApi.fetchSavedViews(resourceCode), [resourceCode]);
+  const { data: viewsData, setData: setViews } = useApiQuery(fetchViews);
+  const views: SavedView[] = viewsData ?? [];
 
   const handleCreate = async () => {
     if (!newViewName.trim()) return;
@@ -49,7 +41,7 @@ export function SavedViewSelector({
       setSaveModalOpen(false);
       setNewViewName('');
       setIsDefault(false);
-      await loadViews();
+      setViews(await viewsApi.fetchSavedViews(resourceCode));
       onSelectView(created);
     } catch {
       // ignore
@@ -90,7 +82,9 @@ export function SavedViewSelector({
       <Button
         variant="secondary"
         size="sm"
-        onClick={() => setSaveModalOpen(true)}
+        onClick={() => {
+          setSaveModalOpen(true);
+        }}
         title="Save current filters as a view preset"
       >
         <Bookmark size={14} style={{ marginRight: '0.25rem' }} /> Save View
@@ -99,7 +93,9 @@ export function SavedViewSelector({
       {saveModalOpen && (
         <Modal
           isOpen={true}
-          onClose={() => setSaveModalOpen(false)}
+          onClose={() => {
+            setSaveModalOpen(false);
+          }}
           title="Save Current View Preset"
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -118,7 +114,9 @@ export function SavedViewSelector({
                 type="text"
                 placeholder="e.g. Inward Pendencies, High Value Returns..."
                 value={newViewName}
-                onChange={(e) => setNewViewName(e.target.value)}
+                onChange={(e) => {
+                  setNewViewName(e.target.value);
+                }}
                 autoFocus
               />
             </div>
@@ -135,7 +133,9 @@ export function SavedViewSelector({
               <input
                 type="checkbox"
                 checked={isDefault}
-                onChange={(e) => setIsDefault(e.target.checked)}
+                onChange={(e) => {
+                  setIsDefault(e.target.checked);
+                }}
               />
               <span>Set as my default view for this page</span>
             </label>
@@ -148,10 +148,21 @@ export function SavedViewSelector({
                 marginTop: '0.5rem',
               }}
             >
-              <Button variant="secondary" onClick={() => setSaveModalOpen(false)}>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setSaveModalOpen(false);
+                }}
+              >
                 Cancel
               </Button>
-              <Button onClick={handleCreate} isLoading={saving} disabled={!newViewName.trim()}>
+              <Button
+                onClick={() => {
+                  void handleCreate();
+                }}
+                isLoading={saving}
+                disabled={!newViewName.trim()}
+              >
                 Save Preset
               </Button>
             </div>

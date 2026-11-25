@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import { ShieldCheck } from 'lucide-react';
 
 import hicksLogo from '@/assets/logo.png';
@@ -9,17 +9,12 @@ import './login.css';
  *  to the official Hicks India logo and company branding. */
 export function AuthLayout({ children }: { children: ReactNode }) {
   const settings = usePublicSettings();
-  const [logoSrc, setLogoSrc] = useState<string>(hicksLogo);
+  // Custom branding logo when configured; the URL that failed to load (if any) is remembered so
+  // we fall back to the bundled Hicks logo for it, and retry if the configured URL changes.
+  const [failedCustomLogo, setFailedCustomLogo] = useState<string | null>(null);
   const [logoFailed, setLogoFailed] = useState(false);
-
-  useEffect(() => {
-    const custom = settings?.branding_logo_url?.trim();
-    if (custom) {
-      setLogoSrc(custom);
-    } else {
-      setLogoSrc(hicksLogo);
-    }
-  }, [settings?.branding_logo_url]);
+  const customLogo = settings?.branding_logo_url?.trim() || null;
+  const logoSrc = customLogo && customLogo !== failedCustomLogo ? customLogo : hicksLogo;
 
   const style = settings
     ? ({ '--auth-brand': settings.branding_primary_color } as CSSProperties)
@@ -31,7 +26,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
   const handleImageError = () => {
     if (logoSrc !== hicksLogo) {
       // If a custom URL failed, fall back to official bundled Hicks logo
-      setLogoSrc(hicksLogo);
+      setFailedCustomLogo(logoSrc);
     } else {
       // Only if the bundled logo itself fails do we fall back to shield
       setLogoFailed(true);

@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useCallback } from 'react';
 import { ArrowLeft, Clock, Globe, Laptop, RefreshCw } from 'lucide-react';
 import { Badge, Button, EmptyState, LoadingState } from '@/components/ui';
 import { auditApi, type UserActivityItem } from '@/features/audit/api';
 import { formatDateTime } from '@/features/goods-slips/format';
+import { useApiQuery } from '@/hooks/useApiQuery';
 
 interface UserActivityPageProps {
   userId: string;
@@ -11,26 +12,10 @@ interface UserActivityPageProps {
 }
 
 export function UserActivityPage({ userId, userName, onBack }: UserActivityPageProps) {
-  const [items, setItems] = useState<UserActivityItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const loadData = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await auditApi.fetchUserActivity(userId, 50);
-      setItems(res.items);
-    } catch {
-      setError('Failed to load user activity log.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void loadData();
-  }, [userId]);
+  const fetchActivity = useCallback(() => auditApi.fetchUserActivity(userId, 50), [userId]);
+  const { data, error: loadError, loading, reload } = useApiQuery(fetchActivity);
+  const items: UserActivityItem[] = data?.items ?? [];
+  const error = loadError ? 'Failed to load user activity log.' : null;
 
   return (
     <div
@@ -66,7 +51,7 @@ export function UserActivityPage({ userId, userName, onBack }: UserActivityPageP
               Sessions and sign-in audit history for user {userName ? `"${userName}"` : userId}.
             </p>
           </div>
-          <Button variant="secondary" size="sm" onClick={() => void loadData()} disabled={loading}>
+          <Button variant="secondary" size="sm" onClick={reload} disabled={loading}>
             <RefreshCw size={14} style={{ marginRight: '0.25rem' }} /> Refresh
           </Button>
         </div>

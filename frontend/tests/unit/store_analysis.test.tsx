@@ -6,7 +6,7 @@
  * Rendered from backend-shaped payloads (backend/app/modules/final_actions/schemas.py
  * StoreAnalysis*); only the HTTP layer is mocked.
  */
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const apiRequest = vi.fn<(path: string, options?: Record<string, unknown>) => Promise<unknown>>();
@@ -152,6 +152,8 @@ function serve(routes: Record<string, unknown>): void {
 const calls = (path: string) => apiRequest.mock.calls.filter(([p]) => p === path);
 
 afterEach(() => {
+  // Unmount first: a late StatusChip effect must not hit the reset (undefined-returning) mock.
+  cleanup();
   apiRequest.mockReset();
 });
 

@@ -3,13 +3,20 @@ import { Download, RefreshCw, Shield, Eye } from 'lucide-react';
 import { Button, Input, Badge, EmptyState, LoadingState, Modal } from '@/components/ui';
 import { auditApi, type AuditLogRow, type AuditFilterParams } from '@/features/audit/api';
 import { formatDateTime } from '@/features/goods-slips/format';
+import { useApiQuery } from '@/hooks/useApiQuery';
+
+/** Render a diff value: primitives as text, objects/arrays as JSON. */
+function formatDiffValue(value: unknown): string {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value);
+  }
+  return JSON.stringify(value);
+}
 
 export function AuditExplorerPage() {
   const [tables, setTables] = useState<string[]>([]);
-  const [items, setItems] = useState<AuditLogRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   // Filters
   const [selectedTable, setSelectedTable] = useState<string>('');
@@ -31,33 +38,26 @@ export function AuditExplorerPage() {
       .catch(() => {});
   }, []);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params: AuditFilterParams = {
-        table_name: selectedTable || undefined,
-        action: selectedAction || undefined,
-        actor_id: actorId.trim() || undefined,
-        from_date: fromDate || undefined,
-        to_date: toDate || undefined,
-        request_id: requestId.trim() || undefined,
-        limit: pageSize,
-        offset: page * pageSize,
-      };
-      const res = await auditApi.fetchAuditLog(params);
-      setItems(res.items);
-      setTotal(res.total);
-    } catch {
-      setError('Failed to fetch audit log records. Ensure you have audit permissions.');
-    } finally {
-      setLoading(false);
-    }
+  const fetchLog = useCallback(() => {
+    const params: AuditFilterParams = {
+      table_name: selectedTable || undefined,
+      action: selectedAction || undefined,
+      actor_id: actorId.trim() || undefined,
+      from_date: fromDate || undefined,
+      to_date: toDate || undefined,
+      request_id: requestId.trim() || undefined,
+      limit: pageSize,
+      offset: page * pageSize,
+    };
+    return auditApi.fetchAuditLog(params);
   }, [selectedTable, selectedAction, actorId, fromDate, toDate, requestId, page]);
 
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
+  const { data: logData, error: logError, loading, reload } = useApiQuery(fetchLog);
+  const items = logData?.items ?? [];
+  const total = logData?.total ?? 0;
+  const error = logError
+    ? 'Failed to fetch audit log records. Ensure you have audit permissions.'
+    : null;
 
   const handleExportCsv = () => {
     const params: AuditFilterParams = {
@@ -112,7 +112,7 @@ export function AuditExplorerPage() {
         </div>
 
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <Button variant="secondary" onClick={() => void loadData()} disabled={loading}>
+          <Button variant="secondary" onClick={reload} disabled={loading}>
             <RefreshCw size={15} style={{ marginRight: '0.35rem' }} /> Refresh
           </Button>
           <Button variant="primary" onClick={handleExportCsv}>
@@ -371,7 +371,7 @@ export function AuditExplorerPage() {
                         (row.actor_id ? `${row.actor_id.substring(0, 8)}...` : 'System')}
                     </td>
                     <td style={{ padding: '0.75rem 1rem' }}>
-                      {row.diffs && row.diffs.length > 0 ? (
+                      {row.diffs.length > 0 ? (
                         <span style={{ color: '#2563eb', fontWeight: 500 }}>
                           {row.diffs.length} field{row.diffs.length > 1 ? 's' : ''}
                         </span>
@@ -383,7 +383,9 @@ export function AuditExplorerPage() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => setInspectRow(row)}
+                        onClick={() => {
+                          setInspectRow(row);
+                        }}
                         title="Inspect diff and payload"
                       >
                         <Eye size={14} style={{ marginRight: '0.25rem' }} /> View
@@ -417,7 +419,9 @@ export function AuditExplorerPage() {
                 size="sm"
                 variant="secondary"
                 disabled={page === 0}
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                onClick={() => {
+                  setPage((p) => Math.max(0, p - 1));
+                }}
               >
                 Previous
               </Button>
@@ -425,7 +429,9 @@ export function AuditExplorerPage() {
                 size="sm"
                 variant="secondary"
                 disabled={page + 1 >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
+                onClick={() => {
+                  setPage((p) => p + 1);
+                }}
               >
                 Next
               </Button>
@@ -438,7 +444,9 @@ export function AuditExplorerPage() {
       {inspectRow && (
         <Modal
           isOpen={true}
-          onClose={() => setInspectRow(null)}
+          onClose={() => {
+            setInspectRow(null);
+          }}
           title={`Audit Entry: ${inspectRow.table_name} (${inspectRow.action})`}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -473,7 +481,7 @@ export function AuditExplorerPage() {
               </div>
             </div>
 
-            {inspectRow.diffs && inspectRow.diffs.length > 0 && (
+            {inspectRow.diffs.length > 0 && (
               <div>
                 <h4 style={{ margin: '0 0 0.5rem', fontSize: '0.875rem', fontWeight: 600 }}>
                   Field Diffs
@@ -501,14 +509,10 @@ export function AuditExplorerPage() {
                           {d.field_label || d.field}
                         </td>
                         <td style={{ padding: '0.35rem 0.5rem', color: '#dc2626' }}>
-                          {d.old_value !== null && d.old_value !== undefined
-                            ? String(d.old_value)
-                            : 'null'}
+                          {formatDiffValue(d.old_value)}
                         </td>
                         <td style={{ padding: '0.35rem 0.5rem', color: '#16a34a' }}>
-                          {d.new_value !== null && d.new_value !== undefined
-                            ? String(d.new_value)
-                            : 'null'}
+                          {formatDiffValue(d.new_value)}
                         </td>
                       </tr>
                     ))}
@@ -546,7 +550,12 @@ export function AuditExplorerPage() {
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-              <Button variant="secondary" onClick={() => setInspectRow(null)}>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setInspectRow(null);
+                }}
+              >
                 Close
               </Button>
             </div>

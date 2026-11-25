@@ -12,4 +12,5 @@ export * from './Modal';
 export * from './StateViews';
 export * from './Drawer';
 export * from './Toast';
+export * from './toast-api';
 export * from './ConfirmDialog';

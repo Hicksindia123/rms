@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState } from 'react';
 import {
   Activity,
   ChevronDown,
@@ -15,6 +15,7 @@ import {
 import { Badge, Button, EmptyState, LoadingState } from '@/components/ui';
 import { auditApi, type GsActivityItem } from '@/features/audit/api';
 import { formatDateTime } from '@/features/goods-slips/format';
+import { useApiQuery } from '@/hooks/useApiQuery';
 
 interface GsActivityTabProps {
   gsId: string;
@@ -22,29 +23,32 @@ interface GsActivityTabProps {
 
 type CategoryFilter = 'ALL' | 'STATUS' | 'STOCK' | 'DOCUMENT' | 'COMMERCIAL' | 'AUDIT';
 
+/** Field-diff values are JSON: primitives print as-is, objects / arrays as JSON. */
+function formatDiffValue(value: unknown): string {
+  if (value === null || value === undefined) return '—';
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'bigint'
+  ) {
+    return String(value);
+  }
+  return JSON.stringify(value);
+}
+
 export function GsActivityTab({ gsId }: GsActivityTabProps) {
-  const [items, setItems] = useState<GsActivityItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<CategoryFilter>('ALL');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
-  const loadActivity = async (cat?: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const resp = await auditApi.fetchGsActivity(gsId, cat === 'ALL' ? undefined : cat);
-      setItems(resp.items);
-    } catch {
-      setError('Failed to load activity history.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void loadActivity(activeCategory);
-  }, [gsId, activeCategory]);
+  const fetchActivity = useCallback(
+    () => auditApi.fetchGsActivity(gsId, activeCategory === 'ALL' ? undefined : activeCategory),
+    [gsId, activeCategory],
+  );
+  const activity = useApiQuery(fetchActivity);
+  const items: GsActivityItem[] = activity.data?.items ?? [];
+  const loading = activity.loading;
+  const error = activity.error ? 'Failed to load activity history.' : null;
 
   const toggleExpand = (id: string) => {
     setExpandedIds((prev) => {
@@ -101,7 +105,9 @@ export function GsActivityTab({ gsId }: GsActivityTabProps) {
             <button
               key={c.id}
               type="button"
-              onClick={() => setActiveCategory(c.id)}
+              onClick={() => {
+                setActiveCategory(c.id);
+              }}
               style={{
                 padding: '0.35rem 0.75rem',
                 borderRadius: '6px',
@@ -122,7 +128,9 @@ export function GsActivityTab({ gsId }: GsActivityTabProps) {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => void loadActivity(activeCategory)}
+          onClick={() => {
+            activity.reload();
+          }}
           style={{ fontSize: '0.75rem' }}
         >
           <History size={14} style={{ marginRight: '0.25rem' }} /> Refresh
@@ -155,7 +163,7 @@ export function GsActivityTab({ gsId }: GsActivityTabProps) {
         >
           {items.map((item) => {
             const isExpanded = expandedIds.has(item.id);
-            const hasDiffs = item.diffs && item.diffs.length > 0;
+            const hasDiffs = item.diffs.length > 0;
 
             return (
               <div
@@ -258,7 +266,9 @@ export function GsActivityTab({ gsId }: GsActivityTabProps) {
                   <div style={{ marginTop: '0.5rem' }}>
                     <button
                       type="button"
-                      onClick={() => toggleExpand(item.id)}
+                      onClick={() => {
+                        toggleExpand(item.id);
+                      }}
                       style={{
                         background: 'transparent',
                         border: 'none',
@@ -275,7 +285,7 @@ export function GsActivityTab({ gsId }: GsActivityTabProps) {
                       {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                       {isExpanded
                         ? 'Hide field changes'
-                        : `View ${item.diffs.length} changed field${item.diffs.length > 1 ? 's' : ''}`}
+                        : `View ${String(item.diffs.length)} changed field${item.diffs.length > 1 ? 's' : ''}`}
                     </button>
 
                     {isExpanded && (
@@ -322,14 +332,10 @@ export function GsActivityTab({ gsId }: GsActivityTabProps) {
                                   {diff.field_label || diff.field}
                                 </td>
                                 <td style={{ padding: '0.35rem 0.5rem', color: '#dc2626' }}>
-                                  {diff.old_value !== null && diff.old_value !== undefined
-                                    ? String(diff.old_value)
-                                    : '—'}
+                                  {formatDiffValue(diff.old_value)}
                                 </td>
                                 <td style={{ padding: '0.35rem 0.5rem', color: '#16a34a' }}>
-                                  {diff.new_value !== null && diff.new_value !== undefined
-                                    ? String(diff.new_value)
-                                    : '—'}
+                                  {formatDiffValue(diff.new_value)}
                                 </td>
                               </tr>
                             ))}

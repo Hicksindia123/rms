@@ -54,8 +54,8 @@ export const viewsApi = {
     });
   },
 
-  deleteSavedView: async (id: string): Promise<void> => {
-    return apiRequest<void>(`/saved-views/${id}`, {
+  deleteSavedView: async (id: string): Promise<undefined> => {
+    return apiRequest<undefined>(`/saved-views/${id}`, {
       method: 'DELETE',
     });
   },

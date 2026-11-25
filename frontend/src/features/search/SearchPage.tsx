@@ -45,16 +45,43 @@ export function SearchPage({ initialQuery = '', onNavigate }: SearchPageProps) {
     }
   }, []);
 
-  useEffect(() => {
+  // Run the search for `initialQuery` (on mount and whenever the route's ?q= changes).
+  // The synchronous part (loading on, error cleared) is applied during render when the
+  // prop changes; the effect only sets state from the async callbacks.
+  const [syncedQuery, setSyncedQuery] = useState<string | null>(null);
+  if (syncedQuery !== initialQuery) {
+    setSyncedQuery(initialQuery);
     if (initialQuery) {
-      void performSearch(initialQuery);
+      if (initialQuery.trim()) {
+        setLoading(true);
+        setError(null);
+      } else {
+        setResults(null);
+      }
     }
-  }, [initialQuery, performSearch]);
+  }
+
+  useEffect(() => {
+    const q = initialQuery.trim();
+    if (!q) return;
+    searchApi.globalSearch(q, 20).then(
+      (resp) => {
+        setResults(resp);
+        setLoading(false);
+      },
+      () => {
+        setError('Failed to perform search. Please check your network.');
+        setLoading(false);
+      },
+    );
+  }, [initialQuery]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     void performSearch(query);
   };
+
+  const directMatch = results?.direct_match;
 
   const filteredGroups = results
     ? activeGroup === 'ALL'
@@ -113,7 +140,12 @@ export function SearchPage({ initialQuery = '', onNavigate }: SearchPageProps) {
             Containers
           </p>
         </div>
-        <Button variant="secondary" onClick={() => setScanModalOpen(true)}>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setScanModalOpen(true);
+          }}
+        >
           <QrCode size={16} style={{ marginRight: '0.5rem' }} /> Scan QR / Barcode
         </Button>
       </div>
@@ -137,7 +169,9 @@ export function SearchPage({ initialQuery = '', onNavigate }: SearchPageProps) {
             type="text"
             placeholder="Search by GS number, party, docket, CN number, batch, container..."
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+            }}
             style={{ paddingLeft: '2.5rem', height: '42px', fontSize: '0.9375rem' }}
             autoFocus
           />
@@ -148,7 +182,7 @@ export function SearchPage({ initialQuery = '', onNavigate }: SearchPageProps) {
       </form>
 
       {/* Direct Match Banner */}
-      {results?.direct_match && (
+      {directMatch && (
         <div
           style={{
             backgroundColor: '#eff6ff',
@@ -160,7 +194,9 @@ export function SearchPage({ initialQuery = '', onNavigate }: SearchPageProps) {
             alignItems: 'center',
             cursor: 'pointer',
           }}
-          onClick={() => onNavigate(results.direct_match!.route)}
+          onClick={() => {
+            onNavigate(directMatch.route);
+          }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <span
@@ -176,10 +212,10 @@ export function SearchPage({ initialQuery = '', onNavigate }: SearchPageProps) {
               EXACT MATCH
             </span>
             <div>
-              <div style={{ fontWeight: 600, color: '#1e3a8a' }}>{results.direct_match.title}</div>
-              {results.direct_match.subtitle && (
+              <div style={{ fontWeight: 600, color: '#1e3a8a' }}>{directMatch.title}</div>
+              {directMatch.subtitle && (
                 <div style={{ fontSize: '0.8125rem', color: '#3b82f6' }}>
-                  {results.direct_match.subtitle}
+                  {directMatch.subtitle}
                 </div>
               )}
             </div>
@@ -188,7 +224,7 @@ export function SearchPage({ initialQuery = '', onNavigate }: SearchPageProps) {
             size="sm"
             onClick={(e) => {
               e.stopPropagation();
-              onNavigate(results.direct_match!.route);
+              onNavigate(directMatch.route);
             }}
           >
             Open <ArrowRight size={14} style={{ marginLeft: '0.25rem' }} />
@@ -210,7 +246,9 @@ export function SearchPage({ initialQuery = '', onNavigate }: SearchPageProps) {
           <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap' }}>
             <button
               type="button"
-              onClick={() => setActiveGroup('ALL')}
+              onClick={() => {
+                setActiveGroup('ALL');
+              }}
               style={{
                 padding: '0.35rem 0.75rem',
                 borderRadius: '6px',
@@ -229,7 +267,9 @@ export function SearchPage({ initialQuery = '', onNavigate }: SearchPageProps) {
               <button
                 key={g.type}
                 type="button"
-                onClick={() => setActiveGroup(g.type)}
+                onClick={() => {
+                  setActiveGroup(g.type);
+                }}
                 style={{
                   padding: '0.35rem 0.75rem',
                   borderRadius: '6px',
@@ -324,7 +364,9 @@ export function SearchPage({ initialQuery = '', onNavigate }: SearchPageProps) {
               {group.items.map((item) => (
                 <div
                   key={item.id}
-                  onClick={() => onNavigate(item.route)}
+                  onClick={() => {
+                    onNavigate(item.route);
+                  }}
                   style={{
                     padding: '0.875rem 1rem',
                     borderBottom: '1px solid #f1f5f9',
@@ -359,7 +401,9 @@ export function SearchPage({ initialQuery = '', onNavigate }: SearchPageProps) {
 
       <QrScanModal
         isOpen={scanModalOpen}
-        onClose={() => setScanModalOpen(false)}
+        onClose={() => {
+          setScanModalOpen(false);
+        }}
         onNavigate={onNavigate}
       />
     </div>
