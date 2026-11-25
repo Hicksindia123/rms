@@ -2,13 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 
 export type BadgeVariant =
-  | 'default'
-  | 'success'
-  | 'danger'
-  | 'warning'
-  | 'info'
-  | 'neutral'
-  | 'purple';
+  'default' | 'success' | 'danger' | 'warning' | 'info' | 'neutral' | 'purple';
 
 export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
   variant?: BadgeVariant;
@@ -23,13 +17,13 @@ export const Badge: React.FC<BadgeProps> = ({
   ...props
 }) => {
   const variantStyles = {
-    default: 'bg-slate-100 text-slate-700 border-slate-200/80',
+    default: 'bg-brand-50 text-brand-700 border-brand-100',
     neutral: 'bg-slate-100 text-slate-700 border-slate-200/80',
     success: 'bg-emerald-50 text-emerald-800 border-emerald-200/80',
     danger: 'bg-rose-50 text-rose-800 border-rose-200/80',
     warning: 'bg-amber-50 text-amber-900 border-amber-200/80',
-    info: 'bg-sky-50 text-sky-800 border-sky-200/80',
-    purple: 'bg-purple-50 text-purple-800 border-purple-200/80',
+    info: 'bg-brand-50 text-brand-700 border-brand-100',
+    purple: 'bg-violet-50 text-violet-800 border-violet-200/80',
   };
 
   const dotColors = {
@@ -38,7 +32,7 @@ export const Badge: React.FC<BadgeProps> = ({
     success: 'bg-emerald-500',
     danger: 'bg-rose-500',
     warning: 'bg-amber-500',
-    info: 'bg-sky-500',
+    info: 'bg-brand-500',
     purple: 'bg-purple-500',
   };
 

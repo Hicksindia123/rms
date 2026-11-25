@@ -57,7 +57,7 @@ function TodayAuditBanner({ onOpenAudit }: BannerProps) {
           </h3>
           <p className="text-xs sm:text-sm text-foreground/80 mt-1 max-w-2xl">
             All active DMT containers must be counted and checked on a daily basis, with sellable
-            packaging separated (BR-18, DD r31). Today's audit has not been confirmed yet.
+            packaging separated. Today's audit has not been confirmed yet.
           </p>
         </div>
       </div>

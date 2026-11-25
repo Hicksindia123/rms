@@ -178,7 +178,7 @@ async def test_challan_only_goods_slip_to_dispatch(
     # The Replacement Slip PDF: store + condition + action lines, totals; no stamp (no approval).
     pdf = _replacement_pdf(db_conn, storage, r.gs_id)
     assert "Replacement Slip" in pdf and "Totals by Action" in pdf
-    assert "Dispatch New Piece" in pdf and "Not Allowed" in pdf
+    assert "Send New Pieces to Party" in pdf and "Not Allowed" in pdf
     assert "Digitally approved" not in pdf
 
     state = (await _entry(client, accounts, r.gs_id)).json()
@@ -504,6 +504,15 @@ async def test_last_store_submits_with_a_management_request(
         json={
             "store_id": r.op_store,
             "lines": [_decide(op, 0, SEND_REPAIRED=1)],
+            "management_lines": [
+                {
+                    "gs_item_id": op["gs_item_id"],
+                    "condition_field_id": op["groups"][0]["condition_field_id"],
+                    "from_action_code": "SEND_REPAIRED",
+                    "proposed_action_code": "ISSUE_CN",
+                    "qty": 1,
+                }
+            ],
             "management_approval_reason": "Party wants a credit note instead",
         },
         headers=_auth(stores.op, key()),
@@ -512,5 +521,8 @@ async def test_last_store_submits_with_a_management_request(
     body = res.json()
     # The request is recorded before the gate: the GS waits for Management, no Replacement Slip.
     assert body["status"] == "ANALYSIS_COMPLETED"
-    assert body["open_approval_request"]["reason"] == "Party wants a credit note instead"
+    assert body["open_approval_request"]["reason"].endswith(
+        "Note: Party wants a credit note instead"
+    )
+    assert body["request_lines"][0]["proposed_action_code"] == "ISSUE_CN"
     assert _slips(db_conn, r.gs_id) == []

@@ -262,8 +262,7 @@ export function AllotBatchPage({ currentUserName, onBack, onCreated }: Props) {
                 Intermediate Store Available Lots
               </h2>
               <p style={{ margin: '0.25rem 0 0', color: '#64748b', fontSize: '0.8125rem' }}>
-                Pick lots to transfer to Raj Kumar Ji&apos;s Technician Bench (auto-accepted SoD
-                bypass DEC-34)
+                Pick lots to transfer to Raj Kumar Ji&apos;s Technician Bench
               </p>
             </div>
             <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#0369a1' }}>
@@ -285,8 +284,8 @@ export function AllotBatchPage({ currentUserName, onBack, onCreated }: Props) {
                   <div
                     key={lot.lot_id}
                     style={{
-                      border: isSelected ? '2px solid #2563eb' : '1px solid #e2e8f0',
-                      backgroundColor: isSelected ? '#eff6ff' : '#f8fafc',
+                      border: isSelected ? '2px solid #2a47f0' : '1px solid #e2e8f0',
+                      backgroundColor: isSelected ? '#eef3ff' : '#f8fafc',
                       borderRadius: '8px',
                       padding: '1rem',
                       display: 'flex',

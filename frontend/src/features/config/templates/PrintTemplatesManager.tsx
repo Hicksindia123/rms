@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Printer, Eye } from 'lucide-react';
+import { apiRequest, toApiError } from '@/lib/api/client';
 
 export interface PrintTemplateItem {
   id: string;
@@ -29,17 +30,24 @@ export function PrintTemplatesManager() {
   const [templates, setTemplates] = useState<PrintTemplateItem[]>([]);
   const [selectedCode, setSelectedCode] = useState<string>('REPLACEMENT_SLIP');
   const [sampleData, setSampleData] = useState<SampleDataResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
-    fetch('/api/v1/config/templates')
-      .then((res) => res.json())
-      .then((data: PrintTemplateItem[]) => {
+    apiRequest<PrintTemplateItem[]>('/config/templates')
+      .then((data) => {
         if (!ignore) {
           setTemplates(data);
         }
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        if (!ignore) {
+          const e = toApiError(err);
+          setError(
+            `Could not load the print templates: ${e.message}${e.requestId ? ` (Request ID: ${e.requestId})` : ''}`,
+          );
+        }
+      });
     return () => {
       ignore = true;
     };
@@ -48,14 +56,20 @@ export function PrintTemplatesManager() {
   useEffect(() => {
     if (!selectedCode) return;
     let ignore = false;
-    fetch(`/api/v1/config/templates/${selectedCode}/sample-data`)
-      .then((res) => res.json())
-      .then((data: SampleDataResponse) => {
+    apiRequest<SampleDataResponse>(`/config/templates/${selectedCode}/sample-data`)
+      .then((data) => {
         if (!ignore) {
           setSampleData(data);
         }
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        if (!ignore) {
+          const e = toApiError(err);
+          setError(
+            `Could not load the sample data for ${selectedCode}: ${e.message}${e.requestId ? ` (Request ID: ${e.requestId})` : ''}`,
+          );
+        }
+      });
     return () => {
       ignore = true;
     };
@@ -112,6 +126,22 @@ export function PrintTemplatesManager() {
         </div>
       </div>
 
+      {error && (
+        <div
+          role="alert"
+          style={{
+            padding: '0.75rem 1rem',
+            backgroundColor: '#fef2f2',
+            border: '1px solid #fecaca',
+            borderRadius: '6px',
+            color: '#b91c1c',
+            fontSize: '0.875rem',
+          }}
+        >
+          {error}
+        </div>
+      )}
+
       {/* Template Selection Tabs */}
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
         {templates.map((t) => (
@@ -124,9 +154,9 @@ export function PrintTemplatesManager() {
             style={{
               padding: '0.5rem 1rem',
               borderRadius: '6px',
-              border: selectedCode === t.code ? '2px solid #3b82f6' : '1px solid #e2e8f0',
-              backgroundColor: selectedCode === t.code ? '#eff6ff' : '#ffffff',
-              color: selectedCode === t.code ? '#1d4ed8' : '#334155',
+              border: selectedCode === t.code ? '2px solid #3f63fb' : '1px solid #e2e8f0',
+              backgroundColor: selectedCode === t.code ? '#eef3ff' : '#ffffff',
+              color: selectedCode === t.code ? '#2236d6' : '#334155',
               fontWeight: 600,
               fontSize: '0.875rem',
               cursor: 'pointer',

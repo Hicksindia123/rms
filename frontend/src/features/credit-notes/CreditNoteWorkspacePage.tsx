@@ -356,9 +356,9 @@ export function CreditNoteWorkspacePage({
       {splitMsg && (
         <div
           style={{
-            backgroundColor: '#eff6ff',
-            border: '1px solid #bfdbfe',
-            color: '#1d4ed8',
+            backgroundColor: '#eef3ff',
+            border: '1px solid #bfd0ff',
+            color: '#2236d6',
             padding: '0.75rem 1rem',
             borderRadius: '8px',
             marginBottom: '1.25rem',
@@ -503,7 +503,7 @@ export function CreditNoteWorkspacePage({
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: '0.25rem',
-                          color: '#2563eb',
+                          color: '#2a47f0',
                           fontSize: '0.8125rem',
                           fontWeight: 500,
                           textDecoration: 'none',
@@ -538,7 +538,7 @@ export function CreditNoteWorkspacePage({
                   color: '#0f172a',
                 }}
               >
-                DEC-23 Split Credit Note Tool
+                Split Credit Note Tool
               </h3>
               <p style={{ margin: '0 0 1rem 0', color: '#64748b', fontSize: '0.8125rem' }}>
                 If this Credit Note contains a mix of Good (packed) and Repaired pieces,
@@ -580,7 +580,7 @@ export function CreditNoteWorkspacePage({
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <span
                   style={{
-                    backgroundColor: '#2563eb',
+                    backgroundColor: '#2a47f0',
                     color: '#ffffff',
                     width: '24px',
                     height: '24px',
@@ -595,7 +595,7 @@ export function CreditNoteWorkspacePage({
                   1
                 </span>
                 <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0, color: '#0f172a' }}>
-                  Party Document Verification (BR-33)
+                  Party Document Verification
                 </h3>
               </div>
               {cn.party_doc_code && <Badge variant="success">Verified</Badge>}
@@ -794,7 +794,7 @@ export function CreditNoteWorkspacePage({
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <span
                   style={{
-                    backgroundColor: '#2563eb',
+                    backgroundColor: '#2a47f0',
                     color: '#ffffff',
                     width: '24px',
                     height: '24px',
@@ -809,7 +809,7 @@ export function CreditNoteWorkspacePage({
                   2
                 </span>
                 <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0, color: '#0f172a' }}>
-                  GST Portal Verification (BR-34, G-13)
+                  GST Portal Verification
                 </h3>
               </div>
               {cn.gst_portal_code && (
@@ -839,7 +839,7 @@ export function CreditNoteWorkspacePage({
                       marginBottom: '0.25rem',
                     }}
                   >
-                    GST Portal Status (DD r75-r76)
+                    GST Portal Status
                   </label>
                   <select
                     id="gst-portal-code-select"
@@ -1013,7 +1013,7 @@ export function CreditNoteWorkspacePage({
             >
               <span
                 style={{
-                  backgroundColor: '#2563eb',
+                  backgroundColor: '#2a47f0',
                   color: '#ffffff',
                   width: '24px',
                   height: '24px',
@@ -1028,7 +1028,7 @@ export function CreditNoteWorkspacePage({
                 3
               </span>
               <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0, color: '#0f172a' }}>
-                Credit Note Type & Compliance (G-13, DEC-23)
+                Credit Note Type & Compliance
               </h3>
             </div>
 
@@ -1160,7 +1160,7 @@ export function CreditNoteWorkspacePage({
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <span
                   style={{
-                    backgroundColor: '#2563eb',
+                    backgroundColor: '#2a47f0',
                     color: '#ffffff',
                     width: '24px',
                     height: '24px',
@@ -1175,7 +1175,7 @@ export function CreditNoteWorkspacePage({
                   4
                 </span>
                 <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0, color: '#0f172a' }}>
-                  Commercial Rate Verification & Valuation (G-14, DEC-24)
+                  Commercial Rate Verification & Valuation
                 </h3>
               </div>
             </div>
@@ -1324,7 +1324,7 @@ export function CreditNoteWorkspacePage({
             >
               <span
                 style={{
-                  backgroundColor: '#2563eb',
+                  backgroundColor: '#2a47f0',
                   color: '#ffffff',
                   width: '24px',
                   height: '24px',
@@ -1339,7 +1339,7 @@ export function CreditNoteWorkspacePage({
                 5
               </span>
               <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0, color: '#0f172a' }}>
-                {isJv ? 'Journal Voucher Issue (DEC-22)' : 'Credit Note Voucher Issue (DEC-22)'}
+                {isJv ? 'Journal Voucher Issue' : 'Credit Note Voucher Issue'}
               </h3>
             </div>
 
@@ -1415,7 +1415,7 @@ export function CreditNoteWorkspacePage({
                         marginBottom: '0.25rem',
                       }}
                     >
-                      {isJv ? 'Accounting JV Number (DEC-22)' : 'Accounting CN Number (DEC-22)'}
+                      {isJv ? 'Accounting JV Number' : 'Accounting CN Number'}
                     </label>
                     <input
                       id="issue-voucher-no-input"
@@ -1521,7 +1521,7 @@ export function CreditNoteWorkspacePage({
                 color: '#0f172a',
               }}
             >
-              Record Rate Verification (DEC-24, G-14)
+              Record Rate Verification
             </h3>
             <p style={{ margin: '0 0 1rem 0', color: '#64748b', fontSize: '0.8125rem' }}>
               Sales rate determines the Credit Note line valuation. Purchase rate provides baseline
@@ -1596,9 +1596,7 @@ export function CreditNoteWorkspacePage({
                       fontSize: '0.8125rem',
                     }}
                   >
-                    <option value="RATE_SALES">
-                      Verified Sales Invoice Rate (DEC-24 Master Rate)
-                    </option>
+                    <option value="RATE_SALES">Verified Sales Invoice Rate</option>
                     <option value="RATE_PURCHASE">Purchase Invoice Rate (Variance Baseline)</option>
                   </select>
                 </div>

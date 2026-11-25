@@ -65,7 +65,7 @@ export function GsActivityTab({ gsId }: GsActivityTabProps) {
   const getCategoryIcon = (category: string) => {
     switch (category) {
       case 'STATUS':
-        return <Truck size={16} color="#2563eb" />;
+        return <Truck size={16} color="#2a47f0" />;
       case 'STOCK':
         return <Package size={16} color="#16a34a" />;
       case 'DOCUMENT':
@@ -112,8 +112,8 @@ export function GsActivityTab({ gsId }: GsActivityTabProps) {
                 padding: '0.35rem 0.75rem',
                 borderRadius: '6px',
                 border: '1px solid',
-                borderColor: activeCategory === c.id ? '#2563eb' : '#cbd5e1',
-                backgroundColor: activeCategory === c.id ? '#2563eb' : '#fff',
+                borderColor: activeCategory === c.id ? '#2a47f0' : '#cbd5e1',
+                backgroundColor: activeCategory === c.id ? '#2a47f0' : '#fff',
                 color: activeCategory === c.id ? '#fff' : '#334155',
                 fontSize: '0.8125rem',
                 fontWeight: 600,
@@ -272,7 +272,7 @@ export function GsActivityTab({ gsId }: GsActivityTabProps) {
                       style={{
                         background: 'transparent',
                         border: 'none',
-                        color: '#2563eb',
+                        color: '#2a47f0',
                         fontSize: '0.8125rem',
                         fontWeight: 600,
                         cursor: 'pointer',

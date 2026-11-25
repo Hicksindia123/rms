@@ -46,7 +46,12 @@ export const FileUpload: React.FC<FileUploadProps> = ({
   }, [value]);
 
   const showPreview = isImageDataUrl || isImageFile;
-  const fileName = value instanceof File ? value.name : typeof value === 'string' && !isImageDataUrl ? value : null;
+  const fileName =
+    value instanceof File
+      ? value.name
+      : typeof value === 'string' && !isImageDataUrl
+        ? value
+        : null;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
@@ -112,7 +117,9 @@ export const FileUpload: React.FC<FileUploadProps> = ({
             }}
           />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#0f172a', display: 'block' }}>
+            <span
+              style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#0f172a', display: 'block' }}
+            >
               Document Image Attached
             </span>
             <span style={{ fontSize: '0.75rem', color: '#64748b', display: 'block' }}>

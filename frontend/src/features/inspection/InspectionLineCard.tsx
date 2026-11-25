@@ -203,7 +203,7 @@ export const InspectionLineCard: React.FC<InspectionLineCardProps> = ({
           ? '4px solid var(--color-success, #16a34a)'
           : hasMercuryHazard
             ? '4px solid #ef4444'
-            : '4px solid var(--color-primary, #2563eb)',
+            : '4px solid var(--color-primary, #2a47f0)',
       }}
     >
       {/* Line Header */}
@@ -266,7 +266,7 @@ export const InspectionLineCard: React.FC<InspectionLineCardProps> = ({
               <span style={{ color: '#d97706', fontWeight: 600 }}>Short: {line.short_qty}</span>
             )}
             {line.excess_qty > 0 && (
-              <span style={{ color: '#2563eb', fontWeight: 600 }}>Excess: +{line.excess_qty}</span>
+              <span style={{ color: '#2a47f0', fontWeight: 600 }}>Excess: +{line.excess_qty}</span>
             )}
           </div>
         </div>

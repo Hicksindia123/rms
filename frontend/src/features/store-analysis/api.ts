@@ -1,6 +1,11 @@
 import { apiRequest } from '@/lib/api/client';
 
-import type { StoreAnalysisGs, StoreAnalysisQueueRow, StoreAnalysisSubmitIn } from './types';
+import type {
+  ManagementLineIn,
+  StoreAnalysisGs,
+  StoreAnalysisQueueRow,
+  StoreAnalysisSubmitIn,
+} from './types';
 
 const gsPath = (gsId: string) => `/store-analysis/gs/${encodeURIComponent(gsId)}`;
 
@@ -22,11 +27,16 @@ export const storeAnalysisApi = {
       idempotencyKey,
     }),
 
-  /** "Send for Management Approval" (reason required). Idempotency-Key (G-16). */
-  requestApproval: (gsId: string, storeId: string, reason: string, idempotencyKey: string) =>
+  /** DEC-75: send selected pieces (item + qty + proposal) for Management approval. */
+  sendToManagement: (
+    gsId: string,
+    lines: ManagementLineIn[],
+    reason: string | null,
+    idempotencyKey: string,
+  ) =>
     apiRequest<StoreAnalysisGs>(`${gsPath(gsId)}/management-approval`, {
       method: 'POST',
-      body: { store_id: storeId, reason },
+      body: { lines, reason },
       idempotencyKey,
     }),
 };

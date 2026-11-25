@@ -52,7 +52,7 @@ export const HazardBanner: React.FC<HazardBannerProps> = ({ hazardQty, message, 
         </div>
         <div style={{ fontSize: '0.85rem', lineHeight: 1.4 }}>
           {message ||
-            'Item will be segregated and locked into HAZARD_QUARANTINE. Safety team & RM will be alerted immediately. Downstream operational flow to functional stores is strictly blocked (G-04/G-05).'}
+            'Item will be segregated and locked into HAZARD_QUARANTINE. Safety team & RM will be alerted immediately. Downstream operational flow to functional stores is strictly blocked.'}
         </div>
         <div
           style={{

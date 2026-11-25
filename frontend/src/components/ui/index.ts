@@ -14,3 +14,4 @@ export * from './Drawer';
 export * from './Toast';
 export * from './toast-api';
 export * from './ConfirmDialog';
+export * from './QtyStepper';

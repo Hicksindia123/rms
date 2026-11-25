@@ -80,6 +80,22 @@ function buildUrl(path: string, query?: ApiRequestOptions['query']): string {
   return url.toString();
 }
 
+/** Internal rule references (e.g. "G-21: ", "DEC-75 (Q36): ", " (DEC-69)") are for logs and
+ *  developers; users see the plain sentence. The full message stays in the backend logs. */
+const RULE_REF = String.raw`(?:G|DEC|BR|AMD|Q)-?\d+[a-z]?`;
+const RULE_PREFIX = new RegExp(
+  String.raw`^(?:Guard\s+)?${RULE_REF}(?:\s*\([^)]*\))?(?:\s*[,/]\s*${RULE_REF})*\s*:\s*`,
+);
+const RULE_PAREN = new RegExp(
+  String.raw`\s*\((?:\s*(?:${RULE_REF}|DD r\d+|WF r\d+)\s*[,/;]?\s*)+\)`,
+  'g',
+);
+
+export function cleanUserMessage(message: string): string {
+  const out = message.replace(RULE_PREFIX, '').replace(RULE_PAREN, '').trim();
+  return out ? out.charAt(0).toUpperCase() + out.slice(1) : message;
+}
+
 /** The standard error envelope of a failed response (falls back to the HTTP status text). */
 async function errorFromResponse(res: Response): Promise<ApiError> {
   let code = `HTTP_${String(res.status)}`;
@@ -92,7 +108,7 @@ async function errorFromResponse(res: Response): Promise<ApiError> {
     };
     if (body.error) {
       code = body.error.code ?? code;
-      message = body.error.message ?? message;
+      message = cleanUserMessage(body.error.message ?? message);
       details = body.error.details ?? null;
       rid = body.error.request_id ?? rid;
     }

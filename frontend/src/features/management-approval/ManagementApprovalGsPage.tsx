@@ -27,7 +27,7 @@ import { StatusChip } from '@/features/goods-slips/display';
 
 import { managementApprovalApi } from './api';
 import { ApprovalStamp } from './ApprovalStamp';
-import type { ChangeIn, Decision, ManagementGs, MgmtGroup, MgmtItem } from './types';
+import type { ChangeIn, Decision, ManagementGs, MgmtGroup, MgmtItem, RequestedLine } from './types';
 
 interface Props {
   gsId: string;
@@ -170,6 +170,25 @@ export const ManagementApprovalGsPage: React.FC<Props> = ({ gsId, onBack, onOpen
       (prev[groupKey(it, g)] ?? '').trim()
         ? prev
         : { ...prev, [groupKey(it, g)]: 'Issue CN Request accepted' },
+    );
+  };
+
+  /** DEC-75: apply a store's proposal: move its pieces from the previous action to the proposal. */
+  const applyProposal = (it: MgmtItem, g: MgmtGroup, line: RequestedLine) => {
+    const gk = groupKey(it, g);
+    const from = `${gk}|${line.from_action_code}`;
+    const to = `${gk}|${line.proposed_action_code}`;
+    setSaved(false);
+    setDraft((prev) => {
+      const moved = Math.min(line.qty, prev[from] ?? 0);
+      const left = (prev[from] ?? 0) - moved;
+      const next = Object.fromEntries(Object.entries(prev).filter(([k]) => k !== from));
+      if (left > 0) next[from] = left;
+      next[to] = (prev[to] ?? 0) + moved;
+      return next;
+    });
+    setReasons((prev) =>
+      (prev[gk] ?? '').trim() ? prev : { ...prev, [gk]: 'Store proposal accepted' },
     );
   };
 
@@ -403,6 +422,49 @@ export const ManagementApprovalGsPage: React.FC<Props> = ({ gsId, onBack, onOpen
                         {dirty ? 'Was: ' : ''}
                         {decisionsText(g.decisions)}
                       </p>
+                      {(g.store_decisions ?? []).length > 0 &&
+                      decisionsText(g.store_decisions ?? []) !== decisionsText(g.decisions) ? (
+                        <p className="mt-1 text-xs text-slate-500">
+                          Store decided: {decisionsText(g.store_decisions ?? [])}
+                        </p>
+                      ) : null}
+                      {(g.requested ?? []).length > 0 ? (
+                        <ul
+                          className="m-0 mt-2 list-none space-y-1.5 p-0"
+                          data-testid={`requested-${gk}`}
+                          aria-label="Sent by the store"
+                        >
+                          {(g.requested ?? []).map((l) => (
+                            <li
+                              key={l.id}
+                              className={
+                                l.request_status === 'OPEN'
+                                  ? 'flex flex-col gap-2 rounded-xl border border-violet-200 bg-violet-50 p-2.5 text-xs text-violet-900 sm:flex-row sm:items-center sm:justify-between'
+                                  : 'rounded-xl bg-slate-100 p-2 text-xs text-slate-600'
+                              }
+                            >
+                              <span>
+                                <strong>{l.store_name ?? 'Store'}</strong> sent {l.qty} pcs ·
+                                previous action <strong>{l.from_action_label}</strong> · proposes{' '}
+                                <strong>{l.proposed_action_label}</strong>
+                                {l.request_status === 'OPEN' ? '' : ' (decided)'}
+                              </span>
+                              {data.can_edit && l.request_status === 'OPEN' ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="min-h-[44px] shrink-0"
+                                  onClick={() => {
+                                    applyProposal(it, g, l);
+                                  }}
+                                >
+                                  Apply: {l.proposed_action_label} {l.qty} pcs
+                                </Button>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
                       {(g.cn_requested_qty ?? 0) > 0 ? (
                         <div
                           className="mt-2 flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900 sm:flex-row sm:items-center sm:justify-between dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"

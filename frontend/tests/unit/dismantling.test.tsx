@@ -177,7 +177,7 @@ describe('DismantlingQueuePage', () => {
     expect(await screen.findByText('Digital Thermometer DMT')).toBeInTheDocument();
 
     // Verify DEC-18 Disposal route required banner
-    expect(screen.getByText(/Disposal route required \(DEC-18\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Disposal route required/i)).toBeInTheDocument();
     expect(screen.getByText('Enclosed Oval Unit')).toBeInTheDocument();
   });
 
@@ -247,14 +247,14 @@ describe('RecoveryPage', () => {
     fireEvent.change(pcbQtyInput, { target: { value: '1' } });
 
     // Wait for PCB G-11 expandable section to appear in DOM
-    expect(await screen.findByText(/PCB Mandatory Details \(G-11 Guard\)/i)).toBeInTheDocument();
+    expect(await screen.findByText(/PCB Mandatory Details/i)).toBeInTheDocument();
 
     // Try reviewing without selecting PCB model or supplier
     const reviewBtn = screen.getByRole('button', { name: /Review & Confirm/i });
     fireEvent.click(reviewBtn);
 
     // G-11 validation message should appear and API should NOT be called
-    expect(await screen.findByText(/G-11: PCB Model is required/i)).toBeInTheDocument();
+    expect(await screen.findByText(/PCB Model is required/i)).toBeInTheDocument();
     expect(dismantlingApi.recoverBatch).not.toHaveBeenCalled();
 
     // Now select PCB Model
@@ -266,7 +266,7 @@ describe('RecoveryPage', () => {
 
     // Try reviewing again -> supplier is missing
     fireEvent.click(reviewBtn);
-    expect(await screen.findByText(/G-11: PCB Supplier is required/i)).toBeInTheDocument();
+    expect(await screen.findByText(/PCB Supplier is required/i)).toBeInTheDocument();
     expect(dismantlingApi.recoverBatch).not.toHaveBeenCalled();
 
     // Select PCB Supplier
@@ -335,7 +335,7 @@ describe('RecoveryPage', () => {
     expect(hazToggle).toBeChecked();
 
     // Warning banner should appear for hazardous scrap (DEC-11)
-    expect(screen.getByText(/DEC-11 Enforced:/i)).toBeInTheDocument();
+    expect(screen.getByText(/Hazardous scrap cannot be disposed without/i)).toBeInTheDocument();
   });
 });
 
@@ -359,9 +359,7 @@ describe('ScrapRegisterPage', () => {
   it('renders scrap items and enforces manifest reference for hazardous disposal (DEC-11)', async () => {
     render(<ScrapRegisterPage />);
 
-    expect(
-      await screen.findByText(/Scrap & Safe Disposal Register \(DEC-11\)/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/Scrap & Safe Disposal Register/i)).toBeInTheDocument();
     expect(screen.getByText('Cracked plastic with residue')).toBeInTheDocument();
 
     // Click Dispose for hazardous item (exact button name "Dispose")
@@ -369,7 +367,7 @@ describe('ScrapRegisterPage', () => {
     fireEvent.click(disposeBtn);
 
     // Dialog opens with DEC-11 note
-    expect(await screen.findByText(/DEC-11 Compliance Requirement/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Compliance Requirement/i)).toBeInTheDocument();
 
     // Confirm Disposal button should be disabled when manifest is empty
     const confirmBtn = screen.getByRole('button', { name: /Confirm Disposal/i });

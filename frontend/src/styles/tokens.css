@@ -7,7 +7,7 @@
 
 :root {
   /* --- HSL Design Tokens (Base & Surfaces) -------------------------------- */
-  --bg-app: 210 40% 98%;              /* #f8fafc - Slate 50 */
+  --bg-app: 225 45% 97%;
   --bg-surface: 0 0% 100%;            /* #ffffff - Pure White */
   --bg-surface-raised: 210 40% 96%;   /* #f1f5f9 - Slate 100 */
   --bg-surface-sunken: 214 32% 91%;   /* #e2e8f0 - Slate 200 */
@@ -16,7 +16,7 @@
   /* --- Borders & Strokes -------------------------------------------------- */
   --border-subtle: 214 32% 91%;       /* #e2e8f0 - Slate 200 */
   --border-strong: 215 20% 75%;       /* #cbd5e1 - Slate 300 */
-  --border-focus-hsl: 221 83% 53%;    /* #2563eb - Blue 600 */
+  --border-focus-hsl: 231 87% 55%;
 
   /* --- Foreground & Typography -------------------------------------------- */
   --fg-base: 222 47% 11%;             /* #0f172a - Slate 900 */
@@ -25,10 +25,11 @@
   --fg-inverted: 0 0% 100%;           /* #ffffff */
 
   /* --- Primary Brand & Accents -------------------------------------------- */
-  --brand-primary: 221 83% 53%;        /* #2563eb - Electric Indigo/Blue */
-  --brand-primary-hover: 224 76% 48%;  /* #1d4ed8 - Blue 700 */
-  --brand-primary-subtle: 214 100% 97%;/* #eff6ff - Blue 50 */
+  --brand-primary: 231 87% 55%;
+  --brand-primary-hover: 233 73% 49%;
+  --brand-primary-subtle: 223 100% 97%;
   --brand-primary-fg: 0 0% 100%;
+  --brand-accent: 3 78% 50%; /* Hicks red */
 
   /* --- Semantic Feedback Tiers -------------------------------------------- */
   --status-success: 158 64% 42%;       /* #059669 - Emerald 600 */
@@ -67,19 +68,19 @@
 
   /* --- Diffused Modern Shadows -------------------------------------------- */
   --shadow-subtle: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
-  --shadow-card: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
+  --shadow-card: 0 1px 2px 0 rgba(15, 23, 42, 0.04), 0 4px 16px -4px rgba(15, 23, 42, 0.06);
   --shadow-popover: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.06);
   --shadow-dialog: 0 20px 25px -5px rgba(15, 23, 42, 0.10), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
 
   /* --- Backward Compatibility Hex Variables (for legacy components) -------- */
-  --color-bg: #f8fafc;
+  --color-bg: #f4f6fc;
   --color-surface: #ffffff;
   --color-border: #e2e8f0;
-  --color-border-focus: #3b82f6;
+  --color-border-focus: #3f63fb;
   --color-fg: #0f172a;
   --color-muted: #64748b;
-  --color-primary: #2563eb;
-  --color-primary-hover: #1d4ed8;
+  --color-primary: #2a47f0;
+  --color-primary-hover: #2236d6;
   --color-primary-fg: #ffffff;
   --color-danger: #e11d48;
   --color-danger-bg: #ffe4e6;
@@ -95,7 +96,7 @@
   --chart-3: #1baf7a;
 
   /* Base Typography */
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: 'Plus Jakarta Sans', Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 
 /* Custom Scrollbar for sleek SaaS UI */

@@ -185,8 +185,8 @@ export function SearchPage({ initialQuery = '', onNavigate }: SearchPageProps) {
       {directMatch && (
         <div
           style={{
-            backgroundColor: '#eff6ff',
-            border: '1px solid #bfdbfe',
+            backgroundColor: '#eef3ff',
+            border: '1px solid #bfd0ff',
             borderRadius: '8px',
             padding: '1rem 1.25rem',
             display: 'flex',
@@ -201,7 +201,7 @@ export function SearchPage({ initialQuery = '', onNavigate }: SearchPageProps) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <span
               style={{
-                backgroundColor: '#2563eb',
+                backgroundColor: '#2a47f0',
                 color: '#fff',
                 borderRadius: '6px',
                 padding: '0.35rem 0.6rem',
@@ -212,9 +212,9 @@ export function SearchPage({ initialQuery = '', onNavigate }: SearchPageProps) {
               EXACT MATCH
             </span>
             <div>
-              <div style={{ fontWeight: 600, color: '#1e3a8a' }}>{directMatch.title}</div>
+              <div style={{ fontWeight: 600, color: '#212e88' }}>{directMatch.title}</div>
               {directMatch.subtitle && (
-                <div style={{ fontSize: '0.8125rem', color: '#3b82f6' }}>
+                <div style={{ fontSize: '0.8125rem', color: '#3f63fb' }}>
                   {directMatch.subtitle}
                 </div>
               )}
@@ -253,8 +253,8 @@ export function SearchPage({ initialQuery = '', onNavigate }: SearchPageProps) {
                 padding: '0.35rem 0.75rem',
                 borderRadius: '6px',
                 border: '1px solid',
-                borderColor: activeGroup === 'ALL' ? '#2563eb' : '#cbd5e1',
-                backgroundColor: activeGroup === 'ALL' ? '#2563eb' : '#fff',
+                borderColor: activeGroup === 'ALL' ? '#2a47f0' : '#cbd5e1',
+                backgroundColor: activeGroup === 'ALL' ? '#2a47f0' : '#fff',
                 color: activeGroup === 'ALL' ? '#fff' : '#334155',
                 fontSize: '0.8125rem',
                 fontWeight: 600,
@@ -274,8 +274,8 @@ export function SearchPage({ initialQuery = '', onNavigate }: SearchPageProps) {
                   padding: '0.35rem 0.75rem',
                   borderRadius: '6px',
                   border: '1px solid',
-                  borderColor: activeGroup === g.type ? '#2563eb' : '#cbd5e1',
-                  backgroundColor: activeGroup === g.type ? '#2563eb' : '#fff',
+                  borderColor: activeGroup === g.type ? '#2a47f0' : '#cbd5e1',
+                  backgroundColor: activeGroup === g.type ? '#2a47f0' : '#fff',
                   color: activeGroup === g.type ? '#fff' : '#334155',
                   fontSize: '0.8125rem',
                   fontWeight: 600,

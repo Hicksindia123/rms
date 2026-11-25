@@ -133,7 +133,9 @@ describe('P11 Accounts entry page (per goods slip)', () => {
     expect(screen.queryByLabelText('CN No.')).not.toBeInTheDocument();
     expect(screen.getByTestId('ac-stamp')).toHaveTextContent('Digitally approved by Management');
     expect(screen.getByRole('button', { name: /Print Replacement Slip/ })).toBeInTheDocument();
-    expect(screen.getByText(/Broken Body · Dispatch New Piece/)).toBeInTheDocument();
+    const sheet = screen.getByTestId('action-sheet');
+    expect(sheet).toHaveTextContent(/Broken Body/);
+    expect(sheet).toHaveTextContent(/Dispatch New Piece/);
     // Lines are read-only: no per-line inputs.
     expect(screen.getAllByRole('textbox')).toHaveLength(1);
 

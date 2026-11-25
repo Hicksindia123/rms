@@ -215,7 +215,7 @@ describe('Step-3 a) RM Actions & Replacement Slip (P2-07)', () => {
       const unlockBtn = screen.getByRole('button', { name: /Unlock with RM Override/i });
       fireEvent.click(unlockBtn);
 
-      expect(screen.getByText('Override Inspection Rejections (DEC-33)')).toBeInTheDocument();
+      expect(screen.getByText('Override Inspection Rejections')).toBeInTheDocument();
       expect(
         screen.getByPlaceholderText(/e\.g\. Verified commercial goodwill approval/i),
       ).toBeInTheDocument();

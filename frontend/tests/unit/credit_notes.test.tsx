@@ -270,13 +270,11 @@ describe('P3-06 Step-7 Credit Notes Frontend Suite', () => {
     expect(screen.getByText('View Scan')).toBeDefined();
 
     // Right pane steps
-    expect(screen.getByText('Party Document Verification (BR-33)')).toBeDefined();
-    expect(screen.getByText('GST Portal Verification (BR-34, G-13)')).toBeDefined();
-    expect(screen.getByText('Credit Note Type & Compliance (G-13, DEC-23)')).toBeDefined();
-    expect(
-      screen.getByText('Commercial Rate Verification & Valuation (G-14, DEC-24)'),
-    ).toBeDefined();
-    expect(screen.getByText('Credit Note Voucher Issue (DEC-22)')).toBeDefined();
+    expect(screen.getByText('Party Document Verification')).toBeDefined();
+    expect(screen.getByText('GST Portal Verification')).toBeDefined();
+    expect(screen.getByText('Credit Note Type & Compliance')).toBeDefined();
+    expect(screen.getByText('Commercial Rate Verification & Valuation')).toBeDefined();
+    expect(screen.getByText('Credit Note Voucher Issue')).toBeDefined();
   });
 
   it('renders RM CN Decision page and enforces deviation reason when diverging', async () => {

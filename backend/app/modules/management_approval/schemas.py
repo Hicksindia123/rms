@@ -28,6 +28,22 @@ class DecisionOut(BaseModel):
     is_cn_request: bool = False
 
 
+class RequestLineOut(BaseModel):
+    """DEC-75: pieces a store sent to Management: previous action -> proposed action."""
+
+    id: UUID
+    request_id: UUID
+    request_status: str
+    store_name: str | None = None
+    from_action_code: str
+    from_action_label: str
+    proposed_action_code: str
+    proposed_action_label: str
+    qty: int
+    requested_at: datetime
+    requested_by_name: str | None = None
+
+
 class GroupOut(BaseModel):
     """DEC-57 group: one item + current condition (no condition = item without a split)."""
 
@@ -37,6 +53,10 @@ class GroupOut(BaseModel):
     qty: int = Field(description="G-21: pieces of this item + condition")
     decisions: list[DecisionOut] = Field(default_factory=list)
     cn_requested_qty: int = Field(0, description="DEC-74: pieces still on Issue CN Request")
+    # DEC-75: what the store decided (the "previous action", kept after Management changes).
+    store_decisions: list[DecisionOut] = Field(default_factory=list)
+    # DEC-75: pieces of this item + condition the stores sent (OPEN request first).
+    requested: list[RequestLineOut] = Field(default_factory=list)
 
 
 class ItemOut(BaseModel):
@@ -157,6 +177,8 @@ class ManagementGsOut(BaseModel):
     items: list[ItemOut] = Field(default_factory=list)
     # DEC-74: pieces still on a store's Issue CN Request (approval refused while > 0).
     cn_request_qty: int = 0
+    # DEC-75: pieces in the OPEN request (sent by the stores).
+    requested_qty: int = 0
     # The signed-in user may change decisions and approve now (ANALYSIS_COMPLETED + approve).
     can_edit: bool = False
     can_approve: bool = False
@@ -188,6 +210,8 @@ class QueueRowOut(BaseModel):
     has_issue_cn: bool = False
     # DEC-74: pieces still on a store's Issue CN Request.
     cn_request_qty: int = 0
+    # DEC-75: pieces in the OPEN request (sent by the stores).
+    requested_qty: int = 0
     waiting_store_codes: list[str] = Field(default_factory=list)
 
 

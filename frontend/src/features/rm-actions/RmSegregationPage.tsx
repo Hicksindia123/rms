@@ -213,8 +213,8 @@ export function RmSegregationPage({ gsId, onBack, onOpenSlip }: Props) {
         <div
           style={{
             padding: '1rem',
-            backgroundColor: '#eff6ff',
-            border: '1px solid #bfdbfe',
+            backgroundColor: '#eef3ff',
+            border: '1px solid #bfd0ff',
             borderRadius: '8px',
             marginBottom: '1.25rem',
           }}
@@ -222,12 +222,12 @@ export function RmSegregationPage({ gsId, onBack, onOpenSlip }: Props) {
           <div
             style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}
           >
-            <AlertTriangle size={18} color="#2563eb" />
-            <strong style={{ color: '#1e40af' }}>
+            <AlertTriangle size={18} color="#2a47f0" />
+            <strong style={{ color: '#212fad' }}>
               Post-Handover Revision (Technical Return / Discrepancy)
             </strong>
           </div>
-          <p style={{ margin: 0, fontSize: '0.875rem', color: '#1e3a8a', marginBottom: '0.5rem' }}>
+          <p style={{ margin: 0, fontSize: '0.875rem', color: '#212e88', marginBottom: '0.5rem' }}>
             Handover to store has occurred. Revising actions now requires a mandatory reason and
             will notify Accounts and Store teams if CN or replacement piece counts change.
           </p>
@@ -242,7 +242,7 @@ export function RmSegregationPage({ gsId, onBack, onOpenSlip }: Props) {
               width: '100%',
               padding: '0.5rem 0.75rem',
               borderRadius: '6px',
-              border: '1px solid #93c5fd',
+              border: '1px solid #93b0ff',
               fontSize: '0.875rem',
             }}
           />
@@ -370,7 +370,7 @@ export function RmSegregationPage({ gsId, onBack, onOpenSlip }: Props) {
                       <>
                         <Unlock size={14} color="#16a34a" />
                         <span style={{ color: '#166534', fontWeight: 600 }}>
-                          DEC-33 RM Override Active
+                          RM Override Active
                         </span>
                       </>
                     ) : (
@@ -383,7 +383,7 @@ export function RmSegregationPage({ gsId, onBack, onOpenSlip }: Props) {
                           type="button"
                           variant="ghost"
                           size="sm"
-                          style={{ color: '#2563eb', padding: '0.2rem 0.4rem', height: 'auto' }}
+                          style={{ color: '#2a47f0', padding: '0.2rem 0.4rem', height: 'auto' }}
                           onClick={() => {
                             setActiveOverrideItemId(line.gs_item_id);
                             setShowOverrideModal(true);
@@ -644,7 +644,7 @@ export function RmSegregationPage({ gsId, onBack, onOpenSlip }: Props) {
             }}
           >
             <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.125rem', fontWeight: 700 }}>
-              Override Inspection Rejections (DEC-33)
+              Override Inspection Rejections
             </h2>
             <p style={{ fontSize: '0.875rem', color: '#475569', marginBottom: '1rem' }}>
               Goods rejected by Inward Verification are locked to &quot;Not Allowed&quot;. As

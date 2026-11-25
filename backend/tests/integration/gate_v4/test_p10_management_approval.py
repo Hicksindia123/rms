@@ -77,7 +77,7 @@ async def _analysed(
     if request:
         res = await client.post(
             f"/api/v1/store-analysis/gs/{r.gs_id}/management-approval",
-            json={"store_id": r.dt_store, "reason": "Party asks for a credit note"},
+            json=_send_body(dt, "Party asks for a credit note"),
             headers=_auth(st.dt, key()),
         )
         assert res.status_code == 200, res.text
@@ -88,6 +88,23 @@ async def _analysed(
     # DEC-71 (P11): without an open request the gate passes and the GS goes on to Accounts.
     assert res.json()["status"] == ("ANALYSIS_COMPLETED" if request else "ACCOUNTS_PENDING")
     return r
+
+
+def _send_body(dt: dict[str, Any], reason: str) -> dict[str, Any]:
+    """DEC-75: DT sends 1 of its "Send New" pieces (first condition) to Management for Issue CN."""
+    g = dt["groups"][0]
+    return {
+        "lines": [
+            {
+                "gs_item_id": dt["gs_item_id"],
+                "condition_field_id": g["condition_field_id"],
+                "from_action_code": "SEND_NEW",
+                "proposed_action_code": "ISSUE_CN",
+                "qty": 1,
+            }
+        ],
+        "reason": reason,
+    }
 
 
 async def _gs(client: AsyncClient, token: str, gs_id: str) -> Any:
@@ -174,13 +191,14 @@ async def test_management_changes_approves_and_verifies(
     )
     sent = await client.post(
         f"/api/v1/store-analysis/gs/{r.gs_id}/management-approval",
-        json={"store_id": r.dt_store, "reason": "Party asks for a credit note"},
+        json=_send_body(dt, "Party asks for a credit note"),
         headers=_auth(stores.dt, key()),
     )
     assert sent.status_code == 200, sent.text
     early = (await _gs(client, mgmt, r.gs_id)).json()
     assert early["can_edit"] is False and "OP" in early["blocked_reason"]
-    assert early["open_request"]["reason"] == "Party asks for a credit note"
+    assert early["open_request"]["reason"].endswith("Note: Party asks for a credit note")
+    assert early["requested_qty"] == 1
     blocked = await _changes(
         client, mgmt, r.gs_id, [_change(_mitem(early, "DT"), 0, "credit", ISSUE_CN=2)]
     )
@@ -189,10 +207,8 @@ async def test_management_changes_approves_and_verifies(
     # The request is in Management's queue and My Work already.
     queue = (await client.get(f"{BASE}/queue", headers=_auth(mgmt))).json()
     row = next(q for q in queue if q["gs_id"] == r.gs_id)
-    assert (row["request_reason"], row["waiting_store_codes"]) == (
-        "Party asks for a credit note",
-        ["OP"],
-    )
+    assert row["request_reason"].endswith("Note: Party asks for a credit note")
+    assert (row["requested_qty"], row["waiting_store_codes"]) == (1, ["OP"])
     work = (await client.get("/api/v1/me/journey/MANAGEMENT_APPROVAL", headers=_auth(mgmt))).json()
     assert r.gs_id in {i["gs_id"] for i in work["items"]}
 

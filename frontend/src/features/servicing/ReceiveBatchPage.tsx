@@ -170,7 +170,7 @@ export function ReceiveBatchPage({ batchId, onBack, onCompleted }: Props) {
     // G-10 guard check
     if (activeLine.supports_battery && batteryCheckCode === 'BATTERY_REPLACED') {
       if (!piecesChecked || piecesChecked <= 0 || !batteriesInstalled || batteriesInstalled <= 0) {
-        setError('BATTERY_REPLACED requires pieces checked > 0 and batteries installed > 0 (G-10)');
+        setError('BATTERY_REPLACED requires pieces checked > 0 and batteries installed > 0');
         return;
       }
       if (!selectedBatteryTypeId) {
@@ -181,9 +181,7 @@ export function ReceiveBatchPage({ batchId, onBack, onCompleted }: Props) {
 
     // DEC-16 check
     if (isDirtyOrScratched && !cleaningCode) {
-      setError(
-        'Cleaning & scratch treatment result is mandatory for dirty/scratched pieces (DEC-16)',
-      );
+      setError('Cleaning & scratch treatment result is mandatory for dirty/scratched pieces');
       return;
     }
 
@@ -297,15 +295,15 @@ export function ReceiveBatchPage({ batchId, onBack, onCompleted }: Props) {
                 minHeight: '44px',
                 padding: '0.5rem 1rem',
                 borderRadius: '6px',
-                border: isSelected ? '2px solid #2563eb' : '1px solid #cbd5e1',
-                backgroundColor: isSelected ? '#eff6ff' : '#fff',
+                border: isSelected ? '2px solid #2a47f0' : '1px solid #cbd5e1',
+                backgroundColor: isSelected ? '#eef3ff' : '#fff',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.5rem',
                 whiteSpace: 'nowrap',
                 fontWeight: isSelected ? 700 : 500,
-                color: isSelected ? '#1e40af' : '#334155',
+                color: isSelected ? '#212fad' : '#334155',
               }}
             >
               {isDone ? <CheckCircle size={16} color="#16a34a" /> : null}
@@ -494,9 +492,9 @@ export function ReceiveBatchPage({ batchId, onBack, onCompleted }: Props) {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Battery size={20} color="#2563eb" />
+                <Battery size={20} color="#2a47f0" />
                 <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#0f172a' }}>
-                  Battery Check & Replacement (G-10)
+                  Battery Check & Replacement
                 </h3>
               </div>
 
@@ -548,7 +546,7 @@ export function ReceiveBatchPage({ batchId, onBack, onCompleted }: Props) {
                     }}
                     style={{ width: '20px', height: '20px' }}
                   />
-                  <span style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#2563eb' }}>
+                  <span style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#2a47f0' }}>
                     Battery Replaced (Deducts Stock)
                   </span>
                 </label>
@@ -712,7 +710,7 @@ export function ReceiveBatchPage({ batchId, onBack, onCompleted }: Props) {
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <Sparkles size={20} color="#059669" />
               <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#0f172a' }}>
-                Cleaning & Scratch Treatment (DEC-16, DEC-17)
+                Cleaning & Scratch Treatment
               </h3>
             </div>
 
@@ -984,9 +982,7 @@ export function ReceiveBatchPage({ batchId, onBack, onCompleted }: Props) {
                 <div style={{ fontWeight: 600, color: '#b91c1c', fontSize: '0.875rem' }}>
                   Non-Sellable
                 </div>
-                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                  SPM / Scrap Store (G-12)
-                </div>
+                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>SPM / Scrap Store</div>
                 <div
                   style={{
                     display: 'flex',

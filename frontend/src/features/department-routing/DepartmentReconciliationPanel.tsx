@@ -85,17 +85,17 @@ export const DepartmentReconciliationPanel: React.FC<DepartmentReconciliationPan
             {is_fully_reconciled ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
                 <ShieldCheck className="h-3.5 w-3.5" />
-                Guard G-20 Conserved
+                Conserved
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-700 dark:bg-rose-950/50 dark:text-rose-400 border border-rose-200 dark:border-rose-800">
                 <AlertTriangle className="h-3.5 w-3.5" />
-                G-20 Imbalance Detected
+                Imbalance Detected
               </span>
             )}
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            AMD-15: Counted = In Store + At Departments + Terminal Outcomes + Actioned
+            Counted = In Store + At Departments + Terminal Outcomes + Actioned
           </p>
         </div>
 

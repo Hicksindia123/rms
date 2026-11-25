@@ -15,6 +15,7 @@ import {
   USERS,
   type Device,
 } from './support/stack';
+import { decideItem, reviewAndSubmit, type AnalysisAction } from './support/analysis';
 import { lockedGs } from './support/transfer_slips';
 
 /**
@@ -52,7 +53,7 @@ const WIDTHS = [
 // no condition fields in the local masters, so they cannot pass the categorisation lock (G-19); the
 // full-flow test maps PRISMATIC to RI through the Admin API for its run and restores it afterwards.
 const CATEGORY: Record<StoreCode, string> = { DT: 'DMT', OP: 'ENCLOSED_OVAL', RI: 'PRISMATIC' };
-type Action = 'Dispatch New Piece' | 'Dispatch Repaired Piece' | 'Not Allowed';
+type Action = AnalysisAction;
 
 interface ProductInfo {
   id: string;
@@ -393,30 +394,18 @@ async function analyse(
   await expect(card).toContainText(`${store}: Ready for analysis`);
   await card.getByRole('button').click();
   const page = d.page.getByTestId('store-analysis-gs');
-  await expect(page.getByRole('heading', { name: `Analysis · ${gs.gs_no}` })).toBeVisible({
+  await expect(page.getByRole('heading', { name: `Analysis ${gs.gs_no}` })).toBeVisible({
     timeout: 20_000,
   });
   const line = page.locator('[data-testid^="analysis-item-"]').first();
-  await expect(line).not.toContainText(/Issue CN(?! Request)/); // Issue CN is Management only (DEC-69); DEC-74 Issue CN Request is the store's
-  const groups = line.locator('fieldset');
-  const n = await groups.count();
-  for (let i = 0; i < n; i += 1) {
-    const g = groups.nth(i);
-    await g.getByRole('button', { name: new RegExp(`: ${action}$`) }).click();
-    await expect(g).toContainText(/(\d+) of \1 decided/);
-  }
-  await tall(d.page, 'Submit analysis');
-  await page.getByRole('button', { name: 'Submit analysis' }).click();
-  const dialog = d.page.getByRole('dialog');
-  await expect(dialog.getByText('Submit the analysis?')).toBeVisible();
-  if (approvalReason) {
-    await dialog.getByLabel('Also send for Management approval').check();
-    await dialog.getByLabel('Reason for Management (required)').fill(approvalReason);
-    await dialog.getByRole('button', { name: 'Submit & send for approval' }).click();
-  } else {
-    await dialog.getByRole('button', { name: 'Submit', exact: true }).click();
-  }
-  await expect(page.getByText(/Analysis submitted for/)).toBeVisible({ timeout: 20_000 });
+  await expect(line).not.toContainText(/Issue CN/); // Issue CN is Management only (DEC-69, DEC-75)
+  await decideItem(line, action);
+  // DEC-75: with a reason, the store sends its pieces to Management (proposal: Issue CN).
+  await reviewAndSubmit(
+    d.page,
+    page,
+    approvalReason ? { proposal: 'Issue CN', note: approvalReason } : undefined,
+  );
   await done(d, `${vp.name}-08-analysis-${store}-${gs.gs_no.replace(/\W/g, '')}`);
 }
 
@@ -544,12 +533,12 @@ async function fullFlow(browser: Browser, vp: (typeof WIDTHS)[number]): Promise<
   for (const [store, gs] of parts) await receive(browser, vp, store, gs);
 
   // Steps 7 – 8: analysis. A's last store sends it for Management approval with its part.
-  await analyse(browser, vp, 'DT', a, 'Dispatch New Piece');
-  await analyse(browser, vp, 'OP', a, 'Dispatch Repaired Piece');
+  await analyse(browser, vp, 'DT', a, 'Send New Pieces to Party');
+  await analyse(browser, vp, 'OP', a, 'Send Repaired Pieces to Party');
   await analyse(browser, vp, 'RI', a, 'Not Allowed', 'Party asks for a credit note');
   await expect.poll(() => gsStatus(a.id)).toBe('ANALYSIS_COMPLETED');
-  await analyse(browser, vp, 'DT', b, 'Dispatch New Piece');
-  await analyse(browser, vp, 'OP', b, 'Dispatch Repaired Piece');
+  await analyse(browser, vp, 'DT', b, 'Send New Pieces to Party');
+  await analyse(browser, vp, 'OP', b, 'Send Repaired Pieces to Party');
   await expect.poll(() => gsStatus(b.id)).toBe('ACCOUNTS_PENDING');
   await analyse(browser, vp, 'RI', c, 'Not Allowed');
   await expect.poll(() => gsStatus(c.id)).toBe('NOT_ALLOWED_HOLD'); // Q21

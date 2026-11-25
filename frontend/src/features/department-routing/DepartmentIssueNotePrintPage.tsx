@@ -101,7 +101,7 @@ export const DepartmentIssueNotePrintPage: React.FC<DepartmentIssueNotePrintPage
             </div>
             <h1 className="text-2xl font-black tracking-tight mt-1">DEPARTMENT ISSUE NOTE (DIN)</h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              AMD-10 Internal Transfer Document • Intermediate Store to Department
+              Internal Transfer Document • Intermediate Store to Department
             </p>
           </div>
 
@@ -241,7 +241,7 @@ export const DepartmentIssueNotePrintPage: React.FC<DepartmentIssueNotePrintPage
         {/* Footer Note */}
         <div className="mt-12 text-center text-[10px] text-slate-400 border-t border-slate-100 dark:border-slate-800 pt-3">
           This is an official stock issue note generated under Return Management System (RMS) Guard
-          G-20 reconciliation guidelines.
+          reconciliation guidelines.
         </div>
       </div>
     </div>

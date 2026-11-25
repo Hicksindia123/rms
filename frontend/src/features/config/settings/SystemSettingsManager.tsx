@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Sliders, CheckCircle2, AlertCircle } from 'lucide-react';
 
+import { apiRequest, toApiError } from '@/lib/api/client';
+
 export interface SettingItem {
   id: string;
   key: string;
@@ -25,9 +27,8 @@ export function SystemSettingsManager() {
   const [contrastAA, setContrastAA] = useState<boolean>(true);
 
   const loadSettings = () => {
-    fetch('/api/v1/config/settings')
-      .then((res) => res.json())
-      .then((data: SettingItem[]) => {
+    apiRequest<SettingItem[]>('/config/settings')
+      .then((data) => {
         setSettings(data);
         const col = data.find((s) => s.key === 'branding_primary_color');
         if (col && typeof col.value === 'string') {
@@ -38,7 +39,12 @@ export function SystemSettingsManager() {
           setLogoUrl(logo.value);
         }
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        const e = toApiError(err);
+        setError(
+          `Could not load the settings: ${e.message}${e.requestId ? ` (Request ID: ${e.requestId})` : ''}`,
+        );
+      });
   };
 
   useEffect(() => {
@@ -51,22 +57,24 @@ export function SystemSettingsManager() {
       return;
     }
     let ignore = false;
-    fetch('/api/v1/config/settings/branding/contrast-check', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        foreground_color: '#ffffff',
-        background_color: primaryColor,
-      }),
-    })
-      .then((res) => res.json())
-      .then((data: { contrast_ratio: number; normal_text_aa: boolean }) => {
+    apiRequest<{ contrast_ratio: number; normal_text_aa: boolean }>(
+      '/config/settings/branding/contrast-check',
+      {
+        method: 'POST',
+        body: { foreground_color: '#ffffff', background_color: primaryColor },
+      },
+    )
+      .then((data) => {
         if (!ignore) {
           setContrastRatio(data.contrast_ratio);
           setContrastAA(data.normal_text_aa);
         }
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        // The contrast hint is advisory; the colour itself is still saved by the user.
+        if (!ignore) setContrastRatio(null);
+        console.warn('contrast check failed', toApiError(err).message);
+      });
     return () => {
       ignore = true;
     };
@@ -76,21 +84,15 @@ export function SystemSettingsManager() {
     setError(null);
     setSuccess(null);
     try {
-      const res = await fetch(`/api/v1/config/settings/${key}`, {
+      await apiRequest(`/config/settings/${encodeURIComponent(key)}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          value: newValue,
-          reason: `Admin updated setting ${key}`,
-        }),
+        body: { value: newValue, reason: `Admin updated setting ${key}` },
       });
-      if (!res.ok) {
-        throw new Error(`Failed to update setting (${String(res.status)})`);
-      }
       setSuccess(`Setting '${key}' updated successfully.`);
       loadSettings();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      const e = toApiError(err);
+      setError(`${e.message}${e.requestId ? ` (Request ID: ${e.requestId})` : ''}`);
     }
   }
 
@@ -141,8 +143,7 @@ export function SystemSettingsManager() {
               System Settings & Provisional Business Rules
             </h2>
             <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.875rem', color: '#64748b' }}>
-              Master Plan §5 provisional business rules (DEC-01 to DEC-20) and application shell
-              branding settings.
+              Provisional business rules and application shell branding settings.
             </p>
           </div>
         </div>
@@ -157,9 +158,9 @@ export function SystemSettingsManager() {
             style={{
               padding: '0.5rem 1rem',
               borderRadius: '6px',
-              border: activeCategory === 'provisional' ? '2px solid #3b82f6' : '1px solid #cbd5e1',
-              backgroundColor: activeCategory === 'provisional' ? '#eff6ff' : '#ffffff',
-              color: activeCategory === 'provisional' ? '#1d4ed8' : '#334155',
+              border: activeCategory === 'provisional' ? '2px solid #3f63fb' : '1px solid #cbd5e1',
+              backgroundColor: activeCategory === 'provisional' ? '#eef3ff' : '#ffffff',
+              color: activeCategory === 'provisional' ? '#2236d6' : '#334155',
               fontWeight: 600,
               fontSize: '0.875rem',
               cursor: 'pointer',
@@ -175,9 +176,9 @@ export function SystemSettingsManager() {
             style={{
               padding: '0.5rem 1rem',
               borderRadius: '6px',
-              border: activeCategory === 'branding' ? '2px solid #3b82f6' : '1px solid #cbd5e1',
-              backgroundColor: activeCategory === 'branding' ? '#eff6ff' : '#ffffff',
-              color: activeCategory === 'branding' ? '#1d4ed8' : '#334155',
+              border: activeCategory === 'branding' ? '2px solid #3f63fb' : '1px solid #cbd5e1',
+              backgroundColor: activeCategory === 'branding' ? '#eef3ff' : '#ffffff',
+              color: activeCategory === 'branding' ? '#2236d6' : '#334155',
               fontWeight: 600,
               fontSize: '0.875rem',
               cursor: 'pointer',
@@ -193,9 +194,9 @@ export function SystemSettingsManager() {
             style={{
               padding: '0.5rem 1rem',
               borderRadius: '6px',
-              border: activeCategory === 'general' ? '2px solid #3b82f6' : '1px solid #cbd5e1',
-              backgroundColor: activeCategory === 'general' ? '#eff6ff' : '#ffffff',
-              color: activeCategory === 'general' ? '#1d4ed8' : '#334155',
+              border: activeCategory === 'general' ? '2px solid #3f63fb' : '1px solid #cbd5e1',
+              backgroundColor: activeCategory === 'general' ? '#eef3ff' : '#ffffff',
+              color: activeCategory === 'general' ? '#2236d6' : '#334155',
               fontWeight: 600,
               fontSize: '0.875rem',
               cursor: 'pointer',
@@ -432,7 +433,7 @@ export function SystemSettingsManager() {
                     padding: '0.5rem 1rem',
                     borderRadius: '6px',
                     border: 'none',
-                    backgroundColor: '#2563eb',
+                    backgroundColor: '#2a47f0',
                     color: '#ffffff',
                     fontWeight: 600,
                     fontSize: '0.875rem',
@@ -504,7 +505,7 @@ export function SystemSettingsManager() {
                     padding: '0.5rem 1rem',
                     borderRadius: '6px',
                     border: 'none',
-                    backgroundColor: '#2563eb',
+                    backgroundColor: '#2a47f0',
                     color: '#ffffff',
                     fontWeight: 600,
                     fontSize: '0.875rem',

@@ -334,22 +334,35 @@ async def test_send_for_management_approval(
     r = await _ready(client, storage, actors, masters, routing_products, rm, stores)
     url = f"{BASE}/gs/{r.gs_id}/management-approval"
 
-    async def send(token: str, store: str, reason: str, idem: str | None = None) -> Any:
+    state = (await _state(client, stores.dt, r.gs_id)).json()
+    dt = _item(state, "DT")
+
+    def line(item: dict[str, Any], group: int, qty: int, frm: str = "SEND_NEW") -> dict[str, Any]:
+        g = item["groups"][group]
+        return {
+            "gs_item_id": item["gs_item_id"],
+            "condition_field_id": g["condition_field_id"],
+            "from_action_code": frm,
+            "proposed_action_code": "ISSUE_CN",
+            "qty": qty,
+        }
+
+    async def send(
+        token: str, lines: list[dict[str, Any]], reason: str | None = None, idem: str | None = None
+    ) -> Any:
         return await client.post(
-            url, json={"store_id": store, "reason": reason}, headers=_auth(token, idem or key())
+            url, json={"lines": lines, "reason": reason}, headers=_auth(token, idem or key())
         )
 
-    assert (await send(rm, r.dt_store, "Please check")).status_code == 403
-    assert (await send(stores.op, r.dt_store, "Please check")).status_code == 403
-    assert (await send(stores.dt, r.dt_store, "ab")).status_code == 422
+    assert (await send(rm, [line(dt, 0, 1)], "Please check")).status_code == 403
+    assert (await send(stores.dt, [line(dt, 0, 1)], "ab")).status_code == 422
+    assert (await send(stores.dt, [], "Please check")).status_code == 422  # pieces required
 
-    # Q36 (user 2026-11-23): a store submits its own analysis before it sends the GS.
-    before = await send(stores.dt, r.dt_store, "Party asks for a credit note")
+    # Q36 / DEC-75: a store sends pieces with or after its own analysis submission.
+    before = await send(stores.dt, [line(dt, 0, 1)], "Party asks for a credit note")
     assert before.status_code == 409
     assert before.json()["error"]["code"] == "ANALYSIS_NOT_SUBMITTED"
-    state = (await _state(client, stores.dt, r.gs_id)).json()
     assert state["can_request_approval"] is False and state["approval_store_ids"] == []
-    dt = _item(state, "DT")
     done = await _submit(
         client,
         stores.dt,
@@ -359,31 +372,37 @@ async def test_send_for_management_approval(
     )
     assert done.status_code == 200, done.text
     assert done.json()["can_request_approval"] is True
-    # OP has not submitted (its goods are still at a department).
-    op_send = await send(stores.op, r.op_store, "Another reason")
-    assert op_send.status_code == 409
-    assert op_send.json()["error"]["code"] == "ANALYSIS_NOT_SUBMITTED"
+    assert done.json()["open_approval_request"] is None  # nothing selected = nothing sent
+    # OP cannot send DT's pieces.
+    other = await send(stores.op, [line(dt, 0, 1)], "Another reason")
+    assert other.status_code == 403
+    assert other.json()["error"]["code"] == "ITEM_OF_OTHER_STORE"
 
-    res = await send(stores.dt, r.dt_store, "Party asks for a credit note")
+    res = await send(stores.dt, [line(dt, 0, 1)], "Party asks for a credit note")
     assert res.status_code == 200, res.text
     body = res.json()
     req = body["open_approval_request"]
-    assert (req["store_id"], req["reason"], req["status"]) == (
-        r.dt_store,
-        "Party asks for a credit note",
-        "OPEN",
-    )
-    assert body["can_request_approval"] is False
-    again = await send(stores.dt, r.dt_store, "Another reason")
-    assert again.status_code == 409
-    assert again.json()["error"]["code"] == "APPROVAL_ALREADY_REQUESTED"
+    assert (req["store_id"], req["status"]) == (r.dt_store, "OPEN")
+    assert req["reason"].endswith("Note: Party asks for a credit note")
+    assert [
+        (x["from_action_code"], x["proposed_action_code"], x["qty"]) for x in body["request_lines"]
+    ] == [("SEND_NEW", "ISSUE_CN", 1)]
+    # DEC-75: more pieces join the same OPEN request; the free qty is enforced.
+    assert body["can_request_approval"] is True
+    too_many = await send(stores.dt, [line(dt, 0, 2)])
+    assert too_many.status_code == 422
+    assert too_many.json()["error"]["code"] == "QTY_EXCEEDS_FREE"
+    again = await send(stores.dt, [line(dt, 0, 1), line(dt, 1, 1)])
+    assert again.status_code == 200, again.text
+    assert [q["status"] for q in again.json()["approval_requests"]] == ["OPEN"]
+    assert sum(x["qty"] for x in again.json()["request_lines"]) == 3
     events = fetch_all(
         as_admin(db_conn),
         "select event_type from public.notification_events where gs_id = :g"
         " and event_type = 'MANAGEMENT_APPROVAL_REQUESTED'",
         g=r.gs_id,
     )
-    assert len(events) == 1
+    assert len(events) == 2
     # The OP view shows the open request too.
     op_state = (await _state(client, stores.op, r.gs_id)).json()
     assert op_state["open_approval_request"]["id"] == req["id"]

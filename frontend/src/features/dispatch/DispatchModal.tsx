@@ -76,9 +76,7 @@ export function DispatchModal({ item, isOpen, onClose, onSuccess }: Props) {
       return;
     }
     if (isOverdispatch && !overrideReason.trim()) {
-      setError(
-        'RM override_reason is required when dispatching more than planned quantity (DEC-33)',
-      );
+      setError('RM override_reason is required when dispatching more than planned quantity');
       return;
     }
 
@@ -169,12 +167,12 @@ export function DispatchModal({ item, isOpen, onClose, onSuccess }: Props) {
           {isSendRepaired ? (
             <div className="p-3 rounded-lg bg-teal-50/60 border border-teal-200 text-teal-900 dark:bg-teal-950/20 dark:border-teal-900/50 dark:text-teal-300 text-xs">
               <strong>SEND_REPAIRED:</strong> Consumes FUNCTIONAL_REPAIRED stock from Intermediate
-              or Main Store (G-04) into DISPATCHED location.
+              or Main Store into DISPATCHED location.
             </div>
           ) : (
             <div className="p-3 rounded-lg bg-blue-50/60 border border-blue-200 text-blue-900 dark:bg-blue-950/20 dark:border-blue-900/50 dark:text-blue-300 text-xs">
-              <strong>SEND_NEW (DEC-26):</strong> Dispatched from fresh Main Store stock outside the
-              RMS returned-goods ledger. No lot is consumed.
+              <strong>SEND_NEW:</strong> Dispatched from fresh Main Store stock outside the RMS
+              returned-goods ledger. No lot is consumed.
             </div>
           )}
 
@@ -200,7 +198,7 @@ export function DispatchModal({ item, isOpen, onClose, onSuccess }: Props) {
             <div className="p-3 rounded-lg bg-amber-50/80 border border-amber-300 text-amber-900 dark:bg-amber-950/20 dark:border-amber-900/50 dark:text-amber-300 text-xs space-y-1">
               <div className="flex items-center gap-1 font-semibold">
                 <AlertTriangle className="w-4 h-4 text-amber-600" />
-                Over-Dispatch Warning (DEC-33)
+                Over-Dispatch Warning
               </div>
               <p>
                 Quantity exceeds pending RM allocation ({item.pending_qty} pcs). An RM override

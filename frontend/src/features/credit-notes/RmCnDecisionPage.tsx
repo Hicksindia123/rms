@@ -149,9 +149,7 @@ export function RmCnDecisionPage({ gsId, onBack, onSubmitted }: Props) {
     setSuccessMsg(null);
 
     if (hasDeviation && !deviationReason.trim()) {
-      setError(
-        'A deviation reason is mandatory when diverging from the planned RM action (DEC-13).',
-      );
+      setError('A deviation reason is mandatory when diverging from the planned RM action.');
       return;
     }
 
@@ -391,7 +389,7 @@ export function RmCnDecisionPage({ gsId, onBack, onSubmitted }: Props) {
           <div className="p-4 rounded-xl border border-amber-300 bg-amber-50/70 dark:bg-amber-950/20 dark:border-amber-800 space-y-3">
             <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200 font-semibold text-sm">
               <AlertTriangle className="w-4 h-4 text-amber-600" />
-              Deviation Reason Required (DEC-13)
+              Deviation Reason Required
             </div>
             <p className="text-xs text-amber-800 dark:text-amber-300">
               One or more items diverge from the planned RM action. Please provide a clear

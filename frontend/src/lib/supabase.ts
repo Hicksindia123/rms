@@ -14,7 +14,9 @@ function resolveSupabaseUrl(): string {
     window.location.hostname !== 'localhost' &&
     window.location.hostname !== '127.0.0.1'
   ) {
-    return rawUrl.replace('127.0.0.1', window.location.hostname).replace('localhost', window.location.hostname);
+    return rawUrl
+      .replace('127.0.0.1', window.location.hostname)
+      .replace('localhost', window.location.hostname);
   }
   return rawUrl;
 }

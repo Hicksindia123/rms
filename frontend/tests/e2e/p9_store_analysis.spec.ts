@@ -8,16 +8,18 @@ import {
   gsStatus,
   USERS,
 } from './support/stack';
+import { decideGroup, reviewAndSubmit } from './support/analysis';
 import { lockedGs, productOf } from './support/transfer_slips';
 
 /**
  * Phase P9 (docs/RMS_PHASE_PROMPTS_20-11-2026.md; DEC-69) against the REAL local stack, at 360 px
  * and 1280 px. Setup through the API: one locked Replacement GS with a DT (DMT) line of 3; the RM
  * generates the slip, the DT store acknowledges it and routes every piece "Issue to Store" (no
- * work), so its part is ready for analysis. The DT store user opens "Analysis", decides each
- * condition (Dispatch New / Dispatch Repaired / Not Allowed; no Issue CN) and submits; the GS
- * becomes Analysis Completed; then (Q36) it sends the GS for Management approval with a reason. No console errors, no
- * horizontal scroll, touch targets ≥ 44 px.
+ * work), so its part is ready for analysis. The DT store user opens "Analysis", gives each
+ * condition its verdict (Allowed → Send New Pieces / Not Allowed; DEC-75), sends the first
+ * condition's pieces to Management (proposal Issue CN) with the submission; the GS becomes Analysis
+ * Completed and waits for Management. No console errors, no horizontal scroll, touch targets
+ * ≥ 44 px.
  */
 const DT_STORE = 'dtstore@rms.local';
 const WIDTHS = [
@@ -97,62 +99,46 @@ test.describe('P9 store analysis', () => {
       await card.getByRole('button').click();
 
       const page = dt.page.getByTestId('store-analysis-gs');
-      await expect(page.getByRole('heading', { name: `Analysis · ${gs.gs_no}` })).toBeVisible({
+      await expect(page.getByRole('heading', { name: `Analysis ${gs.gs_no}` })).toBeVisible({
         timeout: 20_000,
       });
       const line = page.getByTestId('analysis-item-1');
       await expect(line).toBeVisible();
-      // Issue CN itself stays Management's (DEC-70); DEC-74 adds the store's Issue CN Request.
-      await expect(line).not.toContainText(/Issue CN(?! Request)/);
-      const submit = page.getByRole('button', { name: 'Submit analysis' });
-      await expect(submit).toBeDisabled();
-      // Q36: no "Send for Management Approval" before the store's own submission.
-      await expect(page.getByRole('button', { name: /Send for Management Approval/ })).toHaveCount(
+      // Issue CN stays Management's (DEC-70); step 1 offers only the two verdicts (DEC-75).
+      await expect(line).not.toContainText(/Issue CN/);
+      await expect(line).toContainText('Allowed');
+      await expect(line).toContainText('Not Allowed');
+      const review = page.getByRole('button', { name: /Review & submit/ });
+      await expect(review).toBeDisabled();
+      // Nothing to send to Management before the store's own submission.
+      await expect(page.getByRole('button', { name: /Send for Management approval/ })).toHaveCount(
         0,
       );
-      const dialog = dt.page.getByRole('dialog');
 
-      // Decide: the first condition all "Dispatch New Piece" by the touch shortcut, the others
-      // "Not Allowed"; then fix the first one to 1 new + rest repaired by typing.
+      // Decide: the first condition all Allowed → sent as new pieces, the others Not Allowed.
       const groups = line.locator('fieldset');
       const count = await groups.count();
       for (let i = 0; i < count; i += 1) {
         const g = groups.nth(i);
-        const shortcut = g.getByRole('button', {
-          name: i === 0 ? /: Dispatch New Piece$/ : /: Not Allowed$/,
+        const verdict = g.getByRole('button', {
+          name: i === 0 ? /^All \d+ pcs Allowed$/ : /^All \d+ pcs Not Allowed$/,
         });
-        expect((await shortcut.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
-        await shortcut.click();
-        await expect(g).toContainText(/(\d+) of \1 decided/);
+        expect((await verdict.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+        await decideGroup(g, i === 0 ? 'Send New Pieces to Party' : 'Not Allowed');
       }
-      await expect(submit).toBeEnabled();
-      expect((await submit.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+      await expect(review).toBeEnabled();
       await expectNoHorizontalOverflow(dt.page);
       await dt.page.screenshot({ path: `test-results/p9/${vp.name}-decided.png`, fullPage: true });
 
-      await submit.click();
-      await expect(dialog.getByText('Submit the analysis?')).toBeVisible();
-      await dialog.getByLabel('Remarks (optional)').fill('Checked on the bench');
-      // Q36 + DEC-71 (P11): the only store's submission would send the GS on to Accounts, so the
-      // request for Management approval (reason) goes with the submission.
-      await dialog.getByLabel('Also send for Management approval').check();
-      const send = dialog.getByRole('button', { name: 'Submit & send for approval' });
-      await expect(send).toBeDisabled(); // a reason is required
-      await dialog
-        .getByLabel('Reason for Management (required)')
-        .fill('Party asks for a credit note');
-      expect((await send.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
-      await expectNoHorizontalOverflow(dt.page);
-      await dt.page.screenshot({ path: `test-results/p9/${vp.name}-approval.png`, fullPage: true });
-      await send.click();
-      await expect(page.getByText(/Analysis submitted for/)).toBeVisible({ timeout: 20_000 });
+      // The only store's submission would send the GS on to Accounts; the store sends its
+      // first condition's pieces to Management (proposal: Issue CN) with the submission.
+      await reviewAndSubmit(dt.page, page, { proposal: 'Issue CN', note: 'Party asks for a CN' });
       await expect(page).toContainText('Every store has submitted');
-      await expect(page.getByRole('button', { name: 'Submit analysis' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /Review & submit/ })).toHaveCount(0);
       await expect.poll(() => gsStatus(gs.id)).toBe('ANALYSIS_COMPLETED');
-      await expect(page.getByTestId('approval-request')).toContainText(
-        'Party asks for a credit note',
-        { timeout: 20_000 },
-      );
+      await expect(page.getByTestId('approval-request')).toContainText('→ Issue CN', {
+        timeout: 20_000,
+      });
       await expectNoHorizontalOverflow(dt.page);
       await dt.page.screenshot({ path: `test-results/p9/${vp.name}-done.png`, fullPage: true });
       expect(dt.errors).toEqual([]);

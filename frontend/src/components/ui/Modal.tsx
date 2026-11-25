@@ -51,19 +51,22 @@ export const Modal: React.FC<ModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
-      className="fixed inset-0 z-[1000] flex items-center justify-center p-3 sm:p-5 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-150"
+      className="fixed inset-0 z-[1000] flex items-center justify-center p-3 sm:p-5 bg-[#0b1230]/55 backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
         className={cn(
-          'w-full bg-white rounded-2xl shadow-dialog border border-slate-200/80 max-h-[92vh] flex flex-col overflow-hidden transition-all transform animate-in zoom-in-95 duration-150',
+          'w-full bg-white rounded-3xl shadow-[0_32px_80px_-24px_rgba(11,18,48,0.5)] border border-white/60 max-h-[92vh] flex flex-col overflow-hidden animate-fade-up',
           sizeClasses[size],
         )}
       >
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3 flex-shrink-0 bg-slate-50/50">
-          <h2 id={titleId} className="text-base font-semibold text-slate-900 leading-snug">
+        <div className="px-5 py-4 sm:px-6 border-b border-slate-100 flex items-center justify-between gap-3 flex-shrink-0 bg-gradient-to-r from-brand-50/80 to-white">
+          <h2
+            id={titleId}
+            className="m-0 text-base sm:text-lg font-bold tracking-tight text-slate-900 leading-snug"
+          >
             {title}
           </h2>
           <button
@@ -81,7 +84,7 @@ export const Modal: React.FC<ModalProps> = ({
         </div>
 
         {footer ? (
-          <div className="px-5 py-3.5 border-t border-slate-100 bg-slate-50/80 flex items-center justify-end gap-2.5 flex-shrink-0">
+          <div className="px-5 py-3.5 sm:px-6 border-t border-slate-100 bg-slate-50/80 flex items-center justify-end gap-2.5 flex-shrink-0 [&>*]:w-full sm:[&>*]:w-auto">
             {footer}
           </div>
         ) : null}

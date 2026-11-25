@@ -57,6 +57,7 @@ from app.modules.management_approval.schemas import (
     ItemOut,
     ManagementGsOut,
     QueueRowOut,
+    RequestLineOut,
     RequestOut,
     RevisionOut,
     StampOut,
@@ -289,6 +290,20 @@ class ManagementApprovalService:
                     is_cn_request=a["action_code"] == CN_REQUEST_ACTION,
                 )
             )
+        # DEC-75: the store's own decisions and the pieces it sent, per item + condition.
+        store_dec: dict[tuple[UUID, UUID | None], list[DecisionOut]] = {}
+        for a in repo.store_decisions(session, gs_id):
+            store_dec.setdefault((a["gs_item_id"], a["condition_field_id"]), []).append(
+                DecisionOut(action_code=a["action_code"], label=a["label"], qty=a["qty"])
+            )
+        sent: dict[tuple[UUID, UUID | None], list[RequestLineOut]] = {}
+        requested_qty = 0
+        for ln in repo.request_lines(session, gs_id):
+            sent.setdefault((ln["gs_item_id"], ln["condition_field_id"]), []).append(
+                RequestLineOut.model_validate(ln)
+            )
+            if ln["request_status"] == "OPEN":
+                requested_qty += int(ln["qty"])
         options: dict[UUID, list[ActionOptionOut]] = {}
         items: dict[UUID, ItemOut] = {}
         for g in repo.groups(session, gs_id):
@@ -319,6 +334,11 @@ class ManagementApprovalService:
                     qty=g["available_qty"],
                     decisions=group_decisions,
                     cn_requested_qty=sum(d.qty for d in group_decisions if d.is_cn_request),
+                    store_decisions=store_dec.get((g["gs_item_id"], g["condition_field_id"]), []),
+                    requested=sorted(
+                        sent.get((g["gs_item_id"], g["condition_field_id"]), []),
+                        key=lambda x: x.request_status != "OPEN",
+                    ),
                 )
             )
         requests = [RequestOut.model_validate(r) for r in repo.list_requests(session, gs_id)]
@@ -345,6 +365,7 @@ class ManagementApprovalService:
             stores=stores,
             items=item_list,
             cn_request_qty=sum(g.cn_requested_qty for it in item_list for g in it.groups),
+            requested_qty=requested_qty,
             can_edit=may_approve
             and (gs["status"] == EDIT_STATUS or gs["status"] in REOPEN_STATUSES),
             can_approve=may_approve and gs["status"] == EDIT_STATUS,

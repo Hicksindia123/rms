@@ -471,6 +471,13 @@ def route_to_accounts(
     return ACCOUNTS_STATUS
 
 
+def accounts_entry_completed(session: Session, gs_id: UUID) -> bool:
+    """True when Accounts completed the CURRENT Replacement Slip of the goods slip (G-22: it is
+    never reopened). Service-to-service API for the store analysis (DEC-75)."""
+    slip = repo.current_ac_slip(session, gs_id)
+    return slip is not None and repo.get_completion(session, slip["id"]) is not None
+
+
 def reopen_for_management(session: Session, gs_id: UUID, actor: CurrentUser, reason: str) -> bool:
     """DEC-71: Management changes a goods slip at Accounts (entry not completed) or on hold. The
     current Replacement Slip is withdrawn (SUPERSEDED, Accounts told) and the goods slip returns to

@@ -353,8 +353,8 @@ export function FinalActionsPage({ gsId, onBack }: Props) {
             {locked
               ? 'Actions are finalised. Use Revise to change them.'
               : balanced
-                ? 'Every line and condition is fully allocated (G-21).'
-                : 'Each line must allocate exactly its available qty, per condition (G-21).'}
+                ? 'Every line and condition is fully allocated.'
+                : 'Each line must allocate exactly its available qty, per condition.'}
           </p>
           <div className="flex flex-wrap gap-2">
             {!locked ? (

@@ -232,11 +232,14 @@ export const RmRoutingPlanModal: React.FC<RmRoutingPlanModalProps> = ({
                         </span>
                         <span className="text-slate-500 dark:text-slate-400">
                           {' '}
-                          • {l.source_bucket_label ?? 'All pieces'} → {l.department_label} •{' '}
-                          {l.qty} pcs
+                          • {l.source_bucket_label ?? 'All pieces'} → {l.department_label} • {l.qty}{' '}
+                          pcs
                         </span>
                         {l.routing_no ? (
-                          <span className="text-slate-500 dark:text-slate-400"> • {l.routing_no}</span>
+                          <span className="text-slate-500 dark:text-slate-400">
+                            {' '}
+                            • {l.routing_no}
+                          </span>
                         ) : null}
                       </div>
                       <div className="flex items-center gap-2">
@@ -357,7 +360,9 @@ export const RmRoutingPlanModal: React.FC<RmRoutingPlanModalProps> = ({
                                   {r.original !== null ? ` (counted ${String(r.original)})` : ''}
                                 </span>
                               </span>
-                              <span className={over ? 'text-rose-600 font-semibold' : 'text-slate-500'}>
+                              <span
+                                className={over ? 'text-rose-600 font-semibold' : 'text-slate-500'}
+                              >
                                 {r.free === 0
                                   ? `Fully routed (${String(r.total)} pcs)`
                                   : `${String(used)} of ${String(r.free)} free pcs`}
@@ -415,7 +420,7 @@ export const RmRoutingPlanModal: React.FC<RmRoutingPlanModalProps> = ({
           <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-medium">
               <ShieldCheck className="h-4 w-4 shrink-0" />
-              <span>No stock moves until the Store Manager issues (G-20 checked)</span>
+              <span>No stock moves until the Store Manager issues</span>
             </div>
             <div className="flex flex-col-reverse sm:flex-row gap-2.5">
               <button

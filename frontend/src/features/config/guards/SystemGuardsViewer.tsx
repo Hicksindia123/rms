@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Lock, ShieldCheck, AlertCircle } from 'lucide-react';
+import { apiRequest, toApiError } from '@/lib/api/client';
 
 export interface SystemGuardItem {
   code: string;
@@ -18,14 +19,13 @@ export function SystemGuardsViewer() {
     async function loadGuards() {
       try {
         setLoading(true);
-        const res = await fetch('/api/v1/config/system-guards');
-        if (!res.ok) {
-          throw new Error(`Failed to load system guards (${String(res.status)})`);
-        }
-        const data = (await res.json()) as SystemGuardItem[];
+        const data = await apiRequest<SystemGuardItem[]>('/config/system-guards');
         setGuards(data);
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : 'Unknown error');
+        const e = toApiError(err);
+        setError(
+          `Failed to load system guards: ${e.message}${e.requestId ? ` (Request ID: ${e.requestId})` : ''}`,
+        );
       } finally {
         setLoading(false);
       }

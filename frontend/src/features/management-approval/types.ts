@@ -31,6 +31,25 @@ export interface MgmtGroup {
   decisions: Decision[];
   /** DEC-74: pieces still on a store's Issue CN Request. */
   cn_requested_qty?: number;
+  /** DEC-75: what the store decided (kept after Management changes). */
+  store_decisions?: Decision[];
+  /** DEC-75: pieces the stores sent to Management (OPEN request first). */
+  requested?: RequestedLine[];
+}
+
+/** DEC-75: pieces a store sent to Management: previous action -> proposed action. */
+export interface RequestedLine {
+  id: string;
+  request_id: string;
+  request_status: string;
+  store_name?: string | null;
+  from_action_code: string;
+  from_action_label: string;
+  proposed_action_code: string;
+  proposed_action_label: string;
+  qty: number;
+  requested_at: string;
+  requested_by_name?: string | null;
 }
 
 export interface MgmtItem {
@@ -127,6 +146,8 @@ export interface ManagementGs {
   items: MgmtItem[];
   /** DEC-74: pieces still on a store's Issue CN Request (approval refused while > 0). */
   cn_request_qty?: number;
+  /** DEC-75: pieces in the OPEN request (sent by the stores). */
+  requested_qty?: number;
   can_edit: boolean;
   can_approve: boolean;
   blocked_reason?: string | null;
@@ -156,6 +177,8 @@ export interface QueueRow {
   has_issue_cn: boolean;
   /** DEC-74: pieces still on a store's Issue CN Request. */
   cn_request_qty?: number;
+  /** DEC-75: pieces in the OPEN request (sent by the stores). */
+  requested_qty?: number;
   waiting_store_codes: string[];
 }
 

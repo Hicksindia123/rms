@@ -432,8 +432,8 @@ export function AccountsEntryPage({ gsId, onBack, onOpenGs, onOpenPartyNotificat
                     ? 'Everything is entered. Complete the goods slip.'
                     : 'Every line is entered. Complete to generate the Dispatch Slip.'
                   : gsEntry
-                    ? 'Partial saves are fine; complete once everything is entered (G-22).'
-                    : 'Partial saves are fine; complete once every line is entered (G-22).'}
+                    ? 'Partial saves are fine; complete once everything is entered.'
+                    : 'Partial saves are fine; complete once every line is entered.'}
           </p>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -678,17 +678,82 @@ function GsEntryCard({
   );
 }
 
-/** DEC-71: the Replacement Slip lines of a store-flow goods slip (read-only). */
+/** DEC-71 / DEC-75: the action sheet of a store-flow goods slip — every item with its action and
+ * the quantity to act on, plus totals per action (read-only). */
 function ReadOnlyLines({ lines }: { lines: AcEntryLine[] }) {
   if (lines.length === 0) return null;
+  const totals = new Map<string, { label: string; qty: number }>();
+  for (const l of lines) {
+    const t = totals.get(l.action_label) ?? { label: l.action_label, qty: 0 };
+    t.qty += l.qty;
+    totals.set(l.action_label, t);
+  }
+  const pcs = lines.reduce((s, l) => s + l.qty, 0);
   return (
-    <section className="mt-4" aria-label="Replacement Slip lines">
-      <h2 className="m-0 text-sm font-semibold text-slate-700 dark:text-slate-200">Lines</h2>
-      <ul className="m-0 mt-2 flex list-none flex-col gap-2 p-0">
+    <section
+      className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+      aria-label="Action sheet"
+      data-testid="action-sheet"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-gradient-to-r from-indigo-50 to-white px-4 py-3">
+        <h2 className="m-0 text-sm font-semibold text-slate-900">Action sheet</h2>
+        <span className="text-xs font-medium text-slate-500">
+          {lines.length} line(s) · {pcs} pcs
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-2 px-4 pt-3">
+        {[...totals.values()].map((t) => (
+          <span
+            key={t.label}
+            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700"
+          >
+            {t.label}
+            <span className="rounded-full bg-indigo-600 px-2 py-0.5 font-mono text-[11px] text-white">
+              {t.qty}
+            </span>
+          </span>
+        ))}
+      </div>
+      <div className="hidden px-4 pb-4 pt-3 md:block">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+              <th className="border-b border-slate-200 py-2 pr-3 font-semibold">#</th>
+              <th className="border-b border-slate-200 py-2 pr-3 font-semibold">Item</th>
+              <th className="border-b border-slate-200 py-2 pr-3 font-semibold">Condition</th>
+              <th className="border-b border-slate-200 py-2 pr-3 font-semibold">Action</th>
+              <th className="border-b border-slate-200 py-2 text-right font-semibold">Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((l) => (
+              <tr key={l.id} className="hover:bg-slate-50">
+                <td className="border-b border-slate-100 py-2 pr-3 text-slate-400">{l.line_no}</td>
+                <td className="border-b border-slate-100 py-2 pr-3">
+                  <span className="font-medium text-slate-900">{l.product_name}</span>
+                  {l.product_code ? (
+                    <span className="block font-mono text-xs text-slate-500">{l.product_code}</span>
+                  ) : null}
+                </td>
+                <td className="border-b border-slate-100 py-2 pr-3 text-slate-600">
+                  {l.condition_label ?? '—'}
+                </td>
+                <td className="border-b border-slate-100 py-2 pr-3 font-medium text-slate-800">
+                  {l.action_label}
+                </td>
+                <td className="border-b border-slate-100 py-2 text-right font-mono font-semibold">
+                  {l.qty}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <ul className="m-0 flex list-none flex-col gap-2 p-4 md:hidden">
         {lines.map((l) => (
           <li
             key={l.id}
-            className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-slate-800 dark:bg-slate-900"
+            className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 text-sm"
           >
             <div className="min-w-0">
               <p className="m-0 font-medium" style={{ wordBreak: 'break-word' }}>
@@ -697,10 +762,10 @@ function ReadOnlyLines({ lines }: { lines: AcEntryLine[] }) {
               <p className="m-0 text-xs text-slate-500">
                 {l.product_code ? `${l.product_code} · ` : ''}
                 {l.condition_label ? `${l.condition_label} · ` : ''}
-                {l.action_label}
+                <span className="font-semibold text-slate-700">{l.action_label}</span>
               </p>
             </div>
-            <span className="shrink-0 font-semibold">{l.qty} pc</span>
+            <span className="shrink-0 font-mono font-semibold">{l.qty} pcs</span>
           </li>
         ))}
       </ul>

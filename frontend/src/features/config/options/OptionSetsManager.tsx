@@ -102,7 +102,7 @@ export const OptionSetsManager: React.FC = () => {
 
     // G-05 validation: system_behavior=HAZARD cannot have allowed_status=YES
     if (editingItem.system_behavior === 'HAZARD' && editingItem.allowed_status === 'YES') {
-      setModalError('Guard G-05: Hazardous items cannot be set to allowed_status = YES');
+      setModalError('Hazardous items cannot be set to allowed_status = YES');
       return;
     }
 
@@ -114,7 +114,7 @@ export const OptionSetsManager: React.FC = () => {
 
     if (wasNo && isNowAllowed && !reason.trim()) {
       setModalError(
-        'A reason is mandatory when changing allowed status from NO to YES or CONDITIONAL (G-05 audit log requirement).',
+        'A reason is mandatory when changing allowed status from NO to YES or CONDITIONAL.',
       );
       return;
     }
@@ -156,7 +156,7 @@ export const OptionSetsManager: React.FC = () => {
       return;
     }
     if (newItem.system_behavior === 'HAZARD' && newItem.allowed_status === 'YES') {
-      setModalError('Guard G-05: Hazardous items cannot be set to allowed_status = YES');
+      setModalError('Hazardous items cannot be set to allowed_status = YES');
       return;
     }
 
@@ -207,7 +207,7 @@ export const OptionSetsManager: React.FC = () => {
           Option Sets & Dropdown Catalogue
         </h2>
         <p style={{ margin: 0, color: 'var(--color-fg-muted)', fontSize: '0.9375rem' }}>
-          Manage dropdown values, system behaviors, and G-05 hazard guards across the RMS workflow.
+          Manage dropdown values, system behaviors, and hazard guards across the RMS workflow.
         </p>
       </header>
 
@@ -545,7 +545,7 @@ export const OptionSetsManager: React.FC = () => {
                 <Select
                   options={[
                     { value: 'ALLOW', label: 'ALLOW' },
-                    { value: 'HAZARD', label: 'HAZARD (G-05 Guarded)' },
+                    { value: 'HAZARD', label: 'HAZARD' },
                     { value: 'SCRAP', label: 'SCRAP' },
                     { value: 'RTV', label: 'RTV' },
                     { value: 'HOLD', label: 'HOLD' },
@@ -593,7 +593,7 @@ export const OptionSetsManager: React.FC = () => {
               />
               {editingItem.system_behavior === 'HAZARD' && (
                 <p style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '0.25rem' }}>
-                  ⚠️ Guard G-05: System behavior HAZARD strictly forbids allowed_status = YES.
+                  System behavior HAZARD strictly forbids allowed_status = YES.
                 </p>
               )}
             </div>
@@ -808,7 +808,7 @@ export const OptionSetsManager: React.FC = () => {
               <Select
                 options={[
                   { value: 'ALLOW', label: 'ALLOW' },
-                  { value: 'HAZARD', label: 'HAZARD (G-05 Guarded)' },
+                  { value: 'HAZARD', label: 'HAZARD' },
                   { value: 'SCRAP', label: 'SCRAP' },
                   { value: 'RTV', label: 'RTV' },
                   { value: 'HOLD', label: 'HOLD' },

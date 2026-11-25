@@ -75,8 +75,7 @@ export function DispatchQueuePage() {
             Replacement Dispatch Queue
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-            Dispatch fresh replacements (SEND_NEW) and serviced stock (SEND_REPAIRED) to dealers
-            (BR-31, BR-32, DEC-26)
+            Dispatch fresh replacements (SEND_NEW) and serviced stock (SEND_REPAIRED) to dealers.
           </p>
         </div>
 

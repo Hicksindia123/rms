@@ -248,7 +248,7 @@ export function UnboxingPage({ gsId, onBack, onOpenGs, onNext }: Props) {
             <EvidenceSection
               title="Document photos (recorded earlier)"
               icon={<Camera size={18} aria-hidden="true" />}
-              hint="Captured before 20-11-2026. Shown for reference; no longer required (DEC-63)."
+              hint="Captured before 20-11-2026. Shown for reference; no longer required."
             >
               {photos.map((p, index) => (
                 <DocumentPhoto
@@ -818,7 +818,7 @@ function ExceptionHistory({ state }: { state: UnboxingState }) {
     <EvidenceSection
       title="Missing Document Exception (retired)"
       icon={<FileUp size={18} aria-hidden="true" />}
-      hint="Recorded before 20-11-2026. No approval is needed any more (DEC-63)."
+      hint="Recorded before 20-11-2026. No approval is needed any more."
     >
       {state.exceptions.map((e) => {
         const parcel = parcels.get(e.parcel_attachment_id);

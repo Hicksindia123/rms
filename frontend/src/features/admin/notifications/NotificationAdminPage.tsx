@@ -601,8 +601,8 @@ function EscalationEditor({ lookups }: { lookups: Lookups }) {
     <section aria-label="Escalation rules">
       <p className="dash-muted" style={{ marginTop: 0 }}>
         A level fires once per open task, <em>after</em> the step&apos;s SLA is breached by the
-        given hours (DEC-30: seeded disabled). Levels are numbered by their hours among the
-        step&apos;s active rules.
+        given hours (seeded disabled). Levels are numbered by their hours among the step&apos;s
+        active rules.
       </p>
       <div className="notif-filters">
         <label className="notif-filters__field">

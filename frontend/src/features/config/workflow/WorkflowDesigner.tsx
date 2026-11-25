@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { GitFork, CheckCircle2, AlertCircle, Plus, Lock } from 'lucide-react';
+import { apiRequest, toApiError } from '@/lib/api/client';
 
 export interface WorkflowStage {
   id: string;
@@ -68,29 +69,28 @@ export function WorkflowDesigner() {
 
   useEffect(() => {
     let ignore = false;
-    fetch('/api/v1/config/workflow/RMS_STANDARD')
-      .then((res) => res.json())
-      .then(
-        (defData: {
-          has_draft?: boolean;
-          draft_version_no?: number;
-          latest_published_version?: number;
-        }) => {
-          const verToLoad = defData.has_draft
-            ? defData.draft_version_no
-            : defData.latest_published_version;
-          return fetch(`/api/v1/config/workflow/RMS_STANDARD/versions/${String(verToLoad ?? 1)}`);
-        },
-      )
-      .then((res) => res.json())
-      .then((verData: WorkflowVersionDetail) => {
+    apiRequest<{
+      has_draft?: boolean;
+      draft_version_no?: number;
+      latest_published_version?: number;
+    }>('/config/workflow/RMS_STANDARD')
+      .then((defData) => {
+        const verToLoad = defData.has_draft
+          ? defData.draft_version_no
+          : defData.latest_published_version;
+        return apiRequest<WorkflowVersionDetail>(
+          `/config/workflow/RMS_STANDARD/versions/${String(verToLoad ?? 1)}`,
+        );
+      })
+      .then((verData) => {
         if (!ignore) {
           setWorkflow(verData);
         }
       })
       .catch((err: unknown) => {
         if (!ignore) {
-          setError(err instanceof Error ? err.message : 'Unknown error');
+          const e = toApiError(err);
+          setError(`${e.message}${e.requestId ? ` (Request ID: ${e.requestId})` : ''}`);
         }
       });
     return () => {
@@ -99,35 +99,33 @@ export function WorkflowDesigner() {
   }, []);
 
   async function reloadWorkflow() {
-    const defRes = await fetch('/api/v1/config/workflow/RMS_STANDARD');
-    if (!defRes.ok) return;
-    const defData = (await defRes.json()) as {
+    const defData = await apiRequest<{
       has_draft?: boolean;
       draft_version_no?: number;
       latest_published_version?: number;
-    };
+    }>('/config/workflow/RMS_STANDARD');
     const verToLoad = defData.has_draft
       ? defData.draft_version_no
       : defData.latest_published_version;
-    const verRes = await fetch(
-      `/api/v1/config/workflow/RMS_STANDARD/versions/${String(verToLoad ?? 1)}`,
+    const verData = await apiRequest<WorkflowVersionDetail>(
+      `/config/workflow/RMS_STANDARD/versions/${String(verToLoad ?? 1)}`,
     );
-    if (!verRes.ok) return;
-    const verData = (await verRes.json()) as WorkflowVersionDetail;
     setWorkflow(verData);
   }
 
   async function handleCreateDraft() {
     setError(null);
     try {
-      const res = await fetch('/api/v1/config/workflow/RMS_STANDARD/draft', {
+      await apiRequest('/config/workflow/RMS_STANDARD/draft', {
         method: 'POST',
       });
-      if (!res.ok) throw new Error('Failed to create draft');
       await reloadWorkflow();
       setSuccess('Draft created. You can now edit steps, stages, and transitions.');
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error creating draft');
+      const e = toApiError(err);
+      setError(
+        `Failed to create draft: ${e.message}${e.requestId ? ` (Request ID: ${e.requestId})` : ''}`,
+      );
     }
   }
 
@@ -136,21 +134,16 @@ export function WorkflowDesigner() {
     setSavingStep(true);
     setError(null);
     try {
-      const res = await fetch(
-        `/api/v1/config/workflow/RMS_STANDARD/draft/step-label?step_code=${selectedStep.code}&new_label=${encodeURIComponent(
-          stepLabel,
-        )}`,
-        { method: 'PUT' },
-      );
-      if (!res.ok) {
-        const d = (await res.json()) as { error?: { message?: string } };
-        throw new Error(d.error?.message || 'Failed to update step label');
-      }
+      await apiRequest('/config/workflow/RMS_STANDARD/draft/step-label', {
+        method: 'PUT',
+        query: { step_code: selectedStep.code, new_label: stepLabel },
+      });
       setSuccess(`Step '${selectedStep.code}' label updated.`);
       await reloadWorkflow();
       setSelectedStep((prev) => (prev ? { ...prev, label: stepLabel } : null));
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error saving step');
+      const e = toApiError(err);
+      setError(`${e.message}${e.requestId ? ` (Request ID: ${e.requestId})` : ''}`);
     } finally {
       setSavingStep(false);
     }
@@ -164,21 +157,17 @@ export function WorkflowDesigner() {
     setPublishing(true);
     setError(null);
     try {
-      const res = await fetch('/api/v1/config/workflow/RMS_STANDARD/draft/publish', {
+      await apiRequest('/config/workflow/RMS_STANDARD/draft/publish', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: publishReason }),
+        body: { reason: publishReason },
       });
-      if (!res.ok) {
-        const d = (await res.json()) as { error?: { message?: string } };
-        throw new Error(d.error?.message || 'Publishing draft failed');
-      }
       setSuccess(`Workflow version published successfully.`);
       setPublishModalOpen(false);
       setPublishReason('');
       await reloadWorkflow();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error publishing workflow');
+      const e = toApiError(err);
+      setError(`${e.message}${e.requestId ? ` (Request ID: ${e.requestId})` : ''}`);
     } finally {
       setPublishing(false);
     }
@@ -216,8 +205,8 @@ export function WorkflowDesigner() {
               width: '40px',
               height: '40px',
               borderRadius: '8px',
-              backgroundColor: '#eff6ff',
-              color: '#2563eb',
+              backgroundColor: '#eef3ff',
+              color: '#2a47f0',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -268,7 +257,7 @@ export function WorkflowDesigner() {
               style={{
                 padding: '0.4rem 0.75rem',
                 border: 'none',
-                backgroundColor: activeView === 'columns' ? '#1d4ed8' : '#ffffff',
+                backgroundColor: activeView === 'columns' ? '#2236d6' : '#ffffff',
                 color: activeView === 'columns' ? '#ffffff' : '#334155',
                 fontSize: '0.8125rem',
                 fontWeight: 600,
@@ -285,7 +274,7 @@ export function WorkflowDesigner() {
               style={{
                 padding: '0.4rem 0.75rem',
                 border: 'none',
-                backgroundColor: activeView === 'diagram' ? '#1d4ed8' : '#ffffff',
+                backgroundColor: activeView === 'diagram' ? '#2236d6' : '#ffffff',
                 color: activeView === 'diagram' ? '#ffffff' : '#334155',
                 fontSize: '0.8125rem',
                 fontWeight: 600,
@@ -302,7 +291,7 @@ export function WorkflowDesigner() {
               style={{
                 padding: '0.4rem 0.75rem',
                 border: 'none',
-                backgroundColor: activeView === 'transitions' ? '#1d4ed8' : '#ffffff',
+                backgroundColor: activeView === 'transitions' ? '#2236d6' : '#ffffff',
                 color: activeView === 'transitions' ? '#ffffff' : '#334155',
                 fontSize: '0.8125rem',
                 fontWeight: 600,
@@ -323,7 +312,7 @@ export function WorkflowDesigner() {
                 padding: '0.5rem 1rem',
                 borderRadius: '6px',
                 border: 'none',
-                backgroundColor: '#2563eb',
+                backgroundColor: '#2a47f0',
                 color: '#ffffff',
                 fontWeight: 600,
                 fontSize: '0.875rem',
@@ -454,7 +443,7 @@ export function WorkflowDesigner() {
                         }}
                         style={{
                           backgroundColor: '#ffffff',
-                          border: isSelected ? '2px solid #3b82f6' : '1px solid #cbd5e1',
+                          border: isSelected ? '2px solid #3f63fb' : '1px solid #cbd5e1',
                           borderRadius: '6px',
                           padding: '0.75rem',
                           cursor: 'pointer',
@@ -646,7 +635,7 @@ export function WorkflowDesigner() {
                       padding: '0.75rem 1rem',
                       fontFamily: 'monospace',
                       fontWeight: 600,
-                      color: '#2563eb',
+                      color: '#2a47f0',
                     }}
                   >
                     {tr.to_step_code}
@@ -779,7 +768,7 @@ export function WorkflowDesigner() {
                 style={{
                   marginTop: '0.5rem',
                   padding: '0.4rem 0.75rem',
-                  backgroundColor: '#2563eb',
+                  backgroundColor: '#2a47f0',
                   color: '#ffffff',
                   border: 'none',
                   borderRadius: '4px',
@@ -914,7 +903,7 @@ export function WorkflowDesigner() {
               Publish Workflow Version {workflow?.version_no}
             </h3>
             <p style={{ margin: 0, fontSize: '0.875rem', color: '#64748b' }}>
-              Publishing will freeze this workflow snapshot (G-18), retire the previous version, and
+              Publishing will freeze this workflow snapshot, retire the previous version, and
               immediately govern new consignments. A version reason is mandatory.
             </p>
 

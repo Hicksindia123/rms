@@ -82,8 +82,8 @@ export function ConfigHistoryViewer() {
               Configuration Change History & Audit Trail
             </h2>
             <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.875rem', color: '#64748b' }}>
-              Insert-only audit trail (G-17). Every change to workflows, forms, option sets, number
-              series, settings, and templates is tracked with attribution and before/after diffs.
+              Insert-only audit trail. Every change to workflows, forms, option sets, number series,
+              settings, and templates is tracked with attribution and before/after diffs.
             </p>
           </div>
         </div>

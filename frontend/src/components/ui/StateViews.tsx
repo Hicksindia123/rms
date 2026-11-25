@@ -39,7 +39,9 @@ export const EmptyState: React.FC<{
       {icon || <Inbox size={24} aria-hidden="true" />}
     </div>
     <p className="text-base font-semibold text-slate-800 m-0">{title}</p>
-    {hint ? <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-sm leading-normal">{hint}</p> : null}
+    {hint ? (
+      <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-sm leading-normal">{hint}</p>
+    ) : null}
     {action ? <div className="mt-4">{action}</div> : null}
   </div>
 );
@@ -62,7 +64,9 @@ export const ErrorState: React.FC<{
     if (error.requestId) {
       void navigator.clipboard.writeText(error.requestId);
       setCopied(true);
-      setTimeout(() => { setCopied(false); }, 2000);
+      setTimeout(() => {
+        setCopied(false);
+      }, 2000);
     }
   };
 
@@ -85,11 +89,6 @@ export const ErrorState: React.FC<{
           </p>
           {error.code || error.requestId ? (
             <div className="mt-2.5 flex flex-wrap items-center gap-2 text-xs text-rose-600/90 font-mono">
-              {error.code ? (
-                <span className="bg-rose-100/80 px-2 py-0.5 rounded-md border border-rose-200">
-                  Code: {error.code}
-                </span>
-              ) : null}
               {error.requestId ? (
                 <button
                   type="button"

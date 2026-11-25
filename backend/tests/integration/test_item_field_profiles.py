@@ -405,15 +405,13 @@ async def test_rm_action_options_follow_the_action_library(
     options = rm_repo.get_rm_action_options(Session(bind=as_admin(db_conn)))
     by_code = {o["code"]: o for o in options}
     assert by_code["SEND_NEW"]["label"] == "Send New Unit"
-    # The library holds DEC-74's ISSUE_CN_REQUEST too; the RM service filters it out (the RM
-    # action API test checks the five RM options).
+    # DEC-75 switched off DEC-74's ISSUE_CN_REQUEST (inactive entries are not options).
     assert set(by_code) == {
         "SEND_NEW",
         "SEND_REPAIRED",
         "ISSUE_CN",
         "NOT_ALLOWED",
         "PENDING_BP",
-        "ISSUE_CN_REQUEST",
     }
     # Rule texts still come from the workbook option row (WF r6).
     assert by_code["SEND_NEW"]["rule_text"]

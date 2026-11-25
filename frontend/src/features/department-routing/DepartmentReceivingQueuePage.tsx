@@ -93,8 +93,8 @@ export const DepartmentReceivingQueuePage: React.FC<DepartmentReceivingQueuePage
             </h1>
           </div>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            AMD-14 / DEC-42: Inward verifier receives processed goods back from departments into
-            outcome heads (Repaired, Wastage, Re-Route).
+            Inward verifier receives processed goods back from departments into outcome heads
+            (Repaired, Wastage, Re-Route).
           </p>
         </div>
 

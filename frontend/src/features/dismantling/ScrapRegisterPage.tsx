@@ -85,7 +85,7 @@ export function ScrapRegisterPage() {
     setDisposableError(null);
     try {
       await dismantlingApi.markLotForDisposal(
-        { lot_id: lot.lot_id, qty, remarks: lot.hazard ? 'Mercury hazard (DEC-11)' : null },
+        { lot_id: lot.lot_id, qty, remarks: lot.hazard ? 'Mercury hazard' : null },
         newIdempotencyKey(),
       );
       setDisposeSuccess(`${String(qty)} piece(s) marked for disposal.`);
@@ -140,9 +140,7 @@ export function ScrapRegisterPage() {
 
     // DEC-11: Hazardous scrap requires manifest reference
     if (selectedScrap.hazardous && !manifestRef.trim()) {
-      setDisposeError(
-        'DEC-11 Enforced: Manifest reference is mandatory for hazardous scrap disposal.',
-      );
+      setDisposeError('Manifest reference is mandatory for hazardous scrap disposal.');
       return;
     }
 
@@ -181,7 +179,7 @@ export function ScrapRegisterPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
             <Trash2 className="w-6 h-6 text-red-600" />
-            Scrap & Safe Disposal Register (DEC-11)
+            Scrap & Safe Disposal Register
           </h1>
           <p className="text-sm text-slate-500 mt-1">
             Track and authorize scrap disposal with manifest verification for hazardous waste.
@@ -241,8 +239,8 @@ export function ScrapRegisterPage() {
           Stock awaiting disposal
         </h2>
         <p className="text-xs text-slate-500">
-          Mercury-hazard stock in quarantine (DEC-11) and non-good stock that cannot be dismantled
-          (DEC-18). Mark it as scrap, then dispose of it below with the manifest.
+          Mercury-hazard stock in quarantine and non-good stock that cannot be dismantled. Mark it
+          as scrap, then dispose of it below with the manifest.
         </p>
         {disposableError && (
           <ErrorState
@@ -267,7 +265,7 @@ export function ScrapRegisterPage() {
                   {lot.hazard ? (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-800">
                       <AlertTriangle className="w-3 h-3 text-red-600" />
-                      HAZARDOUS (DEC-11)
+                      HAZARDOUS
                     </span>
                   ) : (
                     <Badge variant="warning">{lot.condition_class}</Badge>
@@ -403,7 +401,7 @@ export function ScrapRegisterPage() {
                     {scrap.hazardous ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-800">
                         <AlertTriangle className="w-3 h-3 text-red-600" />
-                        HAZARDOUS (DEC-11)
+                        HAZARDOUS
                       </span>
                     ) : (
                       <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
@@ -486,7 +484,7 @@ export function ScrapRegisterPage() {
                     selectedScrap.hazardous ? 'text-red-700' : 'text-slate-800'
                   }`}
                 >
-                  {selectedScrap.hazardous ? 'Hazardous Waste (DEC-11)' : 'General Scrap'}
+                  {selectedScrap.hazardous ? 'Hazardous Waste' : 'General Scrap'}
                 </span>
               </div>
             </div>
@@ -495,7 +493,7 @@ export function ScrapRegisterPage() {
               <div className="p-3 rounded-lg bg-amber-50 border border-amber-300 text-xs text-amber-900 space-y-1">
                 <div className="flex items-center gap-1.5 font-bold">
                   <AlertTriangle className="w-4 h-4 text-amber-700" />
-                  DEC-11 Compliance Requirement
+                  Compliance Requirement
                 </div>
                 <p>
                   Disposing hazardous waste requires a verified manifest reference number from the
@@ -522,7 +520,7 @@ export function ScrapRegisterPage() {
               />
               <p className="text-[11px] text-slate-500 mt-1">
                 {selectedScrap.hazardous
-                  ? 'Mandatory for hazardous scrap compliance (DEC-11).'
+                  ? 'Mandatory for hazardous scrap compliance.'
                   : 'Optional external tracking reference.'}
               </p>
             </div>

@@ -228,10 +228,7 @@ describe('Phase 6: Department Routing & Receiving with Guard G-20', () => {
     department_label: 'Technician / Repair',
     planned_since: '2026-11-18T09:00:00Z',
     total_qty: 5,
-    lines: [
-      { ...mockPlanLine('pl-1', 2) },
-      { ...mockPlanLine('pl-2', 3) },
-    ],
+    lines: [{ ...mockPlanLine('pl-1', 2) }, { ...mockPlanLine('pl-2', 3) }],
   };
 
   function mockPlanLine(id: string, qty: number) {
@@ -259,7 +256,7 @@ describe('Phase 6: Department Routing & Receiving with Guard G-20', () => {
 
     // Header and G-20 meter
     expect(screen.getByText(/Quantity Reconciliation Panel/i)).toBeInTheDocument();
-    expect(screen.getByText(/Guard G-20 Conserved/i)).toBeInTheDocument();
+    expect(screen.getByText(/^\s*Conserved\s*$/i)).toBeInTheDocument();
     expect(screen.getByText(/100% Conserved/i)).toBeInTheDocument();
 
     // Summary cards
@@ -275,7 +272,7 @@ describe('Phase 6: Department Routing & Receiving with Guard G-20', () => {
   it('renders discrepancy warning when G-20 conservation is broken', () => {
     render(<DepartmentReconciliationPanel reconciliation={mockReconBroken} />);
 
-    expect(screen.getByText(/G-20 Imbalance Detected/i)).toBeInTheDocument();
+    expect(screen.getByText(/Imbalance Detected/i)).toBeInTheDocument();
     expect(screen.getByText('Mismatch')).toBeInTheDocument();
   });
 
@@ -349,9 +346,7 @@ describe('Phase 6: Department Routing & Receiving with Guard G-20', () => {
     const handleSuccess = vi.fn();
     const spy = vi
       .spyOn(departmentRoutingApi, 'planRouting')
-      .mockRejectedValueOnce(
-        new ApiError(409, 'G-20', 'G-20: only 3 pcs left', null, 'req-g2-123'),
-      )
+      .mockRejectedValueOnce(new ApiError(409, 'G-20', 'G-20: only 3 pcs left', null, 'req-g2-123'))
       .mockResolvedValueOnce({ gs_id: 'gs-test-01', lines: [] });
 
     render(

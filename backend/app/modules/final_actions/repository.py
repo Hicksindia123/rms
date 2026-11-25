@@ -736,3 +736,91 @@ def insert_approval_request(session: Session, *, gs_id: UUID, store_id: UUID, re
             ).scalar_one()
         )
     )
+
+
+# --- DEC-75: pieces sent for Management approval ------------------------------------------------
+
+
+def request_lines(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
+    """Lines of every Management approval request of the GS (newest request first)."""
+    return _rows(
+        session,
+        """
+        select l.id, l.request_id, r.status as request_status, l.gs_item_id, gi.line_no,
+               coalesce(gi.product_name_snapshot, pr.name) as product_name,
+               l.condition_field_id, l.condition_label, l.store_id, s.name as store_name,
+               l.from_action_code, l.from_action_label, l.proposed_action_code,
+               l.proposed_action_label, l.qty, l.requested_at,
+               p.full_name as requested_by_name
+          from public.gs_management_request_lines l
+          join public.gs_management_approval_requests r on r.id = l.request_id
+          join public.gs_items gi on gi.id = l.gs_item_id
+          left join public.products pr on pr.id = gi.product_id
+          left join public.intermediate_stores s on s.id = l.store_id
+          left join public.profiles p on p.id = l.requested_by
+         where l.gs_id = :gs_id
+         order by r.requested_at desc, gi.line_no, l.condition_label nulls first, l.requested_at
+        """,
+        {"gs_id": gs_id},
+    )
+
+
+def request_free_qty(
+    session: Session, gs_item_id: UUID, condition_field_id: UUID | None, action_code: str
+) -> int:
+    return int(
+        session.execute(
+            text("select rms_private.gs_request_free_qty(:i, :c, :a)"),
+            {"i": gs_item_id, "c": condition_field_id, "a": action_code},
+        ).scalar_one()
+    )
+
+
+def insert_request_line(
+    session: Session,
+    *,
+    request_id: UUID,
+    gs_id: UUID,
+    gs_item_id: UUID,
+    condition_field_id: UUID | None,
+    from_action_code: str,
+    proposed_action_code: str,
+    qty: int,
+) -> None:
+    # The guard (DEC-75) checks the store user, the free qty and the proposal and stamps the
+    # snapshots; the placeholders below are overwritten by it.
+    session.execute(
+        text(
+            """
+            insert into public.gs_management_request_lines
+                   (request_id, gs_id, gs_item_id, condition_field_id, store_id,
+                    from_action_code, from_action_label, proposed_action_code,
+                    proposed_action_label, qty)
+            select :request_id, :gs_id, :gs_item_id, :condition_field_id,
+                   coalesce(rms_private.gs_item_store(:gs_item_id),
+                            '00000000-0000-0000-0000-000000000000'::uuid),
+                   :from_code, '-', :proposed_code, '-', :qty
+            """
+        ),
+        {
+            "request_id": request_id,
+            "gs_id": gs_id,
+            "gs_item_id": gs_item_id,
+            "condition_field_id": condition_field_id,
+            "from_code": from_action_code,
+            "proposed_code": proposed_action_code,
+            "qty": qty,
+        },
+    )
+
+
+def action_labels(session: Session, codes: list[str]) -> dict[str, str]:
+    rows = _rows(
+        session,
+        """
+        select code, label from public.item_field_library
+         where field_group = 'ACTION' and code = any(:codes)
+        """,
+        {"codes": codes},
+    )
+    return {str(r["code"]): str(r["label"]) for r in rows}

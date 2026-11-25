@@ -174,8 +174,7 @@ export function BatteryStockPage({ canManage, canApprove }: Props) {
             Battery Stock & Ledger
           </h1>
           <p style={{ margin: '0.25rem 0 0', color: '#64748b', fontSize: '0.875rem' }}>
-            Battery stock in BATTERY_STORE location, consumption tracking, and reconciliation
-            (BR-24, G-10)
+            Battery stock in BATTERY_STORE location, consumption tracking, and reconciliation.
           </p>
         </div>
 
@@ -263,7 +262,7 @@ export function BatteryStockPage({ canManage, canApprove }: Props) {
               border: 'none',
               cursor: 'pointer',
               fontWeight: activeTab === tab.id ? 700 : 500,
-              backgroundColor: activeTab === tab.id ? '#2563eb' : 'transparent',
+              backgroundColor: activeTab === tab.id ? '#2a47f0' : 'transparent',
               color: activeTab === tab.id ? '#fff' : '#64748b',
               whiteSpace: 'nowrap',
             }}
@@ -308,7 +307,7 @@ export function BatteryStockPage({ canManage, canApprove }: Props) {
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <Battery size={22} color="#2563eb" />
+                      <Battery size={22} color="#2a47f0" />
                       <span style={{ fontSize: '1.125rem', fontWeight: 700, color: '#0f172a' }}>
                         {b.code}
                       </span>
@@ -505,7 +504,7 @@ export function BatteryStockPage({ canManage, canApprove }: Props) {
                   <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>
                     PIECES BATTERY REPLACED
                   </div>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#2563eb' }}>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#2a47f0' }}>
                     {reconciliation.pieces_with_battery_replaced} pcs
                   </div>
                 </div>

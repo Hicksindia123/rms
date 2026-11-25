@@ -270,7 +270,7 @@ function ClassifyModal({
         </Button>
       }
     >
-      <p style={{ marginTop: 0 }}>Visually OK lots routed sellable skip the technician (DEC-14).</p>
+      <p style={{ marginTop: 0 }}>Visually OK lots routed sellable skip the technician.</p>
       <QtyStepper
         id="classify-qty"
         label={`Quantity (max ${String(row.qty)})`}

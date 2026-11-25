@@ -755,10 +755,15 @@ update public.item_field_library
 -- Piece" (codes SEND_NEW / SEND_REPAIRED unchanged, G-18; an admin may relabel). Same updates in
 -- supabase/snippets/release_20261123_p9_store_analysis.sql. The RM_ITEM_ACTION option items keep
 -- the workbook's verbatim WF r6 labels; the ACTION library is what the screens and snapshots use.
+-- DEC-75 (2026-11-25): the Allowed pieces read "Send New Pieces to Party" / "Send Repaired Pieces
+-- to Party" (same update in migration 20261125000200 and the DEC-75 release snippet).
 update public.item_field_library l
    set label = v.label
-  from (values ('SEND_NEW', 'Send New', 'Dispatch New Piece'),
-               ('SEND_REPAIRED', 'Send Repaired', 'Dispatch Repaired Piece')) as v(code, old_label, label)
+  from (values ('SEND_NEW', 'Send New', 'Send New Pieces to Party'),
+               ('SEND_NEW', 'Dispatch New Piece', 'Send New Pieces to Party'),
+               ('SEND_REPAIRED', 'Send Repaired', 'Send Repaired Pieces to Party'),
+               ('SEND_REPAIRED', 'Dispatch Repaired Piece', 'Send Repaired Pieces to Party'))
+       as v(code, old_label, label)
  where l.field_group = 'ACTION' and l.code = v.code and l.label = v.old_label;
 -- DEC-55: every active department enabled for every category by default (admin may restrict).
 -- The category insert trigger already does this; repeated for clarity / idempotence.
@@ -906,7 +911,7 @@ insert into public.system_settings (key, value, category, description, source_re
   ('dismantling_dmt_only',           'true',                             'provisional', 'Dismantling parts recovery applies only to DMT products.', 'DEC-18'),
   ('dismantling_reconcile_units',    'true',                             'provisional', 'Reconcile dismantled units count rather than component parts yield.', 'DEC-19'),
   ('department_structure_enabled',   'true',                             'provisional', 'Enable standard five-department operational structure.', 'DEC-20'),
-  ('branding_primary_color',         '"#0f172a"',                        'branding',    'Primary brand color for application shell and headers.', null),
+  ('branding_primary_color',         '"#2a47f0"',                        'branding',    'Primary brand color for application shell and headers.', null),
   ('branding_logo_url',              '"/assets/logo.png"',               'branding',    'Branding logo URL displayed in shell and print headers.', null),
   ('company_name',                   '"Hicks Thermometers (India) Limited"', 'branding', 'Company name shown on the sign-in page and footers.', 'P1-05'),
   ('dashboard_poll_seconds',         '60',                               'dashboards',  'Dashboards re-fetch widget data at this interval (seconds) when no realtime event arrives.', 'P4-01'),

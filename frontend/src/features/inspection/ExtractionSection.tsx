@@ -52,7 +52,7 @@ export const ExtractionSection: React.FC<ExtractionSectionProps> = ({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <Package size={18} color="var(--color-primary, #2563eb)" aria-hidden="true" />
+          <Package size={18} color="var(--color-primary, #2a47f0)" aria-hidden="true" />
           <span style={{ fontWeight: 600, fontSize: '0.875rem' }}>Extraction Reconciliation</span>
           <span
             style={{

@@ -393,9 +393,9 @@ export function RmReviewPage({ gsId, onBack, onOpenTransfer }: Props) {
           </h2>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
             {data.all_conserved ? (
-              <Badge variant="success">All lines G-19 conserved</Badge>
+              <Badge variant="success">All lines conserved</Badge>
             ) : (
-              <Badge variant="danger">G-19 Mismatch present: Must resolve before approval</Badge>
+              <Badge variant="danger">Mismatch present: Must resolve before approval</Badge>
             )}
           </div>
         </div>

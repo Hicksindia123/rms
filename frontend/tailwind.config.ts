@@ -1,12 +1,45 @@
 import type { Config } from 'tailwindcss';
 
+const BRAND = {
+  50: '#eef3ff',
+  100: '#dce6ff',
+  200: '#bfd0ff',
+  300: '#93b0ff',
+  400: '#6488ff',
+  500: '#3f63fb',
+  600: '#2a47f0',
+  700: '#2236d6',
+  800: '#212fad',
+  900: '#212e88',
+  950: '#181d52',
+};
+
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   darkMode: 'class',
   corePlugins: { preflight: false },
   theme: {
     extend: {
+      fontFamily: {
+        sans: [
+          '"Plus Jakarta Sans"',
+          'Inter',
+          'system-ui',
+          '-apple-system',
+          '"Segoe UI"',
+          'Roboto',
+          'sans-serif',
+        ],
+        mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+      },
       colors: {
+        // Brand scale (vivid royal blue). Tailwind blue + indigo both map to it, so every screen
+        // using either picks up the same brand colour.
+        brand: BRAND,
+        blue: BRAND,
+        indigo: BRAND,
+        // Hicks red accent (logo colour), used sparingly.
+        hicks: { 50: '#fff1f1', 100: '#ffdfdf', 500: '#ef3b33', 600: '#e2231a', 700: '#bd1a13' },
         background: 'hsl(var(--bg-app) / <alpha-value>)',
         surface: {
           DEFAULT: 'hsl(var(--bg-surface) / <alpha-value>)',
@@ -66,6 +99,16 @@ export default {
         card: 'var(--shadow-card)',
         popover: 'var(--shadow-popover)',
         dialog: 'var(--shadow-dialog)',
+        glow: '0 8px 24px -6px rgba(42, 71, 240, 0.45)',
+      },
+      keyframes: {
+        'fade-up': {
+          from: { opacity: '0', transform: 'translateY(6px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
+      animation: {
+        'fade-up': 'fade-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) both',
       },
     },
   },

@@ -44,6 +44,49 @@ export interface AnalysisGroup {
   /** G-21: pieces to decide in this item + condition. */
   qty: number;
   decisions: AnalysisDecision[];
+  /** DEC-75: per current decision, pieces still free to send to Management. */
+  sendable?: SendableDecision[];
+  /** DEC-75: pieces of this group in an OPEN Management request. */
+  management_lines?: ManagementRequestLine[];
+}
+
+export interface SendableDecision {
+  action_code: string;
+  label: string;
+  qty: number;
+  free_qty: number;
+}
+
+/** DEC-75: pieces sent for Management approval (previous action -> proposed action). */
+export interface ManagementRequestLine {
+  id: string;
+  request_id: string;
+  request_status: string;
+  gs_item_id: string;
+  line_no: number;
+  product_name?: string | null;
+  condition_field_id: string | null;
+  condition_label?: string | null;
+  store_id: string;
+  store_name?: string | null;
+  from_action_code: string;
+  from_action_label: string;
+  proposed_action_code: string;
+  proposed_action_label: string;
+  qty: number;
+  requested_at: string;
+  requested_by_name?: string | null;
+}
+
+/** DEC-75: the two verdicts (setting store_analysis.verdicts). */
+export interface Verdict {
+  label: string;
+  actions: string[];
+}
+
+export interface ProposalOption {
+  code: string;
+  label: string;
 }
 
 export interface AnalysisOutcome {
@@ -91,6 +134,10 @@ export interface StoreAnalysisGs {
   can_request_approval: boolean;
   open_approval_request?: ManagementApprovalRequest | null;
   approval_requests: ManagementApprovalRequest[];
+  verdicts?: { allowed: Verdict; not_allowed: Verdict } | null;
+  proposals?: ProposalOption[];
+  request_lines?: ManagementRequestLine[];
+  can_send_to_management?: boolean;
 }
 
 export interface StoreAnalysisQueueRow {
@@ -114,6 +161,16 @@ export interface StoreAnalysisSubmitIn {
   store_id: string;
   lines: StoreAnalysisLineIn[];
   remarks?: string | null;
-  /** DEC-71 / Q36: submit and send for Management approval in one step (reason). */
+  /** DEC-75: pieces sent to Management with the submission. */
+  management_lines?: ManagementLineIn[];
+  /** Optional note for Management with those pieces. */
   management_approval_reason?: string | null;
+}
+
+export interface ManagementLineIn {
+  gs_item_id: string;
+  condition_field_id: string | null;
+  from_action_code: string;
+  proposed_action_code: string;
+  qty: number;
 }

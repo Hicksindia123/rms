@@ -33,9 +33,7 @@ const IssueGroupCard: React.FC<{
   // G-16: one key per selection; a retry of the same selection reuses it (stock moves once).
   const keyRef = useRef<{ sel: string; key: string } | null>(null);
 
-  const selectedQty = group.lines
-    .filter((l) => selected.has(l.id))
-    .reduce((a, l) => a + l.qty, 0);
+  const selectedQty = group.lines.filter((l) => selected.has(l.id)).reduce((a, l) => a + l.qty, 0);
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -259,8 +257,7 @@ export const DepartmentIssuePage: React.FC<DepartmentIssuePageProps> = ({
             Nothing to issue
           </h3>
           <p className="text-xs text-slate-400 mt-1">
-            When the Replacement Manager plans department routing, the pieces to issue appear
-            here.
+            When the Replacement Manager plans department routing, the pieces to issue appear here.
           </p>
         </div>
       ) : (

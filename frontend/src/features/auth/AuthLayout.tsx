@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type ReactNode } from 'react';
-import { ShieldCheck } from 'lucide-react';
+import { BadgeCheck, Boxes, ShieldCheck, Workflow } from 'lucide-react';
 
 import hicksLogo from '@/assets/logo.png';
 import { usePublicSettings } from './publicSettings';
@@ -35,6 +35,27 @@ export function AuthLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="auth-root" style={style}>
+      <aside className="auth-hero" aria-hidden="true">
+        <div className="auth-hero__inner">
+          <span className="auth-hero__eyebrow">{companyName}</span>
+          <p className="auth-hero__title">{appName}</p>
+          <p className="auth-hero__lead">
+            Every returned piece tracked from the gate to the party: one place for stores,
+            management and accounts.
+          </p>
+          <ul className="auth-hero__list">
+            <li>
+              <Workflow size={18} /> Guided steps for every role
+            </li>
+            <li>
+              <Boxes size={18} /> Live stock and custody
+            </li>
+            <li>
+              <BadgeCheck size={18} /> Management approvals with a verifiable stamp
+            </li>
+          </ul>
+        </div>
+      </aside>
       <main className="auth-main">
         <div className="auth-card">
           <div className="auth-brand">
@@ -43,11 +64,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
               aria-hidden="true"
             >
               {!logoFailed ? (
-                <img
-                  src={logoSrc}
-                  alt="Hicks India Limited"
-                  onError={handleImageError}
-                />
+                <img src={logoSrc} alt="Hicks India Limited" onError={handleImageError} />
               ) : (
                 <ShieldCheck size={22} strokeWidth={2} />
               )}

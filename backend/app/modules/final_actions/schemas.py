@@ -209,6 +209,56 @@ class StoreAnalysisStoreOut(BaseModel):
     is_mine: bool = False
 
 
+class SendableDecisionOut(BaseModel):
+    """DEC-75: a current decision of a group and its pieces still free to send to Management."""
+
+    action_code: str
+    label: str
+    qty: int
+    free_qty: int
+
+
+class ManagementRequestLineOut(BaseModel):
+    """DEC-75: pieces sent for Management approval (previous action -> proposed action)."""
+
+    id: UUID
+    request_id: UUID
+    request_status: str
+    gs_item_id: UUID
+    line_no: int
+    product_name: str | None = None
+    condition_field_id: UUID | None = None
+    condition_label: str | None = None
+    store_id: UUID
+    store_name: str | None = None
+    from_action_code: str
+    from_action_label: str
+    proposed_action_code: str
+    proposed_action_label: str
+    qty: int
+    requested_at: datetime
+    requested_by_name: str | None = None
+
+
+class VerdictOut(BaseModel):
+    """DEC-75: a verdict the store user picks first (setting store_analysis.verdicts)."""
+
+    label: str
+    actions: list[str] = Field(default_factory=list)
+
+
+class VerdictsOut(BaseModel):
+    allowed: VerdictOut
+    not_allowed: VerdictOut
+
+
+class ProposalOptionOut(BaseModel):
+    """DEC-75: an action a store may propose to Management (store_analysis.management_proposals)."""
+
+    code: str
+    label: str
+
+
 class StoreAnalysisGroupOut(BaseModel):
     """DEC-57 group: one item + one current condition (no condition = item without a split)."""
 
@@ -217,6 +267,10 @@ class StoreAnalysisGroupOut(BaseModel):
     condition_label: str | None = None
     qty: int = Field(description="G-21: pieces to decide in this group")
     decisions: list[FinalActionAllocation] = Field(default_factory=list)
+    # DEC-75: per current decision, pieces still free to send for Management approval.
+    sendable: list[SendableDecisionOut] = Field(default_factory=list)
+    # DEC-75: pieces of this group in OPEN Management approval requests.
+    management_lines: list[ManagementRequestLineOut] = Field(default_factory=list)
 
 
 class StoreAnalysisItemOut(BaseModel):
@@ -261,6 +315,12 @@ class StoreAnalysisGsOut(BaseModel):
     can_request_approval: bool = False
     open_approval_request: ManagementApprovalRequestOut | None = None
     approval_requests: list[ManagementApprovalRequestOut] = Field(default_factory=list)
+    # DEC-75: the two verdicts, the proposals to Management and every line sent so far.
+    verdicts: VerdictsOut | None = None
+    proposals: list[ProposalOptionOut] = Field(default_factory=list)
+    request_lines: list[ManagementRequestLineOut] = Field(default_factory=list)
+    # The user's submitted stores may send pieces now (until Accounts completes the GS).
+    can_send_to_management: bool = False
 
 
 class StoreAnalysisQueueRowOut(BaseModel):
@@ -287,12 +347,29 @@ class StoreAnalysisSubmitIn(BaseModel):
     store_id: UUID
     lines: list[StoreAnalysisLineIn] = Field(..., min_length=1, max_length=500)
     remarks: str | None = Field(None, max_length=500)
-    # DEC-71 (P11) / Q36: "Submit and send for Management approval" in one transaction. The last
-    # store's submission routes the goods slip to Accounts at once, so its request must be recorded
-    # with the submission (after it, before the Accounts gate).
+    # DEC-75: pieces sent for Management approval with the submission (same transaction, after
+    # the submission and before the Accounts gate). Empty = nothing goes to Management.
+    management_lines: list[ManagementLineIn] = Field(default_factory=list, max_length=500)
+    # Optional note for Management with those pieces.
     management_approval_reason: str | None = Field(None, min_length=3, max_length=500)
 
 
+class ManagementLineIn(BaseModel):
+    """DEC-75: send `qty` pieces of an item + condition, currently decided `from_action_code`, to
+    Management with a proposed action."""
+
+    gs_item_id: UUID
+    condition_field_id: UUID | None = None
+    from_action_code: str = Field(..., min_length=1, max_length=64, pattern=ACTION_CODE_PATTERN)
+    proposed_action_code: str = Field(..., min_length=1, max_length=64, pattern=ACTION_CODE_PATTERN)
+    qty: int = Field(..., ge=1, le=1_000_000)
+
+
 class ManagementApprovalRequestIn(BaseModel):
-    store_id: UUID = Field(description="The user's store on this GS that sends the request")
-    reason: str = Field(..., min_length=3, max_length=500)
+    """DEC-75: send pieces for Management approval after the submission (any time until Accounts
+    completes the goods slip). `store_id` is kept for older clients and ignored: every line's store
+    is its item's store."""
+
+    store_id: UUID | None = None
+    lines: list[ManagementLineIn] = Field(..., min_length=1, max_length=500)
+    reason: str | None = Field(None, min_length=3, max_length=500)

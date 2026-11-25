@@ -122,7 +122,7 @@ export function DismantlingQueuePage({ onRecover }: DismantlingQueuePageProps) {
             Stage-4: Dismantling & Parts Recovery
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Dismantle non-good DMT units into TIP, BODY, WIRE, PCB (DEC-18, DEC-19, G-11).
+            Dismantle non-good DMT units into TIP, BODY, WIRE, PCB.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -213,13 +213,11 @@ export function DismantlingQueuePage({ onRecover }: DismantlingQueuePageProps) {
               <div className="flex items-start gap-3">
                 <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                 <div>
-                  <h3 className="text-sm font-semibold text-amber-900">
-                    Disposal route required (DEC-18)
-                  </h3>
+                  <h3 className="text-sm font-semibold text-amber-900">Disposal route required</h3>
                   <p className="text-xs text-amber-800 mt-1">
                     The following {disposalLots.length} lot(s) are non-good units from categories
-                    that do NOT support dismantling (e.g. Prismatic, Enclosed Oval). Per decision
-                    DEC-18, they are excluded from the dismantling queue and must follow separate
+                    that do NOT support dismantling (e.g. Prismatic, Enclosed Oval). They are
+                    excluded from the dismantling queue and must follow separate
                     hazardous/quarantine scrap disposal.
                   </p>
                 </div>
@@ -369,7 +367,7 @@ export function DismantlingQueuePage({ onRecover }: DismantlingQueuePageProps) {
                 <div className="space-y-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Storage Method (BR-28)
+                      Storage Method
                     </label>
                     <Select
                       value={storageMethod}
@@ -458,7 +456,7 @@ export function DismantlingQueuePage({ onRecover }: DismantlingQueuePageProps) {
                     <th className="p-3">Technician</th>
                     <th className="p-3">Storage Method</th>
                     <th className="p-3">Status</th>
-                    <th className="p-3 text-center">Progress (DEC-19)</th>
+                    <th className="p-3 text-center">Progress</th>
                     <th className="p-3 text-right">Created At</th>
                     <th className="p-3 text-right">Action</th>
                   </tr>

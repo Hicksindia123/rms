@@ -44,7 +44,7 @@ export const EnclosedOvalToggle: React.FC<EnclosedOvalToggleProps> = ({
               cursor: disabled ? 'not-allowed' : 'pointer',
             }}
           >
-            Enclosed Oval Protocol: Full Opening Confirmation (BR-14 / G-06)
+            Enclosed Oval Protocol: Full Opening Confirmation
           </label>
           <span style={{ fontSize: '0.75rem', color: confirmed ? '#15803d' : '#b45309' }}>
             {confirmed
@@ -67,7 +67,7 @@ export const EnclosedOvalToggle: React.FC<EnclosedOvalToggleProps> = ({
             width: '18px',
             height: '18px',
             cursor: disabled ? 'not-allowed' : 'pointer',
-            accentColor: 'var(--color-primary, #2563eb)',
+            accentColor: 'var(--color-primary, #2a47f0)',
           }}
           aria-label="Confirm Enclosed Oval full opening"
         />

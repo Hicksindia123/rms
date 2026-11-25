@@ -2,11 +2,11 @@
   --color-bg: #f8fafc;
   --color-surface: #ffffff;
   --color-border: #e2e8f0;
-  --color-border-focus: #3b82f6;
+  --color-border-focus: #3f63fb;
   --color-fg: #0f172a;
   --color-muted: #64748b;
-  --color-primary: #2563eb;
-  --color-primary-hover: #1d4ed8;
+  --color-primary: #2a47f0;
+  --color-primary-hover: #2236d6;
   --color-primary-fg: #ffffff;
   --color-danger: #e11d48;
   --color-danger-bg: #ffe4e6;
@@ -552,8 +552,8 @@ main button {
   color: #92400e;
 }
 .badge--info {
-  background-color: #dbeafe;
-  color: #1e40af;
+  background-color: #dce6ff;
+  color: #212fad;
 }
 
 @keyframes spin {
@@ -743,8 +743,8 @@ button.dataview__card:active {
   background-color: #f8fafc;
 }
 .tabs__tab[aria-selected='true'] {
-  color: #2563eb;
-  border-bottom-color: #2563eb;
+  color: #2a47f0;
+  border-bottom-color: #2a47f0;
   font-weight: 600;
   background-color: transparent;
 }
@@ -1266,7 +1266,7 @@ button.dataview__card:active {
   font: inherit;
 }
 .bell__item--unread {
-  background: #eff6ff;
+  background: #eef3ff;
 }
 .bell__item--high {
   border-left: 4px solid var(--color-danger);
@@ -1495,7 +1495,7 @@ button.dataview__card:active {
 }
 .category-option--selected {
   border-color: var(--color-primary);
-  background: #eff6ff;
+  background: #eef3ff;
 }
 .category-option__body {
   display: flex;
@@ -2027,7 +2027,7 @@ button.dataview__card:active {
 }
 .dash-kpi--link:hover,
 .dash-kpi--link:focus-visible {
-  background: #eef2ff;
+  background: #eef3ff;
 }
 .dash-kpi--warning {
   border-left-color: var(--color-warning);
@@ -2426,7 +2426,7 @@ button.dataview__card:active {
 .filterbar__field .input:focus,
 .filterbar__field .select:focus {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  box-shadow: 0 0 0 3px rgba(42, 71, 240, 0.15);
 }
 .filterbar__actions,
 .filterbar__extra,
@@ -2782,7 +2782,7 @@ button.dataview__card:active {
   padding-right: 0.5rem;
 }
 .notif-item--unread {
-  background: #eff6ff;
+  background: #eef3ff;
 }
 .notif-item--high {
   border-left: 4px solid var(--color-danger);
@@ -3021,12 +3021,12 @@ button.dataview__card:active {
   width: 34px;
   height: 34px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  background: linear-gradient(135deg, #3f63fb 0%, #2236d6 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   color: #ffffff;
-  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.3);
+  box-shadow: 0 2px 4px rgba(42, 71, 240, 0.3);
 }
 
 .saas-title {
@@ -3157,15 +3157,15 @@ button.dataview__card:active {
 }
 
 .saas-nav-item.active {
-  background-color: #eff6ff;
-  color: #1d4ed8;
+  background-color: #eef3ff;
+  color: #2236d6;
   font-weight: 600;
-  border-color: #bfdbfe;
-  box-shadow: inset 3px 0 0 #2563eb, 0 1px 2px rgba(37, 99, 235, 0.06);
+  border-color: #bfd0ff;
+  box-shadow: inset 3px 0 0 #2a47f0, 0 1px 2px rgba(42, 71, 240, 0.06);
 }
 
 .saas-nav-item.active svg {
-  color: #2563eb;
+  color: #2a47f0;
 }
 
 .saas-nav-item svg {
@@ -3228,7 +3228,7 @@ button.dataview__card:active {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #4f46e5 0%, #2563eb 100%);
+  background: linear-gradient(135deg, #2a47f0 0%, #2a47f0 100%);
   color: #ffffff;
   display: flex;
   align-items: center;
@@ -3660,7 +3660,7 @@ button.dataview__card:active {
   text-align: center;
 }
 .saas-nav-count--active {
-  background: #2563eb;
+  background: #2a47f0;
   color: #ffffff;
 }
 .journey-steps {
@@ -3701,7 +3701,7 @@ button.dataview__card:active {
   transform: translateY(-1px);
 }
 .journey-step--busy {
-  border-top-color: #2563eb;
+  border-top-color: #2a47f0;
   background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
 }
 .journey-step__head {
@@ -3793,4 +3793,510 @@ button.dataview__card:active {
   display: flex;
   flex-direction: column;
   line-height: 1.2;
+}
+
+/* =============================================================================
+   RMS THEME 2026 — brand royal blue + Hicks red accent, Plus Jakarta Sans.
+   Appended last on purpose: it refines the rules above without rewriting them.
+   ============================================================================= */
+:root {
+  --rms-brand-50: #eef3ff;
+  --rms-brand-100: #dce6ff;
+  --rms-brand-200: #bfd0ff;
+  --rms-brand-500: #3f63fb;
+  --rms-brand-600: #2a47f0;
+  --rms-brand-700: #2236d6;
+  --rms-ink-900: #0b1230;
+  --rms-ink-800: #121a3d;
+  --rms-hicks: #e2231a;
+  --rms-canvas: #f4f6fc;
+  --rms-grad-brand: linear-gradient(135deg, #3f63fb 0%, #2a47f0 55%, #5b3ff0 100%);
+  font-family:
+    'Plus Jakarta Sans',
+    Inter,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  background-color: var(--rms-canvas);
+  color: #0f172a;
+}
+
+body {
+  background-color: var(--rms-canvas);
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--rms-brand-200);
+  color: var(--rms-ink-900);
+}
+
+code,
+kbd,
+pre,
+.font-mono {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+:focus-visible {
+  outline: 3px solid rgba(42, 71, 240, 0.35);
+  outline-offset: 2px;
+}
+
+/* --- Shell: topbar ---------------------------------------------------------------------- */
+.saas-topbar {
+  height: 64px;
+  background-color: rgba(255, 255, 255, 0.86);
+  backdrop-filter: saturate(180%) blur(14px);
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  color: #0f172a;
+  box-shadow:
+    0 1px 0 rgba(15, 23, 42, 0.02),
+    0 8px 24px -16px rgba(15, 23, 42, 0.18);
+}
+.saas-topbar::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--rms-hicks) 0%,
+    #ff6a3d 18%,
+    var(--rms-brand-600) 55%,
+    #7a5cff 100%
+  );
+}
+.saas-logo-badge {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: none;
+  height: 40px;
+  border-radius: 12px;
+}
+.saas-title {
+  color: #0b1230;
+  font-weight: 800;
+  font-size: 1.02rem;
+  letter-spacing: -0.02em;
+}
+.saas-company-tag {
+  color: #64748b;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+.saas-sidebar-toggle {
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  background: #ffffff;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+}
+.saas-sidebar-toggle:hover {
+  background-color: var(--rms-brand-50);
+  border-color: var(--rms-brand-200);
+  color: var(--rms-brand-700);
+}
+.saas-profile-pill {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #0f172a;
+  padding: 0.25rem 0.35rem 0.25rem 0.3rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.saas-profile-name__name {
+  color: #0f172a;
+  font-weight: 700;
+  font-size: 0.8125rem;
+}
+.saas-profile-name__role {
+  color: #64748b;
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+.saas-avatar-circle {
+  width: 34px;
+  height: 34px;
+  background: var(--rms-grad-brand);
+  box-shadow: 0 4px 12px -4px rgba(42, 71, 240, 0.55);
+}
+.saas-btn-signout {
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  min-height: 34px;
+  font-weight: 600;
+}
+.saas-btn-signout:hover {
+  background-color: #fff1f1;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+/* --- Shell: sidebar --------------------------------------------------------------------- */
+.saas-layout {
+  min-height: calc(100vh - 64px);
+  background-color: var(--rms-canvas);
+}
+.saas-sidebar {
+  width: 268px;
+  top: 64px;
+  height: calc(100vh - 64px);
+  background:
+    radial-gradient(120% 60% at 0% 0%, rgba(63, 99, 251, 0.22) 0%, transparent 60%),
+    linear-gradient(180deg, var(--rms-ink-800) 0%, var(--rms-ink-900) 100%);
+  border-right: 0;
+}
+.saas-sidebar-nav {
+  padding: 1.1rem 0.85rem 2rem;
+  gap: 1.35rem;
+}
+.saas-group-header,
+.saas-accordion-header {
+  color: rgba(203, 213, 255, 0.55);
+  letter-spacing: 0.12em;
+}
+.saas-accordion-header:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+.saas-nav-item {
+  color: rgba(226, 232, 255, 0.8);
+  border-radius: 12px;
+  font-size: 0.84rem;
+  font-weight: 500;
+  border: 1px solid transparent;
+}
+.saas-nav-item svg {
+  color: rgba(165, 180, 252, 0.8);
+}
+.saas-nav-item:hover {
+  background-color: rgba(255, 255, 255, 0.07);
+  color: #ffffff;
+}
+.saas-nav-item:hover svg {
+  color: #ffffff;
+}
+.saas-nav-item.active {
+  background: var(--rms-grad-brand);
+  color: #ffffff;
+  font-weight: 700;
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 10px 24px -10px rgba(63, 99, 251, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+.saas-nav-item.active svg {
+  color: #ffffff;
+}
+.saas-nav-count {
+  background: rgba(255, 255, 255, 0.12);
+  color: #e0e7ff;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.72rem;
+}
+.saas-nav-count--active {
+  background: #ffffff;
+  color: var(--rms-brand-700);
+}
+.saas-sidebar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+.saas-sidebar [role='status'] {
+  color: rgba(226, 232, 255, 0.75);
+}
+.saas-main {
+  background-color: transparent;
+  padding: 1.75rem 2.25rem 3rem;
+  animation: rms-fade-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@media (max-width: 1024px) {
+  .saas-sidebar {
+    top: 64px;
+    box-shadow: 12px 0 40px rgba(11, 18, 48, 0.35);
+  }
+  .saas-main {
+    padding: 1rem;
+  }
+}
+@media (max-width: 639px) {
+  .saas-topbar::before {
+    height: 2px;
+  }
+}
+@keyframes rms-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .saas-main {
+    animation: none;
+  }
+}
+
+/* --- Page scaffolding ------------------------------------------------------------------- */
+.page__title,
+.page-header h1 {
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  color: #0b1230;
+}
+.card {
+  border-radius: 18px;
+  border-color: rgba(15, 23, 42, 0.07);
+  box-shadow: var(--shadow-card);
+}
+.banner {
+  border-radius: 14px;
+}
+
+/* Tables */
+.table th,
+.dataview__table th {
+  background: #f8faff;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.dataview__table-wrap {
+  border-radius: 16px;
+  border-color: rgba(15, 23, 42, 0.07);
+  box-shadow: var(--shadow-card);
+  background: #ffffff;
+}
+.table tbody tr:hover,
+.dataview__row--clickable:hover {
+  background: var(--rms-brand-50);
+}
+.dataview__card {
+  border-radius: 16px;
+  box-shadow: var(--shadow-card);
+}
+
+/* Forms */
+.input,
+.select,
+.textarea,
+.form-control {
+  border-radius: 12px;
+  border-color: #dfe3ee;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.input:focus,
+.select:focus,
+.textarea:focus,
+.form-control:focus {
+  border-color: var(--rms-brand-500);
+  box-shadow: 0 0 0 4px rgba(42, 71, 240, 0.14);
+  outline: none;
+}
+
+/* Tabs */
+.tabs__tab[aria-selected='true'] {
+  color: var(--rms-brand-700);
+  border-bottom-color: var(--rms-brand-600);
+}
+
+/* Legacy button classes (screens that do not use components/ui Button) */
+.btn-primary,
+.btn--primary {
+  background: var(--rms-grad-brand);
+  border-color: transparent;
+  color: #ffffff;
+  box-shadow: 0 6px 16px -8px rgba(42, 71, 240, 0.8);
+}
+.btn-primary:hover:not(:disabled),
+.btn--primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+  box-shadow: 0 10px 22px -10px rgba(42, 71, 240, 0.9);
+}
+
+/* Modals */
+.modal-overlay {
+  background: rgba(11, 18, 48, 0.55);
+  backdrop-filter: blur(6px);
+}
+.modal-content {
+  border-radius: 20px;
+}
+
+/* Journey (My Work) cards */
+.journey-step {
+  border-radius: 18px;
+  border-top-width: 4px;
+}
+.journey-step--busy {
+  border-top-color: var(--rms-brand-600);
+  background: linear-gradient(180deg, #ffffff 0%, #f6f8ff 100%);
+}
+.journey-step__no {
+  background: var(--rms-brand-50);
+  color: var(--rms-brand-700);
+}
+.journey-step__count {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 700;
+  color: #0b1230;
+}
+.journey-step--busy .journey-step__count {
+  color: var(--rms-brand-600);
+}
+
+@media print {
+  .saas-topbar::before {
+    display: none;
+  }
+  .saas-main {
+    animation: none;
+    padding: 0;
+  }
+}
+
+/* --- Mini-preflight ------------------------------------------------------------------------
+   Tailwind's base layer is off (tailwind.css), so `border`, `border-2`, `divide-y` … set a width
+   but no style and never drew, and class-styled buttons kept the browser's grey box and font.
+   :where() keeps specificity 0: every class (Tailwind or index.css) still wins. Unclassed native
+   inputs, selects, textareas and fieldsets keep their browser look. */
+:where(
+    div,
+    span,
+    section,
+    article,
+    aside,
+    header,
+    footer,
+    nav,
+    main,
+    ul,
+    ol,
+    li,
+    p,
+    a,
+    label,
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    dl,
+    dt,
+    dd,
+    figure,
+    img,
+    svg,
+    table,
+    thead,
+    tbody,
+    tfoot,
+    tr,
+    td,
+    th,
+    button[class]
+  ) {
+  border-width: 0;
+  border-style: solid;
+  border-color: #e2e8f0;
+}
+:where(button[class]) {
+  background-color: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+:where(button, input, select, textarea, optgroup) {
+  font-family: inherit;
+  letter-spacing: inherit;
+}
+
+/* Desktop: the dark sidebar runs the full height of long pages. */
+@media (min-width: 1025px) {
+  .saas-layout {
+    background: linear-gradient(90deg, #0b1230 0, #0b1230 268px, var(--rms-canvas) 268px);
+  }
+}
+
+/* 360 px topbar: logo, search, bell, avatar and sign-out all fit. */
+@media (max-width: 639px) {
+  .saas-topbar {
+    gap: 0.25rem;
+    padding: 0 0.4rem;
+  }
+  .saas-topbar > div:nth-child(2) {
+    margin: 0 0.25rem !important;
+    min-width: 0;
+  }
+  .saas-sidebar-toggle {
+    width: 38px;
+    height: 38px;
+  }
+  .saas-logo-badge {
+    padding: 2px 4px;
+  }
+  .saas-avatar-circle {
+    width: 30px;
+    height: 30px;
+  }
+  .saas-profile-pill {
+    padding: 0.15rem;
+    gap: 0.15rem;
+  }
+  .saas-btn-signout {
+    min-width: 40px;
+    min-height: 40px;
+    padding: 0;
+    border-color: transparent;
+  }
+}
+
+/* Bell on the light topbar */
+.saas-topbar .bell__button {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #334155;
+  min-width: 40px;
+  min-height: 40px;
+}
+.saas-topbar .bell__button:hover {
+  background: var(--rms-brand-50);
+  border-color: var(--rms-brand-200);
+  color: var(--rms-brand-700);
+}
+
+:where(fieldset[class]) {
+  margin: 0;
+  border: 0 solid #e2e8f0;
+}
+
+/* Phone bottom bar in the theme */
+.mobile-bottom-bar {
+  background-color: rgba(11, 18, 48, 0.96);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 -10px 30px -12px rgba(11, 18, 48, 0.5);
+}
+.mobile-bottom-bar__item {
+  color: rgba(199, 210, 254, 0.75);
+  font-weight: 600;
+  border-radius: 12px;
+}
+.mobile-bottom-bar__item--active {
+  color: #ffffff;
+  background: linear-gradient(135deg, rgba(63, 99, 251, 0.45), rgba(91, 63, 240, 0.45));
 }

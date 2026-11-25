@@ -85,7 +85,9 @@ select tables_are('public', array[
   -- gap plan G3 (DEC-56): current condition per item
   'gs_item_conditions',
   -- DEC-73: E-Commerce Returns
-  'ecommerce_returns','ecommerce_return_media','ecommerce_tickets','ecommerce_return_events'
+  'ecommerce_returns','ecommerce_return_media','ecommerce_tickets','ecommerce_return_events',
+  -- DEC-75: pieces a store sends for Management approval
+  'gs_management_request_lines'
 ],'public schema holds foundation, inward and inventory ledger tables');
 
 select has_schema('rms_private');

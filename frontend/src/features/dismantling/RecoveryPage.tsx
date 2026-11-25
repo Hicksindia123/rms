@@ -64,7 +64,7 @@ const PART_TYPES: Array<{
   {
     type: 'PCB',
     title: 'PCB Module',
-    desc: 'Circuit board & electronics (G-11)',
+    desc: 'Circuit board & electronics',
     color: 'border-purple-400 bg-purple-50/50',
   },
 ];
@@ -284,8 +284,8 @@ export function RecoveryPage({ batchId, onBack, onCompleted }: RecoveryPageProps
 
     // Check G-11 for PCB
     if (partQuantities.PCB > 0) {
-      if (!selectedPcbModel) return 'G-11: PCB Model is required';
-      if (!selectedPcbSupplier) return 'G-11: PCB Supplier is required';
+      if (!selectedPcbModel) return 'PCB Model is required';
+      if (!selectedPcbSupplier) return 'PCB Supplier is required';
     }
 
     // Check storage assignments
@@ -469,7 +469,7 @@ export function RecoveryPage({ batchId, onBack, onCompleted }: RecoveryPageProps
         <div className="flex items-center justify-between">
           <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
             <Wrench className="w-5 h-5 text-indigo-600" />
-            Recovered Spare Parts (DEC-19: Free 0..n yield)
+            Recovered Spare Parts (Free 0..n yield)
           </h3>
           <span className="text-xs text-slate-500">Recorded into Spare Parts Store</span>
         </div>
@@ -595,7 +595,7 @@ export function RecoveryPage({ batchId, onBack, onCompleted }: RecoveryPageProps
                   <div className="pt-3 border-t border-purple-200 bg-purple-100/50 -mx-4 -mb-4 p-4 rounded-b-xl space-y-3">
                     <div className="flex items-center gap-1.5 text-xs font-bold text-purple-900">
                       <Cpu className="w-4 h-4 text-purple-700" />
-                      PCB Mandatory Details (G-11 Guard)
+                      PCB Mandatory Details
                     </div>
 
                     {/* PCB Model */}
@@ -727,7 +727,7 @@ export function RecoveryPage({ batchId, onBack, onCompleted }: RecoveryPageProps
             </div>
             {scrapHazardous && (
               <span className="inline-flex px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-800">
-                HAZARDOUS (DEC-11)
+                HAZARDOUS
               </span>
             )}
           </div>
@@ -736,9 +736,8 @@ export function RecoveryPage({ batchId, onBack, onCompleted }: RecoveryPageProps
             <div className="flex items-start gap-2 text-xs text-red-700 bg-red-50 p-2.5 rounded border border-red-200">
               <AlertTriangle className="w-4 h-4 shrink-0 text-red-600 mt-0.5" />
               <span>
-                <strong>DEC-11 Enforced:</strong> Hazardous scrap cannot be disposed without an
-                official manifest reference (<code className="font-mono">manifest_ref</code>) from
-                authorized waste agencies.
+                Hazardous scrap cannot be disposed without an official manifest reference (
+                <code className="font-mono">manifest_ref</code>) from authorized waste agencies.
               </span>
             </div>
           )}

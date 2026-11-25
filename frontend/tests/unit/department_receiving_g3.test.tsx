@@ -18,9 +18,8 @@ vi.mock('@/lib/api/client', async (importOriginal) => {
   };
 });
 
-const { DepartmentReceiveModal } = await import(
-  '@/features/department-routing/DepartmentReceiveModal'
-);
+const { DepartmentReceiveModal } =
+  await import('@/features/department-routing/DepartmentReceiveModal');
 const { ApiError } = await import('@/lib/api/client');
 
 const HEADS = [

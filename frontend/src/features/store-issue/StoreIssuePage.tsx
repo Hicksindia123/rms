@@ -126,8 +126,7 @@ export function StoreIssuePage({ onOpenPrint, onPrint }: Props) {
             Intermediate Store: Main Store Issue
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-            Sahil issues functional (Good / Repaired) returned stock to Main Store custody (G-04,
-            DEC-21)
+            Sahil issues functional (Good / Repaired) returned stock to Main Store custody
           </p>
         </div>
 

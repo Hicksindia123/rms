@@ -109,11 +109,11 @@ export function UserActivityPage({ userId, userName, onBack }: UserActivityPageP
                       width: '36px',
                       height: '36px',
                       borderRadius: '50%',
-                      backgroundColor: '#eff6ff',
+                      backgroundColor: '#eef3ff',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      color: '#2563eb',
+                      color: '#2a47f0',
                     }}
                   >
                     <Laptop size={18} />

@@ -212,7 +212,7 @@ export const DepartmentLegsTimeline: React.FC<DepartmentLegsTimelineProps> = ({
                 {leg.receipts.length > 0 && (
                   <div>
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
-                      Department Receipts & Outcomes (AMD-14 / DEC-43)
+                      Department Receipts & Outcomes
                     </h4>
                     <div className="space-y-2">
                       {leg.receipts.map((rc) => (

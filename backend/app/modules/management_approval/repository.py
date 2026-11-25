@@ -63,6 +63,8 @@ def queue(session: Session, statuses: tuple[str, ...], q: str | None) -> list[di
                         where gi.gs_id = g.id and a.is_current and a.action_code = 'ISSUE_CN')
                  as has_issue_cn,
                rms_private.gs_open_cn_request_qty(g.id) as cn_request_qty,
+               coalesce((select sum(l.qty) from public.gs_management_request_lines l
+                          where l.request_id = r.id), 0)::int as requested_qty,
                coalesce((select array_agg(p.store_code order by p.store_code)
                            from rms_private.gs_store_analysis_progress(g.id) p
                           where p.analysis_status <> 'SUBMITTED'), '{}') as waiting_store_codes
@@ -396,3 +398,45 @@ def get_setting(session: Session, key: str) -> Any:
     return session.execute(
         text("select value from public.system_settings where key = :key"), {"key": key}
     ).scalar()
+
+
+# --- DEC-75: the store's own decisions and the pieces it sent -----------------------------------
+
+
+def store_decisions(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
+    """The decisions the stores submitted (the revisions that are not Management changes), so
+    Management sees the previous action even after changing it."""
+    return _rows(
+        session,
+        """
+        select a.gs_item_id, a.condition_field_id, a.action_code,
+               coalesce(a.action_label, a.action_code) as label, sum(a.qty)::int as qty
+          from public.rm_item_actions a
+          join public.gs_items gi on gi.id = a.gs_item_id
+         where gi.gs_id = :gs_id and a.round_no = 1
+           and a.revision_no not in (select m.revision_no from public.gs_management_revisions m
+                                      where m.gs_id = :gs_id)
+         group by a.gs_item_id, a.condition_field_id, a.action_code, a.action_label
+         order by a.action_code
+        """,
+        {"gs_id": gs_id},
+    )
+
+
+def request_lines(session: Session, gs_id: UUID) -> list[dict[str, Any]]:
+    return _rows(
+        session,
+        """
+        select l.id, l.request_id, r.status as request_status, l.gs_item_id,
+               l.condition_field_id, l.condition_label, s.name as store_name,
+               l.from_action_code, l.from_action_label, l.proposed_action_code,
+               l.proposed_action_label, l.qty, l.requested_at, p.full_name as requested_by_name
+          from public.gs_management_request_lines l
+          join public.gs_management_approval_requests r on r.id = l.request_id
+          left join public.intermediate_stores s on s.id = l.store_id
+          left join public.profiles p on p.id = l.requested_by
+         where l.gs_id = :gs_id
+         order by r.requested_at desc, l.requested_at
+        """,
+        {"gs_id": gs_id},
+    )

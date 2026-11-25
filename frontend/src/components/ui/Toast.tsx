@@ -16,27 +16,24 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const addToast = useCallback(
-    (options: ToastOptions): string => {
-      const id =
-        options.id || `toast-${String(Date.now())}-${Math.random().toString(36).slice(2, 7)}`;
-      const newToast: ToastItem = {
-        id,
-        title: options.title,
-        ...(options.description !== undefined ? { description: options.description } : {}),
-        type: options.type || 'info',
-        duration: options.duration ?? (options.type === 'error' ? 6000 : 4000),
-      };
+  const addToast = useCallback((options: ToastOptions): string => {
+    const id =
+      options.id || `toast-${String(Date.now())}-${Math.random().toString(36).slice(2, 7)}`;
+    const newToast: ToastItem = {
+      id,
+      title: options.title,
+      ...(options.description !== undefined ? { description: options.description } : {}),
+      type: options.type || 'info',
+      duration: options.duration ?? (options.type === 'error' ? 6000 : 4000),
+    };
 
-      setToasts((prev) => {
-        const filtered = prev.filter((t) => t.id !== id);
-        return [...filtered, newToast];
-      });
+    setToasts((prev) => {
+      const filtered = prev.filter((t) => t.id !== id);
+      return [...filtered, newToast];
+    });
 
-      return id;
-    },
-    [],
-  );
+    return id;
+  }, []);
 
   useEffect(() => {
     setGlobalToastHandler(addToast);
@@ -74,7 +71,13 @@ const ToasterContainer: React.FC<{
       className="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2 max-w-sm w-full pointer-events-none p-2 sm:p-0"
     >
       {toasts.map((item) => (
-        <ToastCard key={item.id} item={item} onDismiss={() => { onDismiss(item.id); }} />
+        <ToastCard
+          key={item.id}
+          item={item}
+          onDismiss={() => {
+            onDismiss(item.id);
+          }}
+        />
       ))}
     </div>
   );
@@ -89,23 +92,25 @@ const ToastCard: React.FC<{
     const timer = setTimeout(() => {
       onDismiss();
     }, item.duration);
-    return () => { clearTimeout(timer); };
+    return () => {
+      clearTimeout(timer);
+    };
   }, [item, onDismiss]);
 
   const icons = {
     success: <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />,
     error: <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0" />,
     warning: <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0" />,
-    info: <Info className="w-5 h-5 text-sky-600 flex-shrink-0" />,
+    info: <Info className="w-5 h-5 text-brand-600 flex-shrink-0" />,
     loading: <Loader2 className="w-5 h-5 text-blue-600 animate-spin flex-shrink-0" />,
   };
 
   const borders = {
-    success: 'border-emerald-200 bg-white shadow-card',
-    error: 'border-rose-200 bg-white shadow-card',
-    warning: 'border-amber-200 bg-white shadow-card',
-    info: 'border-sky-200 bg-white shadow-card',
-    loading: 'border-blue-200 bg-white shadow-card',
+    success: 'border-emerald-200 border-l-emerald-500',
+    error: 'border-rose-200 border-l-rose-500',
+    warning: 'border-amber-200 border-l-amber-500',
+    info: 'border-brand-200 border-l-brand-500',
+    loading: 'border-brand-200 border-l-brand-500',
   };
 
   return (
@@ -113,7 +118,7 @@ const ToastCard: React.FC<{
       role="status"
       aria-live="polite"
       className={cn(
-        'pointer-events-auto flex items-start gap-3 p-3.5 rounded-xl border bg-white shadow-dialog transition-all duration-200 animate-in fade-in slide-in-from-bottom-2',
+        'pointer-events-auto flex items-start gap-3 p-4 rounded-2xl border border-l-4 bg-white/95 backdrop-blur shadow-[0_18px_40px_-16px_rgba(11,18,48,0.35)] transition-all duration-200 animate-fade-up',
         borders[item.type],
       )}
     >

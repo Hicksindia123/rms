@@ -199,7 +199,7 @@ function ImportSummary({ result }: { result: ProductImportResult }) {
       {result.category_changes > 0 && (
         <p className="masters-warning">
           {result.category_changes} product(s) move to another category. Category flags drive the
-          hazard and full-opening guards (G-05, G-06): check the list below.
+          hazard and full-opening guards: check the list below.
         </p>
       )}
 

@@ -114,7 +114,7 @@ export function TechnicianBoardPage({ canAllot, onAllot, onReceive }: Props) {
             backgroundColor: '#fff',
             padding: '1rem',
             borderRadius: '8px',
-            border: statusFilter === 'ALL' ? '2px solid #3b82f6' : '1px solid #e2e8f0',
+            border: statusFilter === 'ALL' ? '2px solid #3f63fb' : '1px solid #e2e8f0',
             boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
           }}
         >
@@ -137,7 +137,7 @@ export function TechnicianBoardPage({ canAllot, onAllot, onReceive }: Props) {
             backgroundColor: '#fff',
             padding: '1rem',
             borderRadius: '8px',
-            border: statusFilter === 'ALLOTTED' ? '2px solid #3b82f6' : '1px solid #e2e8f0',
+            border: statusFilter === 'ALLOTTED' ? '2px solid #3f63fb' : '1px solid #e2e8f0',
             boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
           }}
         >
@@ -161,7 +161,7 @@ export function TechnicianBoardPage({ canAllot, onAllot, onReceive }: Props) {
             padding: '1rem',
             borderRadius: '8px',
             border:
-              statusFilter === 'PARTIALLY_RECEIVED' ? '2px solid #3b82f6' : '1px solid #e2e8f0',
+              statusFilter === 'PARTIALLY_RECEIVED' ? '2px solid #3f63fb' : '1px solid #e2e8f0',
             boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
           }}
         >
@@ -184,7 +184,7 @@ export function TechnicianBoardPage({ canAllot, onAllot, onReceive }: Props) {
             backgroundColor: '#fff',
             padding: '1rem',
             borderRadius: '8px',
-            border: statusFilter === 'COMPLETED' ? '2px solid #3b82f6' : '1px solid #e2e8f0',
+            border: statusFilter === 'COMPLETED' ? '2px solid #3f63fb' : '1px solid #e2e8f0',
             boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
           }}
         >

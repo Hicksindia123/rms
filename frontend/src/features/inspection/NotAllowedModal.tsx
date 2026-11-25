@@ -22,7 +22,7 @@ export const NotAllowedModal: React.FC<NotAllowedModalProps> = ({
 
   const getRoutingDescription = () => {
     if (option.system_behavior === 'HAZARD') {
-      return 'This item contains hazardous mercury material and will be transferred to HAZARD_QUARANTINE. Safety alerts will be dispatched, and downstream flow is strictly blocked (G-05).';
+      return 'This item contains hazardous mercury material and will be transferred to HAZARD_QUARANTINE. Safety alerts will be dispatched, and downstream flow is strictly blocked.';
     }
     if (option.system_behavior === 'REJECT_HOLD') {
       return `${option.label} (${option.code}) will be moved to REJECTED_HOLD for return to the sending party (HOLD_PARTY_RETURN).`;

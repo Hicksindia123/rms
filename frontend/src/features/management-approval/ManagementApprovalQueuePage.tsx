@@ -44,6 +44,9 @@ const Row: React.FC<{ r: QueueRow; onOpen: () => void }> = ({ r, onOpen }) => {
             {(r.cn_request_qty ?? 0) > 0 ? (
               <Badge variant="warning">Issue CN Request · {r.cn_request_qty} pcs</Badge>
             ) : null}
+            {(r.requested_qty ?? 0) > 0 ? (
+              <Badge variant="purple">Sent by store · {r.requested_qty} pcs</Badge>
+            ) : null}
           </div>
           <div className="break-words text-sm text-slate-600 dark:text-slate-300">
             {r.party_name ?? '—'}

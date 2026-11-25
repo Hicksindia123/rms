@@ -105,7 +105,7 @@ export const QuantityReconciliationMeter: React.FC<QuantityReconciliationMeterPr
             color: 'var(--color-muted, #4b5563)',
           }}
         >
-          <Info size={14} color="var(--color-primary, #2563eb)" aria-hidden="true" />
+          <Info size={14} color="var(--color-primary, #2a47f0)" aria-hidden="true" />
           <span>
             <strong>Documented Shortage:</strong> {shortQtyDiscrepancy} pcs noted.{' '}
             {shortQtyRuleText ||

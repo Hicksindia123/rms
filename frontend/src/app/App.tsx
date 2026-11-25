@@ -18,6 +18,7 @@ import {
   BellRing,
   Columns3,
   LogOut,
+  UserRound,
   LogIn,
   Menu,
   ChevronDown,
@@ -557,7 +558,7 @@ function Shell() {
   const isAdminOrRm =
     isSuperAdmin || roleCodes.includes('ADMIN') || roleCodes.includes('REPLACEMENT_MANAGER');
 
-  // Bell / notification centre â†’ the screen where the notification is acted on (P4-03 links.ts).
+  // Bell / notification centre → the screen where the notification is acted on (P4-03 links.ts).
   const openNotification = (n: AppNotification): boolean => {
     const path = notificationPath(n, can);
     if (path) navigate(path);
@@ -586,14 +587,6 @@ function Shell() {
   const journeyError = journeyQuery.error;
   const reloadJourney = journeyQuery.reload;
 
-  const userInitials = me?.profile.full_name
-    ? me.profile.full_name
-        .split(' ')
-        .filter(Boolean)
-        .slice(0, 2)
-        .map((p) => p[0]?.toUpperCase() ?? '')
-        .join('')
-    : 'U';
   const roleTitle = me?.roles[0]?.name ?? (isSuperAdmin ? 'Super Admin' : 'Staff');
 
   type NavEntry = {
@@ -724,7 +717,7 @@ function Shell() {
     return (
       <div className="auth-root auth-root--loading" role="status" aria-live="polite">
         <Loader2 size={22} className="auth-spin" aria-hidden="true" />
-        <span className="sr-only">Loadingâ€¦</span>
+        <span className="sr-only">Loading…</span>
       </div>
     );
   }
@@ -745,17 +738,16 @@ function Shell() {
   }
 
   return (
-    <div
-      className="app-shell"
-      style={{ minHeight: '100vh', backgroundColor: '#f8fafc', overflowX: 'hidden' }}
-    >
+    <div className="app-shell" style={{ minHeight: '100vh', overflowX: 'hidden' }}>
       {/* SaaS Sticky Topbar */}
       <header className="saas-topbar no-print">
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <button
             type="button"
             className="saas-sidebar-toggle"
-            onClick={() => { setSidebarOpen((prev) => !prev); }}
+            onClick={() => {
+              setSidebarOpen((prev) => !prev);
+            }}
             aria-label="Toggle navigation menu"
             title="Toggle menu"
           >
@@ -768,7 +760,9 @@ function Shell() {
                   src={hicksLogo}
                   alt="Hicks India"
                   className="saas-logo-img"
-                  onError={() => { setLogoError(true); }}
+                  onError={() => {
+                    setLogoError(true);
+                  }}
                 />
               ) : (
                 <div className="saas-logo-icon" aria-hidden="true">
@@ -804,13 +798,11 @@ function Shell() {
           {me ? (
             <div className="saas-profile-pill">
               <div className="saas-avatar-circle" title={me.profile.email ?? undefined}>
-                {userInitials}
+                <UserRound size={17} aria-hidden="true" />
               </div>
               <div className="saas-profile-name">
-                <span style={{ fontWeight: 600, fontSize: '0.8125rem', color: '#f8fafc' }}>
-                  {me.profile.full_name}
-                </span>
-                <span style={{ fontSize: '0.6875rem', color: '#94a3b8' }}>{roleTitle}</span>
+                <span className="saas-profile-name__name">{me.profile.full_name}</span>
+                <span className="saas-profile-name__role">{roleTitle}</span>
               </div>
               <button
                 type="button"
@@ -828,7 +820,9 @@ function Shell() {
           ) : (
             <button
               type="button"
-              onClick={() => { setActiveTab('login'); }}
+              onClick={() => {
+                setActiveTab('login');
+              }}
               style={{
                 backgroundColor: '#1e293b',
                 border: '1px solid #334155',
@@ -854,7 +848,9 @@ function Shell() {
       {sidebarOpen ? (
         <div
           className="saas-backdrop no-print"
-          onClick={() => { setSidebarOpen(false); }}
+          onClick={() => {
+            setSidebarOpen(false);
+          }}
           aria-hidden="true"
         />
       ) : null}
@@ -892,7 +888,7 @@ function Shell() {
               </div>
             ) : !journey ? (
               <div className="saas-nav-group">
-                <LoadingState label="Loading menuâ€¦" />
+                <LoadingState label="Loading menu…" />
               </div>
             ) : null}
 
@@ -915,7 +911,9 @@ function Shell() {
                 <button
                   type="button"
                   className="saas-accordion-header"
-                  onClick={() => { setAdminExpanded((prev) => !prev); }}
+                  onClick={() => {
+                    setAdminExpanded((prev) => !prev);
+                  }}
                   aria-expanded={adminOpen}
                 >
                   <span>Administration</span>
@@ -1986,7 +1984,11 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'users' && (
-              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
                 {can('users', 'view') || isSuperAdmin ? (
                   second && third === 'activity' ? (
                     <UserActivityPage
@@ -2026,7 +2028,11 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'permissions' && (
-              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
                 {can('roles', 'view') || isSuperAdmin ? (
                   <PermissionMatrixView />
                 ) : (
@@ -2038,7 +2044,11 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'forms' && (
-              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
                 {can('config', 'view') || isSuperAdmin ? (
                   <FormBuilder />
                 ) : (
@@ -2050,7 +2060,11 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'workflow' && (
-              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
                 {can('config', 'view') || isSuperAdmin ? (
                   <WorkflowDesigner />
                 ) : (
@@ -2062,7 +2076,11 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'masters' && (
-              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
                 {can('masters', 'view') || isSuperAdmin ? (
                   <MastersView />
                 ) : (
@@ -2074,7 +2092,11 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'options' && (
-              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
                 {can('config', 'view') || isSuperAdmin ? (
                   <OptionSetsManager />
                 ) : (
@@ -2102,7 +2124,11 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'numbering' && (
-              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
                 {can('config', 'view') || isSuperAdmin ? (
                   <NumberSeriesManager />
                 ) : (
@@ -2114,7 +2140,11 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'settings' && (
-              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
                 {can('config', 'view') || isSuperAdmin ? (
                   <SystemSettingsManager />
                 ) : (
@@ -2126,7 +2156,11 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'templates' && (
-              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
                 {can('config', 'view') || isSuperAdmin ? (
                   <PrintTemplatesManager />
                 ) : (
@@ -2138,7 +2172,11 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'history' && (
-              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
                 {can('config', 'view') || isSuperAdmin ? (
                   <ConfigHistoryViewer />
                 ) : (
@@ -2186,7 +2224,11 @@ function Shell() {
               </RequireAuth>
             )}
             {activeTab === 'guards' && (
-              <RequireAuth onSignIn={() => { setActiveTab('login'); }}>
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
                 {can('config', 'view') || isSuperAdmin ? (
                   <SystemGuardsViewer />
                 ) : (

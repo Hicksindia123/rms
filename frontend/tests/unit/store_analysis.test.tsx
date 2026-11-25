@@ -1,12 +1,11 @@
 /**
- * Phase P9 (DEC-69; Q15): the Intermediate Store user analyses its goods of a goods slip per item
- * + condition (Dispatch New Piece / Dispatch Repaired Piece / Not Allowed), the split must total
- * the pieces (G-21) before "Submit analysis" is enabled, the submission posts with an
- * Idempotency-Key, and any store user may send the GS for Management approval with a reason.
- * Rendered from backend-shaped payloads (backend/app/modules/final_actions/schemas.py
- * StoreAnalysis*); only the HTTP layer is mocked.
+ * Store analysis (DEC-69, DEC-75): the Intermediate Store user first splits each item + condition
+ * into Allowed / Not Allowed, then the Allowed pieces between Send New / Send Repaired (G-21), and
+ * may send pieces to Management with a proposal, with the submission or later. Rendered from
+ * backend-shaped payloads (backend/app/modules/final_actions/schemas.py StoreAnalysis*); only the
+ * HTTP layer is mocked.
  */
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const apiRequest = vi.fn<(path: string, options?: Record<string, unknown>) => Promise<unknown>>();
@@ -26,14 +25,14 @@ import { itemPath } from '@/features/journey/screens';
 const OPTIONS = [
   {
     code: 'SEND_NEW',
-    label: 'Dispatch New Piece',
+    label: 'Send New Pieces to Party',
     requires_cn: false,
     requires_challan: true,
     sort_order: 10,
   },
   {
     code: 'SEND_REPAIRED',
-    label: 'Dispatch Repaired Piece',
+    label: 'Send Repaired Pieces to Party',
     requires_cn: false,
     requires_challan: true,
     sort_order: 20,
@@ -45,6 +44,15 @@ const OPTIONS = [
     requires_challan: false,
     sort_order: 40,
   },
+];
+
+const VERDICTS = {
+  allowed: { label: 'Allowed', actions: ['SEND_NEW', 'SEND_REPAIRED'] },
+  not_allowed: { label: 'Not Allowed', actions: ['NOT_ALLOWED'] },
+};
+const PROPOSALS = [
+  { code: 'SEND_NEW', label: 'Send New Pieces to Party' },
+  { code: 'ISSUE_CN', label: 'Issue CN' },
 ];
 
 const DT = {
@@ -130,11 +138,14 @@ const GS = {
     },
   ],
   submittable_store_ids: ['s-dt'],
-  // Q36: a store sends for Management approval only after its own submission.
   approval_store_ids: [],
   can_request_approval: false,
+  can_send_to_management: false,
   open_approval_request: null,
   approval_requests: [],
+  verdicts: VERDICTS,
+  proposals: PROPOSALS,
+  request_lines: [],
 };
 
 /** Answers by path (StatusChip loads the status labels itself). A function gets the options. */
@@ -157,7 +168,7 @@ afterEach(() => {
   apiRequest.mockReset();
 });
 
-describe('Store analysis (P9, DEC-69)', () => {
+describe('Store analysis (DEC-69, DEC-75)', () => {
   it('opens a queue item on the analysis of its goods slip (My Work)', () => {
     expect(itemPath('gs-store-analysis', { gs_id: 'gs-1', target_id: 'gs-1' })).toBe(
       '/store-analysis/gs-1',
@@ -189,7 +200,7 @@ describe('Store analysis (P9, DEC-69)', () => {
     expect(onOpen).toHaveBeenCalledWith('gs-1');
   });
 
-  it('submits the store part only when every condition is fully decided (G-21)', async () => {
+  it('decides Allowed / Not Allowed first, then splits the Allowed pieces (G-21)', async () => {
     const done = {
       ...GS,
       stores: [
@@ -201,31 +212,40 @@ describe('Store analysis (P9, DEC-69)', () => {
     serve({ '/store-analysis/gs/gs-1': GS, '/store-analysis/gs/gs-1/submit': done });
     render(<StoreAnalysisGsPage gsId="gs-1" onBack={vi.fn()} onOpenGs={vi.fn()} />);
     const item = await screen.findByTestId('analysis-item-1');
-    // Only the store's own item by default; Issue CN is not an option.
+    // Only the store's own item by default; Issue CN is never a store option.
     expect(screen.queryByTestId('analysis-item-2')).not.toBeInTheDocument();
     expect(within(item).queryByText(/Issue CN/)).not.toBeInTheDocument();
-    const submit = screen.getByRole('button', { name: 'Submit analysis' });
-    expect(submit).toBeDisabled();
-    expect(
-      screen.queryByRole('button', { name: /Send for Management Approval/ }),
-    ).not.toBeInTheDocument();
+    // Step 1 shows the two verdicts only; the Allowed actions appear after a verdict.
+    expect(within(item).getAllByText('Allowed')).toHaveLength(2);
+    expect(within(item).queryByText('Send New Pieces to Party')).not.toBeInTheDocument();
+    const review = screen.getByRole('button', { name: /Review & submit/ });
+    expect(review).toBeDisabled();
 
-    // Working: 1 new + 1 not allowed; Broken: all repaired (touch shortcut).
-    fireEvent.change(within(item).getByLabelText('Dispatch New Piece, Working, item 1'), {
+    // Working (2 pcs): 1 Allowed (→ 1 Not Allowed), the Allowed piece goes as a new piece.
+    fireEvent.change(within(item).getByLabelText('Allowed pieces, Working, item 1'), {
       target: { value: '1' },
     });
-    expect(within(item).getByText('1 of 2 decided')).toBeInTheDocument();
-    expect(submit).toBeDisabled();
-    fireEvent.change(within(item).getByLabelText('Not Allowed, Working, item 1'), {
-      target: { value: '1' },
-    });
-    fireEvent.click(
-      within(item).getByRole('button', { name: 'All 1 pcs: Dispatch Repaired Piece' }),
+    expect(within(item).getByLabelText('Not Allowed pieces, Working, item 1')).toHaveTextContent(
+      '1',
     );
-    expect(submit).toBeEnabled();
+    expect(review).toBeDisabled(); // the Allowed piece is not split yet
+    fireEvent.click(
+      within(item).getByRole('button', { name: 'All 1 allowed pcs: Send New Pieces to Party' }),
+    );
+    // Broken (1 pc): all Allowed, sent repaired.
+    fireEvent.click(within(item).getByRole('button', { name: 'All 1 pcs Allowed' }));
+    const allowedRepaired = within(item).getAllByRole('button', {
+      name: 'All 1 allowed pcs: Send Repaired Pieces to Party',
+    });
+    fireEvent.click(allowedRepaired[allowedRepaired.length - 1] as HTMLElement);
+    expect(review).toBeEnabled();
 
-    fireEvent.click(submit);
-    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    fireEvent.click(review);
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByTestId('mgmt-summary')).toHaveTextContent(
+      'Nothing goes to Management',
+    );
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Submit analysis' }));
     await screen.findByText(/Analysis submitted for/);
     const [submitCall] = calls('/store-analysis/gs/gs-1/submit');
     expect(submitCall?.[1]).toMatchObject({
@@ -233,6 +253,8 @@ describe('Store analysis (P9, DEC-69)', () => {
       idempotencyKey: 'web-test-key',
       body: {
         store_id: 's-dt',
+        management_lines: [],
+        management_approval_reason: null,
         lines: [
           {
             gs_item_id: 'i-1',
@@ -250,128 +272,50 @@ describe('Store analysis (P9, DEC-69)', () => {
         ],
       },
     });
-    expect(screen.queryByRole('button', { name: 'Submit analysis' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Review & submit/ })).not.toBeInTheDocument();
   });
 
   it('shows the other stores read-only behind the toggle', async () => {
     serve({ '/store-analysis/gs/gs-1': GS });
     render(<StoreAnalysisGsPage gsId="gs-1" onBack={vi.fn()} onOpenGs={vi.fn()} />);
     await screen.findByTestId('analysis-item-1');
-    fireEvent.click(screen.getByLabelText(/Show all items of this GS/));
+    fireEvent.click(screen.getByLabelText(/Show all items of this goods slip/));
     const other = screen.getByTestId('analysis-item-2');
     expect(within(other).getByText('Intermediate Store OP')).toBeInTheDocument();
     expect(within(other).getByText('Not decided yet')).toBeInTheDocument();
     expect(within(other).queryByRole('spinbutton')).not.toBeInTheDocument();
   });
 
-  it('sends the goods slip for Management approval with a reason (after submitting)', async () => {
-    const submitted = {
+  it('sends selected pieces to Management with the submission (optional note)', async () => {
+    const done = {
       ...GS,
       stores: [OP, { ...DT, analysis_status: 'SUBMITTED', total_qty: 3 }],
       submittable_store_ids: [],
-      approval_store_ids: ['s-dt'],
-      can_request_approval: true,
     };
-    serve({
-      '/store-analysis/gs/gs-1': submitted,
-      '/store-analysis/gs/gs-1/management-approval': {
-        ...GS,
-        can_request_approval: false,
-        open_approval_request: {
-          id: 'r-1',
-          store_id: 's-dt',
-          store_name: 'Intermediate Store DT',
-          reason: 'Party asks for a credit note',
-          status: 'OPEN',
-          requested_at: '2026-11-23T11:00:00Z',
-          requested_by_name: 'Dinesh',
-        },
-      },
-    });
+    serve({ '/store-analysis/gs/gs-1': GS, '/store-analysis/gs/gs-1/submit': done });
     render(<StoreAnalysisGsPage gsId="gs-1" onBack={vi.fn()} onOpenGs={vi.fn()} />);
-    await screen.findByTestId('analysis-item-1');
-    fireEvent.click(screen.getByRole('button', { name: /Send for Management Approval/ }));
-    const send = screen.getByRole('button', { name: 'Send' });
-    expect(send).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('Reason (required)'), {
-      target: { value: 'Party asks for a credit note' },
-    });
-    fireEvent.click(send);
-    expect(await screen.findByTestId('approval-request')).toHaveTextContent(
-      'Party asks for a credit note',
+    const item = await screen.findByTestId('analysis-item-1');
+    fireEvent.click(within(item).getByRole('button', { name: 'All 2 pcs Allowed' }));
+    fireEvent.click(
+      within(item).getByRole('button', { name: 'All 2 allowed pcs: Send New Pieces to Party' }),
     );
-    expect(calls('/store-analysis/gs/gs-1/management-approval')[0]?.[1]).toEqual({
-      method: 'POST',
-      body: { store_id: 's-dt', reason: 'Party asks for a credit note' },
-      idempotencyKey: 'web-test-key',
-    });
-    await waitFor(() => {
-      expect(
-        screen.queryByRole('button', { name: /Send for Management Approval/ }),
-      ).not.toBeInTheDocument();
-    });
-  });
-
-  it('shows the error with the request id and keeps the decisions', async () => {
-    serve({
-      '/store-analysis/gs/gs-1': GS,
-      '/store-analysis/gs/gs-1/submit': new Error('G-21: decisions total 2 pc(s)'),
-    });
-    render(<StoreAnalysisGsPage gsId="gs-1" onBack={vi.fn()} onOpenGs={vi.fn()} />);
-    const item = await screen.findByTestId('analysis-item-1');
-    fireEvent.click(within(item).getByRole('button', { name: 'All 2 pcs: Not Allowed' }));
-    fireEvent.click(within(item).getByRole('button', { name: 'All 1 pcs: Not Allowed' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Submit analysis' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
-    expect(await screen.findByText('The analysis was not submitted')).toBeInTheDocument();
-    expect(screen.getByText(/G-21: decisions total 2 pc\(s\)/)).toBeInTheDocument();
-    expect(within(item).getByText('2 of 2 decided')).toBeInTheDocument();
-  });
-});
-
-describe('Issue CN Request (DEC-74)', () => {
-  const CN_OPTION = {
-    code: 'ISSUE_CN_REQUEST',
-    label: 'Issue CN Request',
-    requires_cn: false,
-    requires_challan: false,
-    sort_order: 35,
-    is_cn_request: true,
-  };
-  const WITH_CN = {
-    ...GS,
-    items: GS.items.map((it) => ({ ...it, options: [...OPTIONS, CN_OPTION] })),
-  };
-
-  it('sends the requested pieces to Management with the submission (optional note)', async () => {
-    const done = {
-      ...WITH_CN,
-      stores: [OP, { ...DT, analysis_status: 'SUBMITTED', total_qty: 3 }],
-      submittable_store_ids: [],
-    };
-    serve({ '/store-analysis/gs/gs-1': WITH_CN, '/store-analysis/gs/gs-1/submit': done });
-    render(<StoreAnalysisGsPage gsId="gs-1" onBack={vi.fn()} onOpenGs={vi.fn()} />);
-    const item = await screen.findByTestId('analysis-item-1');
-    // A 4th option; Issue CN itself is still not offered.
-    expect(within(item).getAllByText('Issue CN Request')).toHaveLength(2);
-    expect(within(item).queryByText('Issue CN')).not.toBeInTheDocument();
-
-    fireEvent.change(within(item).getByLabelText('Dispatch New Piece, Working, item 1'), {
-      target: { value: '1' },
-    });
-    fireEvent.change(within(item).getByLabelText('Issue CN Request, Working, item 1'), {
-      target: { value: '1' },
-    });
-    fireEvent.click(within(item).getByRole('button', { name: 'All 1 pcs: Issue CN Request' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Submit analysis' }));
+    fireEvent.click(within(item).getByRole('button', { name: 'All 1 pcs Not Allowed' }));
+    fireEvent.click(screen.getByRole('button', { name: /Review & submit/ }));
 
     const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getByTestId('cn-request-notice')).toHaveTextContent(
-      '2 pc(s) go to Management as an Issue CN Request',
+    const row = within(dialog).getByTestId('mgmt-pick-i-1|c-b|NOT_ALLOWED');
+    expect(row).toHaveTextContent('Currently Not Allowed');
+    fireEvent.click(
+      within(row).getByRole('button', {
+        name: 'Increase Pieces to send, item 1, Broken, Not Allowed',
+      }),
     );
-    // No "Also send" checkbox: the CN request goes to Management anyway.
-    expect(within(dialog).queryByLabelText('Also send for Management approval')).toBeNull();
-    const send = within(dialog).getByRole('button', { name: 'Submit & send CN request' });
+    const send = within(dialog).getByRole('button', { name: 'Submit & send to Management' });
+    expect(send).toBeDisabled(); // no proposal chosen yet
+    fireEvent.click(within(row).getByRole('radio', { name: 'Issue CN' }));
+    expect(within(dialog).getByTestId('mgmt-summary')).toHaveTextContent(
+      '1 item(s) · 1 pcs go to Management',
+    );
     const note = within(dialog).getByLabelText('Note for Management (optional)');
     fireEvent.change(note, { target: { value: 'ab' } });
     expect(send).toBeDisabled();
@@ -383,20 +327,131 @@ describe('Issue CN Request (DEC-74)', () => {
       body: {
         store_id: 's-dt',
         management_approval_reason: 'Party insists',
-        lines: [
+        management_lines: [
           {
-            condition_field_id: 'c-a',
-            decisions: [
-              { action_code: 'SEND_NEW', qty: 1 },
-              { action_code: 'ISSUE_CN_REQUEST', qty: 1 },
-            ],
-          },
-          {
+            gs_item_id: 'i-1',
             condition_field_id: 'c-b',
-            decisions: [{ action_code: 'ISSUE_CN_REQUEST', qty: 1 }],
+            from_action_code: 'NOT_ALLOWED',
+            proposed_action_code: 'ISSUE_CN',
+            qty: 1,
           },
         ],
       },
     });
+  });
+
+  it('sends pieces to Management after the submission', async () => {
+    const submitted = {
+      ...GS,
+      stores: [OP, { ...DT, analysis_status: 'SUBMITTED', total_qty: 3 }],
+      submittable_store_ids: [],
+      approval_store_ids: ['s-dt'],
+      can_request_approval: true,
+      can_send_to_management: true,
+      items: GS.items.map((it) =>
+        it.gs_item_id !== 'i-1'
+          ? it
+          : {
+              ...it,
+              groups: [
+                {
+                  ...it.groups[0],
+                  decisions: [{ action_code: 'NOT_ALLOWED', label: 'Not Allowed', qty: 2 }],
+                  sendable: [
+                    { action_code: 'NOT_ALLOWED', label: 'Not Allowed', qty: 2, free_qty: 2 },
+                  ],
+                },
+                {
+                  ...it.groups[1],
+                  decisions: [
+                    { action_code: 'SEND_NEW', label: 'Send New Pieces to Party', qty: 1 },
+                  ],
+                  sendable: [
+                    {
+                      action_code: 'SEND_NEW',
+                      label: 'Send New Pieces to Party',
+                      qty: 1,
+                      free_qty: 1,
+                    },
+                  ],
+                },
+              ],
+            },
+      ),
+    };
+    const LINE = {
+      id: 'l-1',
+      request_id: 'r-1',
+      request_status: 'OPEN',
+      gs_item_id: 'i-1',
+      line_no: 1,
+      product_name: 'Digital thermometer',
+      condition_field_id: 'c-a',
+      condition_label: 'Working',
+      store_id: 's-dt',
+      store_name: 'Intermediate Store DT',
+      from_action_code: 'NOT_ALLOWED',
+      from_action_label: 'Not Allowed',
+      proposed_action_code: 'ISSUE_CN',
+      proposed_action_label: 'Issue CN',
+      qty: 2,
+      requested_at: '2026-11-25T11:00:00Z',
+      requested_by_name: 'Dinesh',
+    };
+    serve({
+      '/store-analysis/gs/gs-1': submitted,
+      '/store-analysis/gs/gs-1/management-approval': { ...submitted, request_lines: [LINE] },
+    });
+    render(<StoreAnalysisGsPage gsId="gs-1" onBack={vi.fn()} onOpenGs={vi.fn()} />);
+    await screen.findByTestId('analysis-item-1');
+    fireEvent.click(screen.getByRole('button', { name: /Send for Management approval/ }));
+    const dialog = screen.getByRole('dialog');
+    const send = within(dialog).getByRole('button', { name: 'Send' });
+    expect(send).toBeDisabled();
+    const row = within(dialog).getByTestId('mgmt-pick-i-1|c-a|NOT_ALLOWED');
+    fireEvent.change(within(row).getByLabelText('Pieces to send, item 1, Working, Not Allowed'), {
+      target: { value: '2' },
+    });
+    fireEvent.click(within(row).getByRole('radio', { name: 'Issue CN' }));
+    expect(within(dialog).getByText('1 item(s) · 2 pcs')).toBeInTheDocument();
+    fireEvent.click(send);
+    expect(await screen.findByTestId('approval-request')).toHaveTextContent(
+      '2 pcs Not Allowed → Issue CN',
+    );
+    expect(calls('/store-analysis/gs/gs-1/management-approval')[0]?.[1]).toEqual({
+      method: 'POST',
+      body: {
+        lines: [
+          {
+            gs_item_id: 'i-1',
+            condition_field_id: 'c-a',
+            from_action_code: 'NOT_ALLOWED',
+            proposed_action_code: 'ISSUE_CN',
+            qty: 2,
+          },
+        ],
+        reason: null,
+      },
+      idempotencyKey: 'web-test-key',
+    });
+  });
+
+  it('shows the error with the request id and keeps the decisions', async () => {
+    serve({
+      '/store-analysis/gs/gs-1': GS,
+      '/store-analysis/gs/gs-1/submit': new Error('Decisions total 2 pc(s)'),
+    });
+    render(<StoreAnalysisGsPage gsId="gs-1" onBack={vi.fn()} onOpenGs={vi.fn()} />);
+    const item = await screen.findByTestId('analysis-item-1');
+    fireEvent.click(within(item).getByRole('button', { name: 'All 2 pcs Not Allowed' }));
+    fireEvent.click(within(item).getByRole('button', { name: 'All 1 pcs Not Allowed' }));
+    fireEvent.click(screen.getByRole('button', { name: /Review & submit/ }));
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Submit analysis' }),
+    );
+    expect(await screen.findByText('The analysis was not submitted')).toBeInTheDocument();
+    expect(screen.getByText(/Decisions total 2 pc\(s\)/)).toBeInTheDocument();
+    expect(screen.getByText(/req-p9/)).toBeInTheDocument();
+    expect(within(item).getAllByText('Decided')).toHaveLength(2);
   });
 });

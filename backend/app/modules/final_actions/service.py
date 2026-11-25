@@ -25,6 +25,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
+from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.orm import Session
 
 from app.core.db import UnitOfWork
@@ -58,14 +59,19 @@ from app.modules.final_actions.schemas import (
     ItemConditionQty,
     ManagementApprovalRequestIn,
     ManagementApprovalRequestOut,
+    ManagementLineIn,
+    ManagementRequestLineOut,
     OutcomeQty,
+    ProposalOptionOut,
     SaveFinalActionsIn,
+    SendableDecisionOut,
     StoreAnalysisGroupOut,
     StoreAnalysisGsOut,
     StoreAnalysisItemOut,
     StoreAnalysisQueueRowOut,
     StoreAnalysisStoreOut,
     StoreAnalysisSubmitIn,
+    VerdictsOut,
 )
 from app.modules.goods_slips import service as gs_service
 from app.modules.management_approval import service as management_approval
@@ -1122,9 +1128,16 @@ ANALYSIS_TASK_STEP = "STORE_ANALYSIS"
 READY_FOR_ANALYSIS = "READY_FOR_ANALYSIS"
 # Q15 / DEC-70: stable codes the store never picks (Issue CN = Management, Pending retired).
 STORE_RESERVED_ACTIONS = frozenset({"ISSUE_CN", PENDING_ACTION})
-# DEC-74: instead, the store may put pieces on "Issue CN Request"; Management decides them.
+# DEC-74 "Issue CN Request" (retired by DEC-75; still read on goods slips that carry it).
 CN_REQUEST_ACTION = management_approval.CN_REQUEST_ACTION
 REQUEST_REASON_MAX = 500
+# DEC-75: configuration of the store analysis.
+VERDICTS_SETTING = "store_analysis.verdicts"
+PROPOSALS_SETTING = "store_analysis.management_proposals"
+# DEC-75: pieces may be sent to Management from the submission until Accounts completes the GS.
+# At Accounts (entry not completed) or on hold, sending withdraws the Replacement Slip (DEC-71).
+SEND_STATUSES = frozenset({*STORE_ANALYSIS_STATUSES, "ACCOUNTS_PENDING", "NOT_ALLOWED_HOLD"})
+REOPEN_STATUSES = frozenset({"ACCOUNTS_PENDING", "NOT_ALLOWED_HOLD"})
 
 
 class StoreAnalysisService:
@@ -1132,20 +1145,57 @@ class StoreAnalysisService:
         self._uow = uow
 
     @staticmethod
+    def _verdicts(session: Session) -> VerdictsOut:
+        """DEC-75: the Allowed / Not Allowed verdicts (setting store_analysis.verdicts)."""
+        raw = repo.get_setting(session, VERDICTS_SETTING)
+        try:
+            out = VerdictsOut.model_validate(raw)
+        except PydanticValidationError:
+            log.error("store_verdicts_setting_invalid", key=VERDICTS_SETTING, value=raw)
+            raise Conflict(
+                f"System setting '{VERDICTS_SETTING}' is missing or invalid",
+                code="SETTING_INVALID",
+                details={"key": VERDICTS_SETTING},
+            ) from None
+        if not out.allowed.actions or not out.not_allowed.actions:
+            log.error("store_verdicts_setting_empty", key=VERDICTS_SETTING)
+            raise Conflict(
+                f"System setting '{VERDICTS_SETTING}' needs actions under both verdicts",
+                code="SETTING_INVALID",
+                details={"key": VERDICTS_SETTING},
+            )
+        return out
+
+    @staticmethod
+    def _verdict_codes(verdicts: VerdictsOut) -> set[str]:
+        return set(verdicts.allowed.actions) | set(verdicts.not_allowed.actions)
+
+    @staticmethod
+    def _proposals(session: Session) -> list[ProposalOptionOut]:
+        """DEC-75: what a store may propose to Management (store_analysis.management_proposals)."""
+        raw = repo.get_setting(session, PROPOSALS_SETTING)
+        if not isinstance(raw, list) or not all(isinstance(c, str) for c in raw):
+            log.error("store_proposals_setting_invalid", key=PROPOSALS_SETTING, value=raw)
+            raise Conflict(
+                f"System setting '{PROPOSALS_SETTING}' is missing or invalid",
+                code="SETTING_INVALID",
+                details={"key": PROPOSALS_SETTING},
+            )
+        labels = repo.action_labels(session, list(raw))
+        return [ProposalOptionOut(code=str(c), label=labels.get(str(c), str(c))) for c in raw]
+
+    @staticmethod
     def _store_options(
-        session: Session, product_id: UUID, version_id: UUID | None
+        session: Session, product_id: UUID, version_id: UUID | None, verdict_codes: set[str]
     ) -> list[FinalActionOption]:
-        """DEC-69 store options (profile actions minus Issue CN / Pending) + DEC-74 Issue CN
-        Request when the product may get a credit note and the option is switched on."""
-        out = [
+        """DEC-75 store options: the product's profile actions that sit under a verdict (Allowed:
+        Send New / Send Repaired; Not Allowed). Issue CN / Pending are never store options
+        (DEC-69, DEC-70), whatever the setting says."""
+        return [
             FinalActionOption(**a)
             for a in repo.allowed_actions(session, product_id, version_id)
-            if a["code"] not in STORE_RESERVED_ACTIONS and a["code"] != CN_REQUEST_ACTION
+            if a["code"] in verdict_codes and a["code"] not in STORE_RESERVED_ACTIONS
         ]
-        cn = repo.cn_request_option(session, product_id, version_id, CN_REQUEST_ACTION)
-        if cn:
-            out.append(FinalActionOption(**cn, is_cn_request=True))
-        return out
 
     # --- scope -------------------------------------------------------------------------------
 
@@ -1231,6 +1281,15 @@ class StoreAnalysisService:
                     **{k: o[k] for k in ("outcome_code", "outcome_label", "is_wastage", "qty")}
                 )
             )
+        verdicts = self._verdicts(session)
+        verdict_codes = self._verdict_codes(verdicts)
+        lines = [
+            ManagementRequestLineOut.model_validate(r) for r in repo.request_lines(session, gs_id)
+        ]
+        open_lines: dict[tuple[UUID, UUID | None], list[ManagementRequestLineOut]] = {}
+        for ln in lines:
+            if ln.request_status == "OPEN":
+                open_lines.setdefault((ln.gs_item_id, ln.condition_field_id), []).append(ln)
         options: dict[UUID, list[FinalActionOption]] = {}
         items: dict[UUID, StoreAnalysisItemOut] = {}
         for g in repo.store_analysis_groups(session, gs_id):
@@ -1238,7 +1297,7 @@ class StoreAnalysisService:
             if item is None:
                 if g["product_id"] not in options:
                     options[g["product_id"]] = self._store_options(
-                        session, g["product_id"], version_id
+                        session, g["product_id"], version_id, verdict_codes
                     )
                 item = items[g["gs_item_id"]] = StoreAnalysisItemOut(
                     gs_item_id=g["gs_item_id"],
@@ -1253,13 +1312,29 @@ class StoreAnalysisService:
                     outcomes=outcomes.get(g["gs_item_id"], []),
                     options=options[g["product_id"]],
                 )
+            key = (g["gs_item_id"], g["condition_field_id"])
+            group_lines = open_lines.get(key, [])
+            group_decisions = decisions.get(key, [])
             item.groups.append(
                 StoreAnalysisGroupOut(
                     condition_field_id=g["condition_field_id"],
                     condition_code=g["condition_code"],
                     condition_label=g["condition_label"],
                     qty=g["available_qty"],
-                    decisions=decisions.get((g["gs_item_id"], g["condition_field_id"]), []),
+                    decisions=group_decisions,
+                    sendable=[
+                        SendableDecisionOut(
+                            action_code=d.action_code,
+                            label=d.label,
+                            qty=d.qty,
+                            free_qty=d.qty
+                            - sum(
+                                x.qty for x in group_lines if x.from_action_code == d.action_code
+                            ),
+                        )
+                        for d in group_decisions
+                    ],
+                    management_lines=group_lines,
                 )
             )
         requests = [
@@ -1267,9 +1342,17 @@ class StoreAnalysisService:
             for r in repo.list_approval_requests(session, gs_id)
         ]
         open_request = next((r for r in requests if r.status == "OPEN"), None)
-        # Q36 (user 2026-11-23): a store sends for approval once it submitted its own analysis.
+        # Q36 / DEC-75: a store sends pieces once it submitted its own analysis.
         mine = [s.store_id for s in stores if s.is_mine and s.analysis_status == "SUBMITTED"]
         can_analyse = gs["status"] == ANALYSIS_STATUS
+        can_send = (
+            bool(mine)
+            and gs["status"] in SEND_STATUSES
+            and not (
+                gs["status"] == "ACCOUNTS_PENDING"
+                and ac_entry_service.accounts_entry_completed(session, gs_id)
+            )
+        )
         return StoreAnalysisGsOut(
             gs_id=gs["id"],
             gs_no=gs["gs_no"],
@@ -1284,11 +1367,13 @@ class StoreAnalysisService:
                 if s.is_mine and s.analysis_status == "PENDING" and can_analyse
             ],
             approval_store_ids=mine,
-            can_request_approval=bool(mine)
-            and open_request is None
-            and gs["status"] in STORE_ANALYSIS_STATUSES,
+            can_request_approval=can_send,
             open_approval_request=open_request,
             approval_requests=requests,
+            verdicts=verdicts,
+            proposals=self._proposals(session),
+            request_lines=lines,
+            can_send_to_management=can_send,
         )
 
     # --- submit ------------------------------------------------------------------------------
@@ -1403,6 +1488,8 @@ class StoreAnalysisService:
         seen: set[tuple[UUID, UUID | None]] = set()
         allowed: dict[UUID, dict[str, str]] = {}
         new_rows: list[tuple[dict[str, Any], str, int]] = []
+        verdicts = self._verdicts(session)
+        verdict_codes = self._verdict_codes(verdicts)
         for line in payload.lines:
             key = (line.gs_item_id, line.condition_field_id)
             grp = groups.get(key)
@@ -1435,13 +1522,7 @@ class StoreAnalysisService:
                 allowed[grp["product_id"]] = {
                     a["code"]: a["label"]
                     for a in repo.allowed_actions(session, grp["product_id"], version_id)
-                    if a["code"] != CN_REQUEST_ACTION
                 }
-                cn = repo.cn_request_option(
-                    session, grp["product_id"], version_id, CN_REQUEST_ACTION
-                )
-                if cn:
-                    allowed[grp["product_id"]][CN_REQUEST_ACTION] = cn["label"]
             codes: set[str] = set()
             total = 0
             for d in line.decisions:
@@ -1455,18 +1536,18 @@ class StoreAnalysisService:
                 if d.action_code in STORE_RESERVED_ACTIONS:
                     raise PermissionDenied(
                         f"{where(grp)}: {d.action_code} is not a store analysis option; Issue CN "
-                        "is decided by Management (DEC-69, DEC-70): use Issue CN Request (DEC-74)",
+                        "is decided by Management (DEC-69, DEC-70): send the pieces to Management "
+                        "with the proposal Issue CN (DEC-75)",
                         code="ACTION_RESERVED",
                         details={"action_code": d.action_code},
                     )
-                if (
-                    d.action_code == CN_REQUEST_ACTION
-                    and d.action_code not in allowed[grp["product_id"]]
-                ):
+                if d.action_code not in verdict_codes:
+                    # DEC-75: the store decides Allowed (Send New / Send Repaired) or Not Allowed.
                     raise ValidationFailed(
-                        f"{where(grp)}: Issue CN Request is not available for this product (no "
-                        "credit-note action in its profile, or the option is switched off)",
-                        code="CN_REQUEST_NOT_AVAILABLE",
+                        f"{where(grp)}: {d.action_code} is not an "
+                        f"{verdicts.allowed.label} / {verdicts.not_allowed.label} option",
+                        code="ACTION_NOT_A_VERDICT",
+                        details={"action_code": d.action_code},
                     )
                 if d.action_code not in allowed[grp["product_id"]]:
                     raise SystemGuardViolation(
@@ -1535,23 +1616,17 @@ class StoreAnalysisService:
         repo.validate_store_analysis(session, gs_id)
         repo.validate_reconciliation(session, gs_id)
 
-        # DEC-71 / Q36: the submission is recorded; its request (if any) is recorded now,
-        # before the Accounts gate below, so the goods slip waits for Management.
-        cn_lines = [(grp, qty) for grp, code, qty in new_rows if code == CN_REQUEST_ACTION]
-        if cn_lines:
-            # DEC-74: pieces on Issue CN Request go to Management (the Accounts gate waits for
-            # them in any case; the request puts the goods slip in Management's queue).
-            self._raise_cn_request(
-                session, actor, gs, store, cn_lines, payload.management_approval_reason
+        # DEC-75 / Q36: the submission is recorded; pieces sent to Management (if any) are recorded
+        # now, before the Accounts gate below, so the goods slip waits for Management. Nothing
+        # selected = nothing goes to Management (the goods slip goes on to Accounts).
+        if payload.management_lines:
+            self._send_lines(
+                session, actor, gs, payload.management_lines, payload.management_approval_reason
             )
         elif payload.management_approval_reason:
-            self._request_approval(
-                session,
-                actor,
-                gs_id,
-                ManagementApprovalRequestIn(
-                    store_id=payload.store_id, reason=payload.management_approval_reason
-                ),
+            raise ValidationFailed(
+                "Select the pieces to send for Management approval (a note alone sends nothing)",
+                code="MANAGEMENT_LINES_REQUIRED",
             )
 
         # 4. The store's analysis task closes; the last store completes the GS.
@@ -1609,55 +1684,176 @@ class StoreAnalysisService:
         )
         return self._gs(session, actor, gs_id)
 
-    def _raise_cn_request(
+    def _send_lines(
         self,
         session: Session,
         actor: CurrentUser,
         gs: dict[str, Any],
-        store: dict[str, Any],
-        cn_lines: list[tuple[dict[str, Any], int]],
+        lines: list[ManagementLineIn],
         note: str | None,
     ) -> None:
-        """DEC-74: the store's Issue CN Request (item + condition + qty) as a Management approval
-        request. One OPEN request per goods slip: if another store's request is already open, the
-        pieces are added to Management's attention by an alert (the gate waits for them anyway)."""
-        parts = []
-        for grp, qty in cn_lines:
-            cond = f" ({grp['condition_label']})" if grp["condition_label"] else ""
-            parts.append(f"#{grp['line_no']} {grp['product_name']}{cond} {qty} pc(s)")
-        reason_text = "Issue CN Request: " + "; ".join(parts)
+        """DEC-75: pieces (item + condition + current decision + qty) go to Management with a
+        proposed action. They join the OPEN request of the goods slip, or open one. At Accounts
+        (entry not completed) or on hold the Replacement Slip is withdrawn first (DEC-71), so the
+        goods slip waits for Management again. The DB guard checks the same rules."""
+        gs_id = gs["id"]
+        if gs["status"] not in SEND_STATUSES:
+            raise Conflict(
+                f"{gs['gs_no']} is {gs['status']}: pieces are sent for Management approval from "
+                "the store analysis until Accounts completes the goods slip",
+                code="INVALID_GS_STATUS",
+                details={"status": gs["status"]},
+            )
+        if gs["status"] == "ACCOUNTS_PENDING" and ac_entry_service.accounts_entry_completed(
+            session, gs_id
+        ):
+            raise Conflict(
+                f"Accounts completed {gs['gs_no']}; its pieces can no longer be sent to Management",
+                code="ACCOUNTS_COMPLETED",
+            )
+        version_id = gs["item_field_profile_version_id"]
+        groups = {
+            (g["gs_item_id"], g["condition_field_id"]): g
+            for g in repo.store_analysis_groups(session, gs_id)
+        }
+        progress = {s["store_id"]: s for s in repo.store_analysis_progress(session, gs_id)}
+        proposals = {p.code: p.label for p in self._proposals(session)}
+        acts: dict[UUID, bool] = {}
+        current: dict[tuple[UUID, UUID | None, str], dict[str, Any]] = {}
+        for a in repo.current_actions(session, gs_id, 1):
+            current[(a["gs_item_id"], a["condition_field_id"], a["action_code"])] = a
+
+        def where(g: dict[str, Any]) -> str:
+            cond = f" ({g['condition_label']})" if g["condition_label"] else ""
+            return f"Item #{g['line_no']} {g['product_name']}{cond}"
+
+        wanted: dict[tuple[UUID, UUID | None, str, str], int] = {}
+        for ln in lines:
+            key = (ln.gs_item_id, ln.condition_field_id)
+            grp = groups.get(key)
+            if grp is None:
+                raise ValidationFailed(
+                    f"A selected piece is not on {gs['gs_no']}",
+                    code="CONDITION_NOT_IN_ITEM",
+                    details={"gs_item_id": str(ln.gs_item_id)},
+                )
+            if not self._acts_for(session, actor, acts, grp["store_id"]):
+                raise PermissionDenied(
+                    f"{where(grp)} belongs to {grp['store_name'] or 'no Intermediate Store'}; "
+                    "only a user of that store sends its pieces to Management",
+                    code="ITEM_OF_OTHER_STORE",
+                )
+            part = progress.get(grp["store_id"])
+            if part is None or part["analysis_status"] != "SUBMITTED":
+                raise Conflict(
+                    f"{grp['store_name']} sends pieces to Management with or after its analysis "
+                    "submission",
+                    code="ANALYSIS_NOT_SUBMITTED",
+                )
+            if ln.proposed_action_code not in proposals:
+                raise ValidationFailed(
+                    f"{where(grp)}: {ln.proposed_action_code} is not a proposal for Management "
+                    f"(options: {', '.join(proposals.values())})",
+                    code="PROPOSAL_NOT_ALLOWED",
+                )
+            if ln.proposed_action_code == ln.from_action_code:
+                raise ValidationFailed(
+                    f"{where(grp)}: the proposal is the same as the current decision",
+                    code="PROPOSAL_UNCHANGED",
+                )
+            if (ln.gs_item_id, ln.condition_field_id, ln.from_action_code) not in current:
+                raise ValidationFailed(
+                    f"{where(grp)}: no current {ln.from_action_code} decision to send",
+                    code="DECISION_NOT_FOUND",
+                )
+            allowed = {
+                a["code"] for a in repo.allowed_actions(session, grp["product_id"], version_id)
+            }
+            if ln.proposed_action_code not in allowed:
+                raise SystemGuardViolation(
+                    "G-21",
+                    f"G-21: {ln.proposed_action_code} is not allowed by the resolved profile of "
+                    f"item #{grp['line_no']} ({grp['product_name']})",
+                    details={"line_no": grp["line_no"], "action_code": ln.proposed_action_code},
+                )
+            k = (ln.gs_item_id, ln.condition_field_id, ln.from_action_code, ln.proposed_action_code)
+            wanted[k] = wanted.get(k, 0) + ln.qty
+        # Free pieces per current decision (already in an OPEN request = not free).
+        per_from: dict[tuple[UUID, UUID | None, str], int] = {}
+        for (item_id, cond_id, from_code, _), qty in wanted.items():
+            per_from[(item_id, cond_id, from_code)] = (
+                per_from.get((item_id, cond_id, from_code), 0) + qty
+            )
+        for (item_id, cond_id, from_code), qty in per_from.items():
+            free = repo.request_free_qty(session, item_id, cond_id, from_code)
+            if qty > free:
+                grp = groups[(item_id, cond_id)]
+                label = current[(item_id, cond_id, from_code)]["label"]
+                raise ValidationFailed(
+                    f"{where(grp)}: {free} pc(s) of {label} are free to send, not {qty}",
+                    code="QTY_EXCEEDS_FREE",
+                    details={"line_no": grp["line_no"], "free_qty": free, "qty": qty},
+                )
+
+        parts: list[str] = []
+        for (item_id, cond_id, from_code, prop), qty in wanted.items():
+            grp = groups[(item_id, cond_id)]
+            parts.append(
+                f"{where(grp)}: {qty} pc(s) {current[(item_id, cond_id, from_code)]['label']} → "
+                f"{proposals[prop]}"
+            )
+        summary = "; ".join(parts)
         note = (note or "").strip()
-        if note:
-            reason_text += f". Note: {note}"
+        reason_text = summary + (f". Note: {note}" if note else "")
         if len(reason_text) > REQUEST_REASON_MAX:
             reason_text = reason_text[: REQUEST_REASON_MAX - 1] + "…"
-        total = sum(q for _, q in cn_lines)
-        gs_id = gs["id"]
-        if any(r["status"] == "OPEN" for r in repo.list_approval_requests(session, gs_id)):
-            notifications.publish(
+
+        if gs["status"] in REOPEN_STATUSES:
+            # DEC-71: withdraw the Replacement Slip / leave the hold (same transaction).
+            ac_entry_service.reopen_for_management(
+                session, gs_id, actor, f"pieces sent to Management by a store: {summary}"[:400]
+            )
+        first_store = groups[(lines[0].gs_item_id, lines[0].condition_field_id)]["store_id"]
+        open_request = next(
+            (r for r in repo.list_approval_requests(session, gs_id) if r["status"] == "OPEN"), None
+        )
+        request_id = (
+            open_request["id"]
+            if open_request
+            else repo.insert_approval_request(
+                session, gs_id=gs_id, store_id=first_store, reason=reason_text
+            )
+        )
+        for (item_id, cond_id, from_code, prop), qty in wanted.items():
+            repo.insert_request_line(
                 session,
-                "MANAGEMENT_APPROVAL_REQUESTED",
-                title=f"{gs['gs_no']}: Issue CN Request from {store['name']}",
-                body=f"{actor.full_name} ({store['name']}): {reason_text}",
-                entity_type="goods_slips",
-                entity_id=gs_id,
+                request_id=request_id,
                 gs_id=gs_id,
-                data={"gs_no": gs["gs_no"], "store_code": store["code"]},
-                dedupe_key=f"cn-request:{gs_id}:{store['id']}",
+                gs_item_id=item_id,
+                condition_field_id=cond_id,
+                from_action_code=from_code,
+                proposed_action_code=prop,
+                qty=qty,
             )
-        else:
-            self._request_approval(
-                session,
-                actor,
-                gs_id,
-                ManagementApprovalRequestIn(store_id=store["id"], reason=reason_text),
-            )
+        total = sum(wanted.values())
+        notifications.publish(
+            session,
+            "MANAGEMENT_APPROVAL_REQUESTED",
+            title=f"{gs['gs_no']}: {total} pc(s) sent for Management approval",
+            body=f"{actor.full_name}: {reason_text}",
+            entity_type="gs_management_approval_requests",
+            entity_id=request_id,
+            gs_id=gs_id,
+            data={"gs_no": gs["gs_no"], "qty": total},
+            dedupe_key=f"mgmt-lines:{request_id}:{len(repo.request_lines(session, gs_id))}",
+        )
         log.info(
-            "store_cn_requested",
+            "management_lines_sent",
             gs_id=str(gs_id),
-            store=store["code"],
-            lines=len(cn_lines),
+            request_id=str(request_id),
+            lines=len(wanted),
             qty=total,
+            reopened=gs["status"] in REOPEN_STATUSES,
         )
 
     # --- send for Management approval --------------------------------------------------------
@@ -1669,8 +1865,9 @@ class StoreAnalysisService:
         payload: ManagementApprovalRequestIn,
         idem: IdempotencyKey,
     ) -> IdempotentResult:
-        """Target flow step 9: any user of a store on the GS (reason required). One transaction;
-        a duplicate Idempotency-Key returns the first result (G-16). Resolved in P10."""
+        """DEC-75: a store user sends selected pieces (item + qty + proposed action) for
+        Management approval, at any time after its submission until Accounts completes the goods
+        slip. One transaction; a duplicate Idempotency-Key returns the first result (G-16)."""
         with self._uow.transaction(actor.id) as session:
             return run_idempotent(
                 session,
@@ -1692,60 +1889,5 @@ class StoreAnalysisService:
         gs = repo.get_gs_header(session, gs_id, lock=True)
         if not gs:
             raise NotFound(f"Goods slip {gs_id} not found", code="GS_NOT_FOUND")
-        store = self._store_for(
-            session, actor, payload.store_id, "sends its goods slips for Management approval"
-        )
-        if gs["status"] not in STORE_ANALYSIS_STATUSES:
-            raise Conflict(
-                f"Goods slip {gs['gs_no']} is {gs['status']}; it is sent for Management approval "
-                "during or after the store analysis",
-                code="INVALID_GS_STATUS",
-            )
-        part = next(
-            (
-                s
-                for s in repo.store_analysis_progress(session, gs_id)
-                if s["store_id"] == store["id"]
-            ),
-            None,
-        )
-        if part is None:
-            raise Conflict(f"{store['name']} has no goods on {gs['gs_no']}", code="STORE_NOT_ON_GS")
-        if part["analysis_status"] != "SUBMITTED":
-            # Q36 (user 2026-11-23): the store submits its own analysis first (DB checks it too).
-            raise Conflict(
-                f"{store['name']} submits its own analysis of {gs['gs_no']} before sending it for "
-                "Management approval",
-                code="ANALYSIS_NOT_SUBMITTED",
-            )
-        if any(r["status"] == "OPEN" for r in repo.list_approval_requests(session, gs_id)):
-            raise Conflict(
-                f"{gs['gs_no']} is already waiting for Management approval",
-                code="APPROVAL_ALREADY_REQUESTED",
-            )
-        reason = payload.reason.strip()
-        if len(reason) < 3:
-            raise ValidationFailed(
-                "A reason is required (at least 3 characters)", code="REASON_REQUIRED"
-            )
-        request_id = repo.insert_approval_request(
-            session, gs_id=gs_id, store_id=store["id"], reason=reason
-        )
-        notifications.publish(
-            session,
-            "MANAGEMENT_APPROVAL_REQUESTED",
-            title=f"{gs['gs_no']}: sent for Management approval",
-            body=f"{actor.full_name} ({store['name']}): {reason}",
-            entity_type="gs_management_approval_requests",
-            entity_id=request_id,
-            gs_id=gs_id,
-            data={"gs_no": gs["gs_no"], "store_code": store["code"]},
-            dedupe_key=f"mgmt-approval-requested:{request_id}",
-        )
-        log.info(
-            "management_approval_requested",
-            gs_id=str(gs_id),
-            store=store["code"],
-            request_id=str(request_id),
-        )
+        self._send_lines(session, actor, gs, payload.lines, payload.reason)
         return self._gs(session, actor, gs_id)

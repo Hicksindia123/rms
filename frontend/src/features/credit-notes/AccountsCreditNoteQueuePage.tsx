@@ -277,8 +277,8 @@ export function AccountsCreditNoteQueuePage({
           }}
           style={{
             padding: '0.75rem 1rem',
-            borderBottom: activeTab === 'pending' ? '2px solid #2563eb' : '2px solid transparent',
-            color: activeTab === 'pending' ? '#2563eb' : '#64748b',
+            borderBottom: activeTab === 'pending' ? '2px solid #2a47f0' : '2px solid transparent',
+            color: activeTab === 'pending' ? '#2a47f0' : '#64748b',
             fontWeight: activeTab === 'pending' ? 600 : 500,
             background: 'none',
             borderTop: 'none',
@@ -296,8 +296,8 @@ export function AccountsCreditNoteQueuePage({
           {workQueue?.pending_gs && (
             <span
               style={{
-                backgroundColor: activeTab === 'pending' ? '#dbeafe' : '#f1f5f9',
-                color: activeTab === 'pending' ? '#1d4ed8' : '#475569',
+                backgroundColor: activeTab === 'pending' ? '#dce6ff' : '#f1f5f9',
+                color: activeTab === 'pending' ? '#2236d6' : '#475569',
                 padding: '2px 8px',
                 borderRadius: '12px',
                 fontSize: '0.75rem',
@@ -316,8 +316,8 @@ export function AccountsCreditNoteQueuePage({
           }}
           style={{
             padding: '0.75rem 1rem',
-            borderBottom: activeTab === 'register' ? '2px solid #2563eb' : '2px solid transparent',
-            color: activeTab === 'register' ? '#2563eb' : '#64748b',
+            borderBottom: activeTab === 'register' ? '2px solid #2a47f0' : '2px solid transparent',
+            color: activeTab === 'register' ? '#2a47f0' : '#64748b',
             fontWeight: activeTab === 'register' ? 600 : 500,
             background: 'none',
             borderTop: 'none',
@@ -335,8 +335,8 @@ export function AccountsCreditNoteQueuePage({
           {workQueue?.active_notes && (
             <span
               style={{
-                backgroundColor: activeTab === 'register' ? '#dbeafe' : '#f1f5f9',
-                color: activeTab === 'register' ? '#1d4ed8' : '#475569',
+                backgroundColor: activeTab === 'register' ? '#dce6ff' : '#f1f5f9',
+                color: activeTab === 'register' ? '#2236d6' : '#475569',
                 padding: '2px 8px',
                 borderRadius: '12px',
                 fontSize: '0.75rem',
@@ -757,7 +757,7 @@ export function AccountsCreditNoteQueuePage({
                       marginBottom: '0.25rem',
                     }}
                   >
-                    Initial Credit Note Type (DEC-23)
+                    Initial Credit Note Type
                   </label>
                   <select
                     id="draft-cn-type-select"
@@ -793,7 +793,7 @@ export function AccountsCreditNoteQueuePage({
                         marginBottom: '0.25rem',
                       }}
                     >
-                      GST Portal Reflection Status (G-13 Precondition)
+                      GST Portal Reflection Status
                     </label>
                     <select
                       id="draft-gst-portal-select"

@@ -21,8 +21,8 @@ export function CategoriesPanel({ categories }: { categories: ProductCategory[] 
               {c.subcategory_count} sub-categories · {c.product_count} products
             </div>
             <div className="masters-row__badges">
-              {c.hazard_capable && <Badge variant="warning">Hazard capable (G-05)</Badge>}
-              {c.requires_full_opening && <Badge variant="warning">Full opening (G-06)</Badge>}
+              {c.hazard_capable && <Badge variant="warning">Hazard capable</Badge>}
+              {c.requires_full_opening && <Badge variant="warning">Full opening</Badge>}
               {c.supports_battery && <Badge variant="default">Battery</Badge>}
               {c.supports_dismantling && <Badge variant="default">Dismantling</Badge>}
             </div>

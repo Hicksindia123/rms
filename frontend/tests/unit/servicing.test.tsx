@@ -179,7 +179,7 @@ describe('ReceiveBatchPage', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Receive Batch: TB/2026-27/00001')).toBeDefined();
-      expect(screen.getByText('Battery Check & Replacement (G-10)')).toBeDefined();
+      expect(screen.getByText('Battery Check & Replacement')).toBeDefined();
     });
 
     // Selecting PERMANENT_SCRATCHES forces NON_SELLABLE

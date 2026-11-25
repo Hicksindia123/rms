@@ -35,7 +35,10 @@ export function AuditExplorerPage() {
     void auditApi
       .fetchAuditTables()
       .then(setTables)
-      .catch(() => {});
+      .catch((err: unknown) => {
+        // The table filter is optional: the log still loads without it.
+        console.warn('audit table list unavailable', err);
+      });
   }, []);
 
   const fetchLog = useCallback(() => {
@@ -101,13 +104,13 @@ export function AuditExplorerPage() {
       >
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Shield size={22} color="#4338ca" />
+            <Shield size={22} color="#2236d6" />
             <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0, color: '#0f172a' }}>
               Audit Explorer
             </h1>
           </div>
           <p style={{ margin: '0.25rem 0 0', fontSize: '0.875rem', color: '#64748b' }}>
-            System-wide tamper-evident immutable audit log (BR-40, G-17).
+            System-wide tamper-evident immutable audit log.
           </p>
         </div>
 
@@ -372,7 +375,7 @@ export function AuditExplorerPage() {
                     </td>
                     <td style={{ padding: '0.75rem 1rem' }}>
                       {row.diffs.length > 0 ? (
-                        <span style={{ color: '#2563eb', fontWeight: 500 }}>
+                        <span style={{ color: '#2a47f0', fontWeight: 500 }}>
                           {row.diffs.length} field{row.diffs.length > 1 ? 's' : ''}
                         </span>
                       ) : (

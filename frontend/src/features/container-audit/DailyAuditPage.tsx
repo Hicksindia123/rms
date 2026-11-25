@@ -203,8 +203,7 @@ export function DailyAuditPage() {
             Daily DMT Container Register
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-            Mandatory daily count of all active DMT containers & sellable packaging separation
-            (BR-18, DD r31).
+            Mandatory daily count of all active DMT containers & sellable packaging separation.
           </p>
         </div>
 

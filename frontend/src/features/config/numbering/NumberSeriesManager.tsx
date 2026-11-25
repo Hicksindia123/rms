@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Hash, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { apiRequest, toApiError } from '@/lib/api/client';
 
 export interface NumberSeriesItem {
   id: string;
@@ -63,9 +64,8 @@ export function NumberSeriesManager() {
 
   useEffect(() => {
     let ignore = false;
-    fetch('/api/v1/config/numbering')
-      .then((res) => res.json())
-      .then((data: NumberSeriesItem[]) => {
+    apiRequest<NumberSeriesItem[]>('/config/numbering')
+      .then((data) => {
         if (!ignore) {
           setSeriesList(data);
           const initial = data[0];
@@ -81,7 +81,14 @@ export function NumberSeriesManager() {
           }
         }
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        if (!ignore) {
+          const e = toApiError(err);
+          setError(
+            `Could not load the number series: ${e.message}${e.requestId ? ` (Request ID: ${e.requestId})` : ''}`,
+          );
+        }
+      });
     return () => {
       ignore = true;
     };
@@ -91,14 +98,18 @@ export function NumberSeriesManager() {
   useEffect(() => {
     if (!selectedCode) return;
     let ignore = false;
-    fetch(`/api/v1/config/numbering/${selectedCode}/preview?count=3&on_date=${previewDate}`)
-      .then((res) => res.json())
-      .then((data: NumberPreviewData) => {
+    apiRequest<NumberPreviewData>(`/config/numbering/${selectedCode}/preview`, {
+      query: { count: 3, on_date: previewDate },
+    })
+      .then((data) => {
         if (!ignore) {
           setPreviewData(data);
         }
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        // Advisory live preview only: the editor and save path keep working without it.
+        console.warn('number series preview failed', selectedCode, toApiError(err).message);
+      });
     return () => {
       ignore = true;
     };
@@ -110,10 +121,9 @@ export function NumberSeriesManager() {
     setSaving(true);
 
     try {
-      const res = await fetch(`/api/v1/config/numbering/${selectedCode}`, {
+      await apiRequest(`/config/numbering/${selectedCode}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: {
           name,
           prefix: prefix || null,
           pattern,
@@ -123,24 +133,15 @@ export function NumberSeriesManager() {
           start_value: startValue,
           is_active: true,
           reason: `Admin updated pattern for ${selectedCode}`,
-        }),
+        },
       });
 
-      if (!res.ok) {
-        const errData = (await res.json()) as { error?: { message?: string } };
-        throw new Error(
-          errData.error?.message || `Failed to update number series (${String(res.status)})`,
-        );
-      }
-
       setSuccess(`Number series ${selectedCode} updated successfully.`);
-      const updatedListRes = await fetch('/api/v1/config/numbering');
-      if (updatedListRes.ok) {
-        const updatedData = (await updatedListRes.json()) as NumberSeriesItem[];
-        setSeriesList(updatedData);
-      }
+      const updatedData = await apiRequest<NumberSeriesItem[]>('/config/numbering');
+      setSeriesList(updatedData);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      const e = toApiError(err);
+      setError(`${e.message}${e.requestId ? ` (Request ID: ${e.requestId})` : ''}`);
     } finally {
       setSaving(false);
     }
@@ -177,7 +178,7 @@ export function NumberSeriesManager() {
               height: '40px',
               borderRadius: '8px',
               backgroundColor: '#e0e7ff',
-              color: '#4338ca',
+              color: '#2236d6',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -209,9 +210,9 @@ export function NumberSeriesManager() {
             style={{
               padding: '0.5rem 1rem',
               borderRadius: '6px',
-              border: selectedCode === s.code ? '2px solid #3b82f6' : '1px solid #e2e8f0',
-              backgroundColor: selectedCode === s.code ? '#eff6ff' : '#ffffff',
-              color: selectedCode === s.code ? '#1d4ed8' : '#334155',
+              border: selectedCode === s.code ? '2px solid #3f63fb' : '1px solid #e2e8f0',
+              backgroundColor: selectedCode === s.code ? '#eef3ff' : '#ffffff',
+              color: selectedCode === s.code ? '#2236d6' : '#334155',
               fontWeight: 600,
               fontSize: '0.875rem',
               cursor: 'pointer',
@@ -231,7 +232,7 @@ export function NumberSeriesManager() {
                   borderRadius: '4px',
                 }}
               >
-                DEC-01
+                Provisional
               </span>
             )}
           </button>
@@ -254,10 +255,10 @@ export function NumberSeriesManager() {
         >
           <AlertCircle size={20} style={{ flexShrink: 0, marginTop: '2px' }} />
           <div style={{ fontSize: '0.875rem', lineHeight: '1.4' }}>
-            <strong>DEC-01 Provisional Goods Slip Format:</strong> The workbook specifies that Goods
-            Slips are auto-generated with "existing formatting" (WF r2, DD r10). The placeholder
-            format below is fully configurable without code changes. Set your desired prefix, FY
-            token, sequence length, and starting value.
+            <strong>Provisional Goods Slip Format:</strong> The workbook specifies that Goods Slips
+            are auto-generated with "existing formatting". The placeholder format below is fully
+            configurable without code changes. Set your desired prefix, FY token, sequence length,
+            and starting value.
           </div>
         </div>
       )}
@@ -551,7 +552,7 @@ export function NumberSeriesManager() {
               style={{
                 marginTop: '0.5rem',
                 padding: '0.6rem 1.25rem',
-                backgroundColor: '#2563eb',
+                backgroundColor: '#2a47f0',
                 color: '#ffffff',
                 border: 'none',
                 borderRadius: '6px',

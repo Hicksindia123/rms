@@ -9,29 +9,10 @@ interface LoginFormProps {
   onSuccess?: () => void;
 }
 
-// Local-development convenience only (production audit 2026-11-14). `import.meta.env.DEV` is a
-// build-time constant: in `vite build` it is false, so the accounts and the shared UAT password
-// are removed from the production bundle and the picker is not rendered.
-const UAT_QUICK_FILL = import.meta.env.DEV;
-const DEV_ACCOUNTS: Array<{ label: string; email: string }> = !UAT_QUICK_FILL
-  ? []
-  : [
-      { label: 'Super Admin', email: 'admin@rms.local' },
-      { label: 'Replacement Manager', email: 'pratham@rms.local' },
-      { label: 'Inward Verifier', email: 'aman@rms.local' },
-      { label: 'Gate Security', email: 'anuj@rms.local' },
-      { label: 'Accounts', email: 'deepak@rms.local' },
-      { label: 'Technician', email: 'rajkumar@rms.local' },
-      { label: 'Dispatch', email: 'dispatch@rms.local' },
-    ];
-const DEV_PASSWORD = UAT_QUICK_FILL ? 'Uat@2026RMS!' : '';
-
 function friendlyError(message: string): string {
   const lowered = message.toLowerCase();
   if (lowered.includes('failed to fetch') || lowered.includes('network')) {
-    return import.meta.env.DEV
-      ? 'Cannot reach the local sign-in service (127.0.0.1:54321). Start Docker Desktop and run "supabase start".'
-      : 'Cannot reach the sign-in service. Check your connection and try again.';
+    return 'Cannot reach the sign-in service. Check your connection and try again.';
   }
   if (lowered.includes('invalid login credentials')) {
     return 'The email or password is incorrect.';
@@ -182,28 +163,6 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
       </form>
 
       <p className="auth-note">Forgot your password? Contact your administrator.</p>
-
-      {UAT_QUICK_FILL && (
-        <label className="auth-dev">
-          <span>Development only: fill a test account</span>
-          <select
-            value=""
-            onChange={(e) => {
-              if (!e.target.value) return;
-              setEmail(e.target.value);
-              setPassword(DEV_PASSWORD);
-              setError(null);
-            }}
-          >
-            <option value="">Choose…</option>
-            {DEV_ACCOUNTS.map((a) => (
-              <option key={a.email} value={a.email}>
-                {a.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
     </AuthLayout>
   );
 }
