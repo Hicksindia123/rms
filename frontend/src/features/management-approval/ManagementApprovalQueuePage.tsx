@@ -52,13 +52,7 @@ const Row: React.FC<{ r: QueueRow; onOpen: () => void }> = ({ r, onOpen }) => {
             {r.party_name ?? '—'}
             {r.station_name ? ` · ${r.station_name}` : ''}
           </div>
-          {r.request_id ? (
-            <p className="break-words text-sm text-amber-900 dark:text-amber-200">
-              {r.request_store_name}
-              {r.requested_by_name ? ` (${r.requested_by_name})` : ''}
-              {r.requested_at ? `, ${formatDateTime(r.requested_at)}` : ''}: “{r.request_reason}”
-            </p>
-          ) : r.since ? (
+          {!r.request_id && r.since ? (
             <div className="text-xs text-slate-500 dark:text-slate-400">
               Since {formatDateTime(r.since)}
             </div>

@@ -421,9 +421,7 @@ async function managementApproves(browser: Browser, vp: (typeof WIDTHS)[number],
   await expect(card).toBeVisible({ timeout: 20_000 });
   await card.getByRole('button').click();
   const page = m.page.getByTestId('management-approval-gs');
-  await expect(page.getByTestId('open-request')).toContainText('Party asks for a credit note', {
-    timeout: 20_000,
-  });
+  await expect(page.getByTestId('mgmt-item-1')).toBeVisible({ timeout: 20_000 });
   const first = page.getByTestId('mgmt-item-1').locator('fieldset').first();
   await first.getByRole('button', { name: /: Issue CN$/ }).click();
   await expect(first).toContainText(/(\d+) of \1 decided/);

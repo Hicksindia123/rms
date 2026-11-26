@@ -128,7 +128,6 @@ test.describe('P10 Management approval', () => {
       const sent = queue.getByRole('list', { name: 'Sent for approval' });
       const card = sent.getByRole('listitem').filter({ hasText: gs.gs_no }).first();
       await expect(card).toBeVisible({ timeout: 20_000 });
-      await expect(card).toContainText('Party asks for a credit note');
       await expectNoHorizontalOverflow(m.page);
       await m.page.screenshot({ path: `test-results/p10/${vp.name}-queue.png`, fullPage: true });
       await card.getByRole('button').click();
@@ -137,7 +136,6 @@ test.describe('P10 Management approval', () => {
       await expect(
         page.getByRole('heading', { name: `Management Approval · ${gs.gs_no}` }),
       ).toBeVisible({ timeout: 20_000 });
-      await expect(page.getByTestId('open-request')).toContainText('Party asks for a credit note');
       const line = page.getByTestId('mgmt-item-1');
       const first = line.locator('fieldset').first();
       const toCn = first.getByRole('button', { name: /: Issue CN$/ });

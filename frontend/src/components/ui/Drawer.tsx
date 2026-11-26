@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 export interface DrawerProps {
@@ -10,7 +11,11 @@ export interface DrawerProps {
   footer?: React.ReactNode;
 }
 
-/** Side panel: slides in from the right on desktop, full screen on phones. Escape closes. */
+/**
+ * Side panel: slides in from the right on desktop, full screen on phones. Escape closes.
+ * Portalled to <body> (like Modal) so `position: fixed` is always viewport-relative: inside the page
+ * shell an ancestor transform/filter made it page-tall and pushed the footer (Submit) off screen.
+ */
 export const Drawer: React.FC<DrawerProps> = ({
   isOpen,
   onClose,
@@ -37,7 +42,7 @@ export const Drawer: React.FC<DrawerProps> = ({
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div
       className="drawer-backdrop"
       onClick={(e) => {
@@ -63,6 +68,7 @@ export const Drawer: React.FC<DrawerProps> = ({
         <div className="drawer__body">{children}</div>
         {footer ? <footer className="drawer__footer">{footer}</footer> : null}
       </aside>
-    </div>
+    </div>,
+    document.body,
   );
 };

@@ -239,7 +239,8 @@ describe('Management approval (P10, DEC-70)', () => {
     const onOpen = vi.fn();
     render(<ManagementApprovalQueuePage onOpenGs={onOpen} />);
     const sent = await screen.findByRole('list', { name: 'Sent for approval' });
-    expect(within(sent).getByText(/Party asks for a credit note/)).toBeInTheDocument();
+    // The store's request note is no longer repeated on the queue card.
+    expect(within(sent).queryByText(/Party asks for a credit note/)).not.toBeInTheDocument();
     fireEvent.click(within(sent).getByText('GS/2026-27/0010'));
     expect(onOpen).toHaveBeenCalledWith('gs-1');
 
@@ -265,7 +266,7 @@ describe('Management approval (P10, DEC-70)', () => {
     });
     render(<ManagementApprovalGsPage gsId="gs-1" onBack={vi.fn()} onOpenGs={vi.fn()} />);
     const item = await screen.findByTestId('mgmt-item-1');
-    expect(screen.getByTestId('open-request')).toHaveTextContent('Party asks for a credit note');
+    expect(screen.queryByTestId('open-request')).not.toBeInTheDocument();
     const save = screen.getByRole('button', { name: 'Save changes' });
     const approve = screen.getByRole('button', { name: 'Approve' });
     expect(save).toBeDisabled();
