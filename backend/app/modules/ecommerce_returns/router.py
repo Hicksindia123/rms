@@ -4,7 +4,9 @@ Permissions (checked here and again by the DB triggers):
 * ecommerce_returns.create: E-Commerce gate user (record, upload, submit)
 * ecommerce_returns.view:   list / detail / file download
 * ecommerce_returns.delete: void (Super Admin / Management)
-* ecommerce_tickets.view / .edit: Ticket Handler queue / raise, respond, close
+* ecommerce_tickets.view / .edit: E-Commerce Executive (role TICKET_HANDLER) queue / raise,
+  follow up, respond, close with the portal resolution; portal check of returns without a ticket
+  (DEC-76)
 """
 
 from __future__ import annotations
@@ -23,12 +25,15 @@ from app.modules.ecommerce_returns.schemas import (
     ConfirmMediaIn,
     CreateOut,
     DownloadOut,
+    FollowUpIn,
     FormConfigOut,
     MediaIn,
     MediaOut,
     MediaUploadOut,
     OrderMatchOut,
+    PortalCheckQueueOut,
     ProductLookupOut,
+    ResolutionIn,
     ReturnCreateIn,
     ReturnListOut,
     ReturnOut,
@@ -204,9 +209,45 @@ def respond(
     return EcommerceReturnService(uow).respond(user, ticket_id, payload, idem).to_response()
 
 
+@tickets_router.post("/{ticket_id}/follow-up", response_model=ReturnOut)
+def follow_up(
+    ticket_id: UUID,
+    payload: FollowUpIn,
+    user: TicketUser,
+    uow: UowDep,
+    idem: IdempotencyKeyDep,
+) -> JSONResponse:
+    """DEC-76: a follow-up with the platform (note, optional next follow-up date)."""
+    return EcommerceReturnService(uow).follow_up(user, ticket_id, payload, idem).to_response()
+
+
 @tickets_router.post("/{ticket_id}/close", response_model=ReturnOut)
 def close_ticket(
-    ticket_id: UUID, user: TicketUser, uow: UowDep, idem: IdempotencyKeyDep
+    ticket_id: UUID,
+    payload: ResolutionIn,
+    user: TicketUser,
+    uow: UowDep,
+    idem: IdempotencyKeyDep,
 ) -> JSONResponse:
-    """Close with a final response (never while PENDING); the return becomes CLOSED."""
-    return EcommerceReturnService(uow).close_ticket(user, ticket_id, idem).to_response()
+    """Close with a final response (never while PENDING) and the portal resolution (DEC-76:
+    Free Replacement / Refund + qty); the return waits for unboxing."""
+    return EcommerceReturnService(uow).close_ticket(user, ticket_id, payload, idem).to_response()
+
+
+# --- portal check (DEC-76) ---------------------------------------------------------------------
+@tickets_router.get("/portal-checks", response_model=PortalCheckQueueOut)
+def portal_checks(user: TicketViewUser, uow: UowDep) -> PortalCheckQueueOut:
+    """Returns without a ticket waiting for the executive's portal check (oldest first)."""
+    return EcommerceReturnService(uow).portal_queue(user)
+
+
+@tickets_router.post("/portal-checks/{return_id}", response_model=ReturnOut)
+def portal_check(
+    return_id: UUID,
+    payload: ResolutionIn,
+    user: TicketUser,
+    uow: UowDep,
+    idem: IdempotencyKeyDep,
+) -> JSONResponse:
+    """What the portal shows for the order (Free Replacement / Refund) and its qty."""
+    return EcommerceReturnService(uow).portal_check(user, return_id, payload, idem).to_response()

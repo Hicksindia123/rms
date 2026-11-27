@@ -12,9 +12,15 @@ triggers of migration 20261124000100 (`rms_private.ecommerce_*_guard`):
             ISSUE_TO_CHECKING → IN_CHECKING (open; `_issue_to_checking` is the extension point)
             TICKET_RAISE      → PENDING_TICKET + ticket queued for the Ticket Handlers, SLA due =
                                 queued + `ecommerce_ticket_sla_hours` (2 h, computed by the DB).
-* ticket  → raise (TICKET_RAISED) → response REJECTED (remark) / CLAIM_RECEIVED (amount) / PENDING
-            (stays open) → close (CLOSED; never while PENDING or with missing data).
-* void    → Super Admin / Management (ecommerce_returns.delete), reason, any time before CLOSED.
+* ticket  → raise (TICKET_RAISED) → follow-ups → response REJECTED (remark) / CLAIM_RECEIVED
+            (amount) / PENDING (stays open) → close with the portal resolution (DEC-76) →
+            PENDING_UNBOXING (never while PENDING or with missing data).
+* portal  → DEC-76: a return without a ticket (IN_CHECKING, "Portal Check Pending") gets the
+            executive's portal resolution (Free Replacement / Refund + qty + short note) →
+            PENDING_UNBOXING. The unboxing, store receipts and credit note follow in
+            app/modules/ecommerce_settlement.
+* void    → Super Admin / Management (ecommerce_returns.delete), reason, any time before it is
+            unboxed (DEC-76) or CLOSED.
 
 DEC-51: no ownership lock; any Ticket Handler may work any ticket (the raiser is recorded).
 Commands run in one transaction and are idempotent on `Idempotency-Key` (G-16 pattern).
@@ -56,6 +62,7 @@ from app.modules.ecommerce_returns.schemas import (
     CreateOut,
     DownloadOut,
     EventOut,
+    FollowUpIn,
     FormConfigOut,
     ImageRuleOut,
     MediaIn,
@@ -63,7 +70,10 @@ from app.modules.ecommerce_returns.schemas import (
     MediaUploadOut,
     OptionOut,
     OrderMatchOut,
+    PortalCheckQueueOut,
+    PortalCheckRowOut,
     ProductLookupOut,
+    ResolutionIn,
     ReturnCreateIn,
     ReturnListOut,
     ReturnOut,
@@ -75,6 +85,7 @@ from app.modules.ecommerce_returns.schemas import (
     VideoRuleOut,
     VoidIn,
 )
+from app.modules.ecommerce_settlement.service import EcommerceSettlementService
 from app.shared.storage import Bucket, StorageService
 
 log = structlog.get_logger(__name__)
@@ -86,6 +97,7 @@ SET_PRODUCT_TYPE = "ECOM_PRODUCT_TYPE"
 SET_QC_ROUTING = "ECOM_QC_ROUTING"
 SET_RESPONSE = "ECOM_TICKET_RESPONSE"
 SET_STATUS = "ECOM_RETURN_STATUS"
+SET_RESOLUTION = "ECOM_PORTAL_RESOLUTION"  # DEC-76
 
 COMPANY_PRODUCT = "COMPANY_PRODUCT"
 DIFFERENT_PRODUCT = "DIFFERENT_PRODUCT"
@@ -95,6 +107,7 @@ REJECTED = "REJECTED"
 CLAIM_RECEIVED = "CLAIM_RECEIVED"
 PENDING = "PENDING"
 FINAL_STATUSES = frozenset({"CLOSED", "VOIDED"})
+NOT_VOIDABLE = FINAL_STATUSES | {"UNBOXED"}  # DEC-76: unboxed pieces are in stock
 
 VIDEO = "PACKAGE_VIDEO"
 IMAGE = "IMAGE"
@@ -214,6 +227,9 @@ def _ticket_out(row: dict[str, Any], now: datetime) -> TicketOut:
         responded_by_name=row["responded_by_name"],
         closed_at=row["closed_at"],
         closed_by_name=row["closed_by_name"],
+        follow_up_count=int(row["follow_up_count"] or 0),
+        last_follow_up_at=row["last_follow_up_at"],
+        next_follow_up_on=row["next_follow_up_on"],
     )
 
 
@@ -333,9 +349,11 @@ class EcommerceReturnService:
         with self._uow.transaction(actor.id) as session:
             labels = _labels(session, SET_STATUS)
             responses = [OptionOut(**o) for o in repo.options(session, SET_RESPONSE)]
+            resolutions = [OptionOut(**o) for o in repo.options(session, SET_RESOLUTION)]
             rows = repo.ticket_queue(session, state=state, limit=LIST_LIMIT)
         return TicketQueueOut(
             response_options=responses,
+            resolution_options=resolutions,
             rows=[
                 TicketRowOut(
                     return_id=r["return_id"],
@@ -755,7 +773,7 @@ class EcommerceReturnService:
             ret = repo.get_return(session, return_id, for_update=True)
             if not ret:
                 raise NotFound("E-Commerce Return not found")
-            if ret["status"] in FINAL_STATUSES:
+            if ret["status"] in NOT_VOIDABLE:
                 raise Conflict(
                     f"A {ret['status'].lower()} return cannot be voided",
                     code="ECOM_INVALID_STATE",
@@ -873,8 +891,11 @@ class EcommerceReturnService:
         return self._command(actor, idem, 200, run)
 
     def close_ticket(
-        self, actor: CurrentUser, ticket_id: UUID, idem: IdempotencyKey
+        self, actor: CurrentUser, ticket_id: UUID, payload: ResolutionIn, idem: IdempotencyKey
     ) -> IdempotentResult:
+        """DEC-76: closing the ticket finishes the executive's work on the return: the platform
+        outcome AND the portal resolution, in one command → PENDING_UNBOXING."""
+
         def run(session: Session) -> ReturnOut:
             ticket, ret = self._ticket(session, ticket_id)
             code = ticket["response_code"]
@@ -892,19 +913,124 @@ class EcommerceReturnService:
                 raise Conflict("The rejection remark is missing", code="ECOM_REMARK_REQUIRED")
             if code == CLAIM_RECEIVED and not ticket["claim_amount"]:
                 raise Conflict("The claim amount is missing", code="ECOM_CLAIM_AMOUNT_REQUIRED")
-            repo.close_ticket(session, ticket_id, by=actor.id)  # DB closes the return
+            resolution = self._resolution(session, ret, payload)
+            repo.close_ticket(session, ticket_id, by=actor.id)
             repo.insert_event(
                 session,
                 ret["id"],
                 "TICKET_CLOSED",
                 from_status=ret["status"],
-                to_status="CLOSED",
+                to_status=ret["status"],
                 details={"response_code": code},
             )
+            self._record_resolution(session, actor, ret, resolution)
             log.info("ecommerce_ticket_closed", ticket_id=str(ticket_id), response=code)
             return self._return_out(session, ret["id"])
 
         return self._command(actor, idem, 200, run)
+
+    def follow_up(
+        self, actor: CurrentUser, ticket_id: UUID, payload: FollowUpIn, idem: IdempotencyKey
+    ) -> IdempotentResult:
+        """DEC-76: the executive chased the platform (note + optional next follow-up date)."""
+
+        def run(session: Session) -> ReturnOut:
+            ticket, ret = self._ticket(session, ticket_id)
+            if ticket["raised_at"] is None:
+                raise Conflict(
+                    "Raise the ticket on the platform first", code="ECOM_TICKET_NOT_RAISED"
+                )
+            note = payload.note.strip()
+            if len(note) < 3:
+                raise ValidationFailed(
+                    "Write the follow-up (3+ characters)", details={"note": ["Required"]}
+                )
+            next_on = payload.next_follow_up_on
+            if next_on is not None and next_on < repo.business_today(session):
+                raise ValidationFailed(
+                    "The next follow-up cannot be in the past",
+                    details={"next_follow_up_on": ["Today or later"]},
+                )
+            repo.add_ticket_follow_up(session, ticket_id, next_on=next_on)
+            repo.insert_event(
+                session,
+                ret["id"],
+                "TICKET_FOLLOW_UP",
+                from_status=ret["status"],
+                to_status=ret["status"],
+                details={"note": note, "next_follow_up_on": next_on},
+            )
+            return self._return_out(session, ret["id"])
+
+        return self._command(actor, idem, 200, run)
+
+    # ================================================================ portal check (DEC-76) ===
+    def portal_queue(self, actor: CurrentUser) -> PortalCheckQueueOut:
+        with self._uow.transaction(actor.id) as session:
+            resolutions = [OptionOut(**o) for o in repo.options(session, SET_RESOLUTION)]
+            rows = repo.portal_check_queue(session, limit=LIST_LIMIT)
+        return PortalCheckQueueOut(
+            resolution_options=resolutions, rows=[PortalCheckRowOut(**r) for r in rows]
+        )
+
+    def portal_check(
+        self, actor: CurrentUser, return_id: UUID, payload: ResolutionIn, idem: IdempotencyKey
+    ) -> IdempotentResult:
+        def run(session: Session) -> ReturnOut:
+            ret = repo.get_return(session, return_id, for_update=True)
+            if not ret:
+                raise NotFound("E-Commerce Return not found")
+            if ret["status"] != "IN_CHECKING":
+                raise Conflict(
+                    "This return is not waiting for a portal check",
+                    code="ECOM_INVALID_STATE",
+                    details={"status": ret["status"]},
+                )
+            resolution = self._resolution(session, ret, payload)
+            self._record_resolution(session, actor, ret, resolution)
+            return self._return_out(session, return_id)
+
+        return self._command(actor, idem, 200, run)
+
+    def _resolution(
+        self, session: Session, ret: dict[str, Any], payload: ResolutionIn
+    ) -> tuple[str, str, int, str | None]:
+        labels = _labels(session, SET_RESOLUTION)
+        errors: dict[str, list[str]] = {}
+        if payload.resolution_code not in labels:
+            errors["resolution_code"] = ["Choose Free Replacement or Refund"]
+        if payload.resolution_qty > ret["qty"]:
+            errors["resolution_qty"] = [f"At most the {ret['qty']} received"]
+        if errors:
+            raise ValidationFailed(
+                "Record what the portal shows for this order",
+                code="ECOM_RESOLUTION_REQUIRED",
+                details=errors,
+            )
+        note = (payload.resolution_note or "").strip() or None
+        code = payload.resolution_code
+        return code, labels[code], payload.resolution_qty, note
+
+    def _record_resolution(
+        self,
+        session: Session,
+        actor: CurrentUser,
+        ret: dict[str, Any],
+        resolution: tuple[str, str, int, str | None],
+    ) -> None:
+        code, label, qty, note = resolution
+        repo.set_return_resolved(
+            session, ret["id"], code=code, label=label, qty=qty, note=note, by=actor.id
+        )
+        repo.insert_event(
+            session,
+            ret["id"],
+            "RESOLUTION_RECORDED",
+            from_status=ret["status"],
+            to_status="PENDING_UNBOXING",
+            details={"resolution_code": code, "qty": qty, "note": note},
+        )
+        log.info("ecommerce_resolution_recorded", return_id=str(ret["id"]), resolution=code)
 
     # ================================================================ worker =================
     def cleanup_stale_pending(self, *, batch: int = 200) -> int:
@@ -978,9 +1104,16 @@ class EcommerceReturnService:
                     "void_reason",
                     "voided_at",
                     "closed_at",
+                    "resolution_code",
+                    "resolution_label",
+                    "resolution_qty",
+                    "resolution_note",
+                    "resolved_at",
+                    "resolved_by_name",
                 )
             },
             status_label=labels.get(ret["status"], ret["status"]),
+            settlement=EcommerceSettlementService.settlement_for_return(session, return_id),
             media=[_media_out(m) for m in repo.media_for_return(session, return_id)],
             ticket=_ticket_out(ticket, now) if ticket else None,
             events=[EventOut(**e) for e in repo.events_for_return(session, return_id)],

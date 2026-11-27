@@ -52,7 +52,9 @@ insert into public.roles (code, name, description, is_system) values
   ('ISTORE_RI',                  'Intermediate Store RI',      'DEC-61: users of Intermediate Store RI', true),
   -- DEC-73 (2026-11-24): E-Commerce Returns.
   ('ECOM_GATE',                  'Gate User (E-Commerce)',     'DEC-73: records E-Commerce Returns at Gate Entry', true),
-  ('TICKET_HANDLER',             'Ticket Handler',             'DEC-73: raises E-Commerce platform tickets and records the platform response', true)
+  -- DEC-76 (2026-11-26): TICKET_HANDLER is shown as "E-Commerce Executive" (code unchanged).
+  ('TICKET_HANDLER',             'E-Commerce Executive',       'DEC-73 / DEC-76: platform tickets and follow-ups, portal check (Free Replacement / Refund)', true),
+  ('ECOM_ACCOUNTS',              'Accounts (E-Commerce)',      'DEC-76: issues the credit note of E-Commerce action sheets', true)
 on conflict (code) do nothing;
 
 -- -----------------------------------------------------------------------------
@@ -289,7 +291,25 @@ insert into _seed_role_matrix values
   ('MANAGEMENT',                 'ecommerce_returns', array['view','delete']),
   ('MANAGEMENT',                 'ecommerce_tickets', array['view']),
   ('MANAGEMENT_VIEWER',          'ecommerce_returns', array['view']),
-  ('MANAGEMENT_VIEWER',          'ecommerce_tickets', array['view']);
+  ('MANAGEMENT_VIEWER',          'ecommerce_tickets', array['view']),
+  -- DEC-76: settlement. The Replacement Executive unboxes, store users acknowledge receipts,
+  -- E-Commerce Accounts issues the credit note of an action sheet.
+  ('INWARD_VERIFIER',            'ecommerce_returns', array['view']),
+  ('INWARD_VERIFIER',            'ecommerce_unboxing', array['view','create']),
+  ('INWARD_VERIFIER',            'ecommerce_accounts', array['view']),
+  ('ISTORE_OP',                  'ecommerce_store_receipts', array['view','create']),
+  ('ISTORE_DT',                  'ecommerce_store_receipts', array['view','create']),
+  ('ISTORE_RI',                  'ecommerce_store_receipts', array['view','create']),
+  ('ECOM_ACCOUNTS',              'dashboards',      array['view']),
+  ('ECOM_ACCOUNTS',              'notifications',   array['view']),
+  ('ECOM_ACCOUNTS',              'ecommerce_returns', array['view']),
+  ('ECOM_ACCOUNTS',              'ecommerce_accounts', array['view','edit']),
+  ('MANAGEMENT',                 'ecommerce_unboxing', array['view']),
+  ('MANAGEMENT',                 'ecommerce_store_receipts', array['view']),
+  ('MANAGEMENT',                 'ecommerce_accounts', array['view']),
+  ('MANAGEMENT_VIEWER',          'ecommerce_unboxing', array['view']),
+  ('MANAGEMENT_VIEWER',          'ecommerce_store_receipts', array['view']),
+  ('MANAGEMENT_VIEWER',          'ecommerce_accounts', array['view']);
 
 -- Fail loudly on a typo in the matrix instead of silently dropping a permission.
 do $$
@@ -431,7 +451,19 @@ select r.id, s.id, m.ord
     ('TICKET_HANDLER',             'ECOM_TICKETS',    10),
     ('TICKET_HANDLER',             'ECOM_RETURNS',   100),
     ('MANAGEMENT',                 'ECOM_RETURNS',   150),
-    ('MANAGEMENT_VIEWER',          'ECOM_RETURNS',   150)
+    ('MANAGEMENT_VIEWER',          'ECOM_RETURNS',   150),
+    -- DEC-76: E-Commerce settlement.
+    ('TICKET_HANDLER',             'ECOM_PORTAL_CHECK', 20),
+    ('INWARD_VERIFIER',            'ECOM_UNBOXING',   50),
+    ('INWARD_VERIFIER',            'ECOM_ACTION_SHEETS', 55),
+    ('INWARD_VERIFIER',            'ECOM_RETURNS',   130),
+    ('ISTORE_OP',                  'ECOM_STORE_RECEIPTS', 50),
+    ('ISTORE_DT',                  'ECOM_STORE_RECEIPTS', 50),
+    ('ISTORE_RI',                  'ECOM_STORE_RECEIPTS', 50),
+    ('ECOM_ACCOUNTS',              'ECOM_ACTION_SHEETS', 10),
+    ('ECOM_ACCOUNTS',              'ECOM_RETURNS',   100),
+    ('MANAGEMENT',                 'ECOM_ACTION_SHEETS', 155),
+    ('MANAGEMENT_VIEWER',          'ECOM_ACTION_SHEETS', 155)
   ) as m(role_code, step_code, ord)
   join public.roles r on r.code = m.role_code
   join public.journey_steps s on s.code = m.step_code

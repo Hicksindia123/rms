@@ -86,6 +86,8 @@ select tables_are('public', array[
   'gs_item_conditions',
   -- DEC-73: E-Commerce Returns
   'ecommerce_returns','ecommerce_return_media','ecommerce_tickets','ecommerce_return_events',
+  -- DEC-76: E-Commerce settlement
+  'ecommerce_action_sheets','ecommerce_repairs','ecommerce_store_receipts',
   -- DEC-75: pieces a store sends for Management approval
   'gs_management_request_lines'
 ],'public schema holds foundation, inward and inventory ledger tables');

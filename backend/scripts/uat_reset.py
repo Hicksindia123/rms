@@ -133,8 +133,15 @@ UAT_USERS: list[dict[str, Any]] = [
     },
     {
         "email": "tickets@rms.local",
-        "name": "Ticket Handler",
+        "name": "E-Commerce Executive",
         "roles": ["TICKET_HANDLER"],
+        "is_super_admin": False,
+    },
+    # DEC-76 (2026-11-26): E-Commerce settlement - the credit note of action sheets.
+    {
+        "email": "ecomaccounts@rms.local",
+        "name": "E-Commerce Accounts",
+        "roles": ["ECOM_ACCOUNTS"],
         "is_super_admin": False,
     },
 ]

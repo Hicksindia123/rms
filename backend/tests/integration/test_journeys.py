@@ -75,9 +75,12 @@ async def test_inward_verifier_journey_order_steps_then_tools(
         "COUNTING",  # DEC-53: Counting & Categorisation, one entry
         # DEC-72 (P12): INSPECTION hidden (unreachable since the categorisation lock, DEC-64).
         # DEC-68 (P8): DEPT_RECEIVING hidden; the Intermediate Stores receive their goods back.
+        "ECOM_UNBOXING",  # DEC-76
+        "ECOM_ACTION_SHEETS",  # DEC-76
         "CONTAINER_AUDIT",
         "GS_LIST",
         "REPORTS",
+        "ECOM_RETURNS",  # DEC-76
     ]
     assert all(isinstance(e["count"], int) for e in body["entries"] if e["kind"] == "STEP")
 
@@ -115,11 +118,13 @@ _FLOW_MENUS: dict[str, list[str]] = {
         "STORE_DEPT_ROUTING",
         "STORE_DEPT_RECEIVING",
         "STORE_ANALYSIS",
+        "ECOM_STORE_RECEIPTS",  # DEC-76
         "GS_LIST",
     ],
     "MANAGEMENT": [
         "MANAGEMENT_APPROVAL",
         "EDIT_REQUESTS",
+        "ECOM_ACTION_SHEETS",  # DEC-76
         "DASHBOARD",
         "GS_LIST",
         "PENDENCIES",
@@ -129,7 +134,8 @@ _FLOW_MENUS: dict[str, list[str]] = {
     ],
     # DEC-73: E-Commerce Returns.
     "ECOM_GATE": ["ECOM_GATE_ENTRY", "ECOM_RETURNS"],
-    "TICKET_HANDLER": ["ECOM_TICKETS", "ECOM_RETURNS"],
+    "TICKET_HANDLER": ["ECOM_TICKETS", "ECOM_PORTAL_CHECK", "ECOM_RETURNS"],  # DEC-76
+    "ECOM_ACCOUNTS": ["ECOM_ACTION_SHEETS", "ECOM_RETURNS"],  # DEC-76
     "ACCOUNTS": [
         "ACCOUNTS_DOCS",
         "ACCOUNTS_ENTRY",

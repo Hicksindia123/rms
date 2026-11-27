@@ -35,6 +35,7 @@ import {
   Wrench,
   FileCheck2,
   BadgeCheck,
+  Search,
 } from 'lucide-react';
 
 /**
@@ -70,6 +71,10 @@ const SCREEN_PATHS: Record<string, string> = {
   'ecom-return-new': '/ecom-returns/new', // DEC-73
   'ecom-returns': '/ecom-returns', // DEC-73
   'ecom-tickets': '/ecom-tickets', // DEC-73
+  'ecom-portal-check': '/ecom-portal-check', // DEC-76
+  'ecom-unboxing': '/ecom-unboxing', // DEC-76
+  'ecom-store-receipts': '/ecom-store-receipts', // DEC-76
+  'ecom-action-sheets': '/ecom-action-sheets', // DEC-76
   'transfer-slips': '/transfer-slips',
   'transfer-slip-acks': '/transfer-slips/acknowledge', // DEC-66
   'department-receiving': '/department-receiving',
@@ -124,6 +129,8 @@ export function itemPath(
       return `/management-approval/${item.gs_id}`;
     case 'ecom-return': // DEC-73: an E-Commerce Return (not a goods slip)
       return `/ecom-returns/${item.target_id}`;
+    case 'ecom-action-sheet': // DEC-76: an E-Commerce Action Sheet
+      return `/ecom-action-sheets/${item.target_id}`;
     case 'transfer-slip': // DEC-66: the queue item is the slip itself
       return `/transfer-slips/${item.target_id}`;
     case 'accounts-docs':
@@ -161,6 +168,10 @@ const ICONS: Record<string, LucideIcon> = {
   ECOM_GATE_ENTRY: ShoppingCart, // DEC-73
   ECOM_TICKETS: Ticket, // DEC-73
   ECOM_RETURNS: ShoppingCart, // DEC-73
+  ECOM_PORTAL_CHECK: Search, // DEC-76
+  ECOM_UNBOXING: PackageOpen, // DEC-76
+  ECOM_STORE_RECEIPTS: PackageCheck, // DEC-76
+  ECOM_ACTION_SHEETS: FileSpreadsheet, // DEC-76
   DEPT_RECEIVING: CheckCircle2,
   FINAL_ACTIONS: Split,
   ACCOUNTS_DOCS: FileSpreadsheet,

@@ -192,6 +192,9 @@ describe('Ticket Handler queue (DEC-73)', () => {
     responded_by_name: null,
     closed_at: null,
     closed_by_name: null,
+    follow_up_count: 0,
+    last_follow_up_at: null,
+    next_follow_up_on: null,
     ...over,
   });
   const row = (over: Record<string, unknown>) => ({
@@ -216,7 +219,11 @@ describe('Ticket Handler queue (DEC-73)', () => {
   it('flags an overdue ticket and raises it with an Idempotency-Key', async () => {
     apiRequest.mockImplementation((path, options) => {
       if (path === '/ecommerce-tickets' && !options?.method)
-        return Promise.resolve({ response_options: RESPONSES, rows: [row({})] });
+        return Promise.resolve({
+          response_options: RESPONSES,
+          resolution_options: [],
+          rows: [row({})],
+        });
       return Promise.resolve({});
     });
     render(<TicketQueuePage canEdit onOpen={vi.fn()} />);
@@ -235,6 +242,7 @@ describe('Ticket Handler queue (DEC-73)', () => {
       if (path === '/ecommerce-tickets' && !options?.method)
         return Promise.resolve({
           response_options: RESPONSES,
+          resolution_options: [],
           rows: [
             row({
               status: 'TICKET_RAISED',
@@ -276,7 +284,11 @@ describe('Ticket Handler queue (DEC-73)', () => {
   });
 
   it('hides the actions without ecommerce_tickets.edit', async () => {
-    apiRequest.mockResolvedValue({ response_options: RESPONSES, rows: [row({})] });
+    apiRequest.mockResolvedValue({
+      response_options: RESPONSES,
+      resolution_options: [],
+      rows: [row({})],
+    });
     render(<TicketQueuePage canEdit={false} onOpen={vi.fn()} />);
     await screen.findByTestId('sla-overdue');
     expect(screen.queryByTestId('ticket-raise')).toBeNull();

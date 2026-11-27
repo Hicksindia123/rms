@@ -1,7 +1,9 @@
 /**
- * DEC-73: one E-Commerce Return: gate data, files (view), platform ticket with SLA, history.
- * A DRAFT (upload not finished) can be completed here by the E-Commerce gate user; Super Admin /
- * Management can void it with a reason until it is closed.
+ * DEC-73 / DEC-76: one E-Commerce Return: gate data, files (view), platform ticket with SLA and
+ * follow-ups, the E-Commerce Executive's portal resolution, the settlement after unboxing (action
+ * sheet, store receipts, repair, credit note) and the history. A DRAFT (upload not finished) can be
+ * completed here by the E-Commerce gate user; Super Admin / Management can void it with a reason
+ * until it is unboxed.
  */
 import React, { useCallback, useRef, useState } from 'react';
 import { ArrowLeft, Eye, RefreshCw, Trash2, Upload } from 'lucide-react';
@@ -23,6 +25,8 @@ interface Props {
   canCreate: boolean;
   canVoid: boolean;
   onBack: () => void;
+  /** DEC-76: open the action sheet (only for users who may see action sheets). */
+  onOpenSheet?: ((sheetId: string) => void) | undefined;
 }
 
 export const EcommerceReturnDetailPage: React.FC<Props> = ({
@@ -30,6 +34,7 @@ export const EcommerceReturnDetailPage: React.FC<Props> = ({
   canCreate,
   canVoid,
   onBack,
+  onOpenSheet,
 }) => {
   const fetcher = useCallback(() => ecomApi.get(returnId), [returnId]);
   const query = useApiQuery<EcomReturn>(fetcher);
@@ -97,7 +102,7 @@ export const EcommerceReturnDetailPage: React.FC<Props> = ({
             <Button type="button" variant="outline" className="min-h-[44px]" onClick={query.reload}>
               <RefreshCw className="h-4 w-4" aria-hidden="true" /> Refresh
             </Button>
-            {canVoid && r.status !== 'CLOSED' && r.status !== 'VOIDED' ? (
+            {canVoid && r.status !== 'CLOSED' && r.status !== 'VOIDED' && r.status !== 'UNBOXED' ? (
               <Button
                 type="button"
                 variant="danger"
@@ -120,8 +125,12 @@ export const EcommerceReturnDetailPage: React.FC<Props> = ({
       ) : null}
       {r.status === 'IN_CHECKING' ? (
         <p className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-100">
-          Issued to the Checking Department. This return stays open; the checking step is not set up
-          yet.
+          Waiting for the E-Commerce Executive to check the portal (Free Replacement / Refund).
+        </p>
+      ) : null}
+      {r.status === 'PENDING_UNBOXING' ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+          Waiting for the unboxing user.
         </p>
       ) : null}
 
@@ -198,6 +207,76 @@ export const EcommerceReturnDetailPage: React.FC<Props> = ({
               Closed {formatDateTime(r.ticket.closed_at)} by {r.ticket.closed_by_name ?? '—'}
             </p>
           ) : null}
+        </section>
+      ) : null}
+
+      {r.resolution_code ? (
+        <section
+          className="space-y-1 rounded-xl border border-slate-200 bg-white p-4 text-sm dark:border-slate-700 dark:bg-slate-900"
+          data-testid="ecom-resolution"
+        >
+          <h2 className="m-0 text-base font-semibold">Portal resolution</h2>
+          <p className="m-0">
+            <strong>{r.resolution_label}</strong> · Qty {r.resolution_qty}
+            {r.resolution_note ? ` · “${r.resolution_note}”` : ''}
+          </p>
+          <p className="m-0 text-xs text-slate-500">
+            {formatDateTime(r.resolved_at)}
+            {r.resolved_by_name ? ` by ${r.resolved_by_name}` : ''}
+          </p>
+        </section>
+      ) : null}
+
+      {r.settlement ? (
+        <section
+          className="space-y-2 rounded-xl border border-slate-200 bg-white p-4 text-sm dark:border-slate-700 dark:bg-slate-900"
+          data-testid="ecom-settlement"
+        >
+          <h2 className="m-0 text-base font-semibold">Unboxing and settlement</h2>
+          <p className="m-0">
+            Action sheet{' '}
+            {onOpenSheet ? (
+              <button
+                type="button"
+                className="min-h-[44px] border-0 bg-transparent p-0 font-semibold text-indigo-700 underline dark:text-indigo-300"
+                onClick={() => {
+                  onOpenSheet(r.settlement?.action_sheet_id ?? '');
+                }}
+              >
+                {r.settlement.sheet_no}
+              </button>
+            ) : (
+              <strong>{r.settlement.sheet_no}</strong>
+            )}{' '}
+            · {r.settlement.sheet_status === 'COMPLETED' ? 'completed' : 'pending with Accounts'} ·
+            Qty Issue CN {r.settlement.cn_qty}
+          </p>
+          <p className="m-0">
+            Store {r.settlement.good_qty} · Repair {r.settlement.repair_qty}
+            {r.settlement.repair_location_name ? ` (${r.settlement.repair_location_name})` : ''} ·
+            Wastage {r.settlement.wastage_qty}
+            {r.settlement.unbox_note ? ` · “${r.settlement.unbox_note}”` : ''}
+          </p>
+          <p className="m-0 text-xs text-slate-500">
+            Unboxed {formatDateTime(r.settlement.unboxed_at)}
+            {r.settlement.unboxed_by_name ? ` by ${r.settlement.unboxed_by_name}` : ''}
+          </p>
+          {r.settlement.repair ? (
+            <p className="m-0">
+              Repair:{' '}
+              {r.settlement.repair.status === 'RETURNED'
+                ? `back ${formatDateTime(r.settlement.repair.returned_at)} · OK ${String(r.settlement.repair.qty_ok ?? 0)} · scrap ${String(r.settlement.repair.qty_scrap ?? 0)}`
+                : `${String(r.settlement.repair.qty_sent)} pc(s) at ${r.settlement.repair.location_name}`}
+            </p>
+          ) : null}
+          {r.settlement.receipts.map((x) => (
+            <p key={x.id} className="m-0">
+              {x.source === 'REPAIR' ? 'Repaired' : 'Good'} {x.qty} pc(s) → {x.store_name}:{' '}
+              {x.status === 'ACKNOWLEDGED'
+                ? `received ${formatDateTime(x.acknowledged_at)}${x.acknowledged_by_name ? ` by ${x.acknowledged_by_name}` : ''}`
+                : 'waiting for the store'}
+            </p>
+          ))}
         </section>
       ) : null}
 

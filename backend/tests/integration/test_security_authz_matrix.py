@@ -50,7 +50,7 @@ ALL_13_ROLES = [
 # Phase P1 20-11-2026: DEC-60 Management and DEC-61 one role per seeded Intermediate Store.
 P1_ROLES = ["MANAGEMENT", "ISTORE_OP", "ISTORE_DT", "ISTORE_RI"]
 # DEC-73 (2026-11-24): E-Commerce Returns.
-ECOM_ROLES = ["ECOM_GATE", "TICKET_HANDLER"]
+ECOM_ROLES = ["ECOM_GATE", "TICKET_HANDLER", "ECOM_ACCOUNTS"]  # DEC-73, DEC-76
 
 
 def _auth(token: str) -> dict[str, str]:

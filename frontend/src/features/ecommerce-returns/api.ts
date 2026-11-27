@@ -10,7 +10,19 @@ import type {
   MediaKind,
   MediaUpload,
   OrderMatch,
+  PortalCheckQueue,
   ProductLookup,
+  ResolutionIn,
+  FollowUpIn,
+  UnboxingQueue,
+  UnboxLineIn,
+  ActionSheet,
+  ActionSheetList,
+  RepairReturnIn,
+  ReturnSettlement,
+  SheetStatus,
+  StoreReceipts,
+  CompleteSheetIn,
   ReturnList,
   ReturnStatus,
   TicketQueue,
@@ -77,6 +89,61 @@ export const ecomApi = {
       body,
       idempotencyKey,
     }),
-  close: (ticketId: string, idempotencyKey: string) =>
-    apiRequest<EcomReturn>(`${ticket(ticketId)}/close`, { method: 'POST', idempotencyKey }),
+  /** DEC-76: closing carries the portal resolution (Free Replacement / Refund + qty). */
+  close: (ticketId: string, body: ResolutionIn, idempotencyKey: string) =>
+    apiRequest<EcomReturn>(`${ticket(ticketId)}/close`, {
+      method: 'POST',
+      body,
+      idempotencyKey,
+    }),
+  followUp: (ticketId: string, body: FollowUpIn, idempotencyKey: string) =>
+    apiRequest<EcomReturn>(`${ticket(ticketId)}/follow-up`, {
+      method: 'POST',
+      body,
+      idempotencyKey,
+    }),
+  portalChecks: () => apiRequest<PortalCheckQueue>('/ecommerce-tickets/portal-checks'),
+  portalCheck: (returnId: string, body: ResolutionIn, idempotencyKey: string) =>
+    apiRequest<EcomReturn>(`/ecommerce-tickets/portal-checks/${encodeURIComponent(returnId)}`, {
+      method: 'POST',
+      body,
+      idempotencyKey,
+    }),
+};
+
+const settle = '/ecommerce-settlement';
+
+/** DEC-76: unboxing, store receipts and action sheets. */
+export const settlementApi = {
+  unboxing: () => apiRequest<UnboxingQueue>(`${settle}/unboxing`),
+  unbox: (platformCode: string, lines: UnboxLineIn[], idempotencyKey: string) =>
+    apiRequest<ActionSheet>(`${settle}/unboxing`, {
+      method: 'POST',
+      body: { platform_code: platformCode, lines },
+      idempotencyKey,
+    }),
+  repairReturn: (repairId: string, body: RepairReturnIn, idempotencyKey: string) =>
+    apiRequest<ReturnSettlement>(`${settle}/repairs/${encodeURIComponent(repairId)}/return`, {
+      method: 'POST',
+      body,
+      idempotencyKey,
+    }),
+  receipts: (state: 'PENDING' | 'ACKNOWLEDGED' | 'ALL') =>
+    apiRequest<StoreReceipts>(`${settle}/store-receipts`, { query: { state } }),
+  acknowledge: (receiptIds: string[], idempotencyKey: string) =>
+    apiRequest<StoreReceipts>(`${settle}/store-receipts/acknowledge`, {
+      method: 'POST',
+      body: { receipt_ids: receiptIds },
+      idempotencyKey,
+    }),
+  sheets: (status: SheetStatus | '') =>
+    apiRequest<ActionSheetList>(`${settle}/action-sheets`, { query: { status: status || null } }),
+  sheet: (id: string) =>
+    apiRequest<ActionSheet>(`${settle}/action-sheets/${encodeURIComponent(id)}`),
+  complete: (id: string, body: CompleteSheetIn, idempotencyKey: string) =>
+    apiRequest<ActionSheet>(`${settle}/action-sheets/${encodeURIComponent(id)}/complete`, {
+      method: 'POST',
+      body,
+      idempotencyKey,
+    }),
 };

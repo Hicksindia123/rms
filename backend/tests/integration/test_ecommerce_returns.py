@@ -28,6 +28,9 @@ from tests.integration.test_unboxing import FakeStorage
 MB = 1024 * 1024
 BASE = "/api/v1/ecommerce-returns"
 TICKETS = "/api/v1/ecommerce-tickets"
+# DEC-76: closing a ticket carries the portal resolution.
+REFUND_2 = {"resolution_code": "REFUND", "resolution_qty": 2, "resolution_note": "Refund on portal"}
+REPLACE_1 = {"resolution_code": "FREE_REPLACEMENT", "resolution_qty": 1}
 
 
 @pytest.fixture
@@ -309,7 +312,12 @@ async def test_ticket_path_end_to_end(
     assert res.json()["ticket"]["assigned_handler_name"] == "Ticket Handler"
     assert res.json()["ticket"]["sla_state"] == "RAISED_ON_TIME"
 
+    # DEC-76: the resolution is part of the close command.
     res = await client.post(f"{TICKETS}/{tid}/close", headers=_h(actors.handler, _key()))
+    assert res.status_code == 422
+    res = await client.post(
+        f"{TICKETS}/{tid}/close", json=REFUND_2, headers=_h(actors.handler, _key())
+    )
     assert res.status_code == 409 and res.json()["error"]["code"] == "ECOM_TICKET_NO_RESPONSE"
 
     res = await client.post(
@@ -318,7 +326,9 @@ async def test_ticket_path_end_to_end(
         headers=_h(actors.handler, _key()),
     )
     assert res.status_code == 200 and res.json()["ticket"]["response_code"] == "PENDING"
-    res = await client.post(f"{TICKETS}/{tid}/close", headers=_h(actors.handler, _key()))
+    res = await client.post(
+        f"{TICKETS}/{tid}/close", json=REFUND_2, headers=_h(actors.handler, _key())
+    )
     assert res.status_code == 409 and res.json()["error"]["code"] == "ECOM_TICKET_PENDING"
 
     res = await client.post(
@@ -342,12 +352,34 @@ async def test_ticket_path_end_to_end(
     assert res.status_code == 200, res.text
     assert res.json()["ticket"]["claim_amount"] == "1499.50"
 
+    # DEC-76: the resolution qty cannot exceed the received qty; an unknown code is refused.
+    res = await client.post(
+        f"{TICKETS}/{tid}/close",
+        json={"resolution_code": "REFUND", "resolution_qty": 3},
+        headers=_h(actors.handler, _key()),
+    )
+    assert res.status_code == 422 and "resolution_qty" in res.json()["error"]["details"]
+    res = await client.post(
+        f"{TICKETS}/{tid}/close",
+        json={"resolution_code": "NOPE", "resolution_qty": 1},
+        headers=_h(actors.handler, _key()),
+    )
+    assert res.status_code == 422 and "resolution_code" in res.json()["error"]["details"]
+
     close_key = _key()
-    res = await client.post(f"{TICKETS}/{tid}/close", headers=_h(actors.handler, close_key))
+    res = await client.post(
+        f"{TICKETS}/{tid}/close", json=REFUND_2, headers=_h(actors.handler, close_key)
+    )
     assert res.status_code == 200, res.text
-    assert res.json()["status"] == "CLOSED" and res.json()["closed_at"]
+    body = res.json()
+    assert body["status"] == "PENDING_UNBOXING" and body["closed_at"] is None
+    assert body["ticket"]["closed_at"] is not None
+    assert body["resolution_code"] == "REFUND" and body["resolution_qty"] == 2
+    assert body["resolution_note"] == "Refund on portal"
     # G-16 pattern: the same key replays the original result.
-    again = await client.post(f"{TICKETS}/{tid}/close", headers=_h(actors.handler, close_key))
+    again = await client.post(
+        f"{TICKETS}/{tid}/close", json=REFUND_2, headers=_h(actors.handler, close_key)
+    )
     assert again.status_code == 200 and again.headers.get("Idempotency-Replayed") == "true"
 
     detail = await client.get(f"{BASE}/{rid}", headers=_h(actors.mgmt))
@@ -359,12 +391,8 @@ async def test_ticket_path_end_to_end(
         "TICKET_RESPONSE",
         "TICKET_RESPONSE",
         "TICKET_CLOSED",
+        "RESOLUTION_RECORDED",
     ]
-    # A closed return cannot be voided.
-    res = await client.post(
-        f"{BASE}/{rid}/void", json={"reason": "late void"}, headers=_h(actors.mgmt, _key())
-    )
-    assert res.status_code == 409
     # G-17: audited.
     audited = fetch_all(
         as_admin(db_conn),
@@ -387,8 +415,10 @@ async def test_rejected_ticket_closes_with_remark(
         headers=_h(actors.handler, _key()),
     )
     assert res.status_code == 200, res.text
-    res = await client.post(f"{TICKETS}/{tid}/close", headers=_h(actors.handler, _key()))
-    assert res.status_code == 200 and res.json()["status"] == "CLOSED"
+    res = await client.post(
+        f"{TICKETS}/{tid}/close", json=REPLACE_1, headers=_h(actors.handler, _key())
+    )
+    assert res.status_code == 200 and res.json()["status"] == "PENDING_UNBOXING"
     res = await client.post(
         f"{TICKETS}/{tid}/response",
         json={"response_code": "PENDING"},
@@ -678,7 +708,7 @@ def test_db_guard_in_checking_has_no_exit_and_only_managers_void(
         ),
         {"id": rid},
     )
-    # Extension point: no exit from IN_CHECKING yet.
+    # DEC-76: IN_CHECKING leaves only to PENDING_UNBOXING (the executive's portal check).
     with pytest.raises(DBAPIError, match="ECOM_INVALID_TRANSITION"), conn.begin_nested():
         conn.execute(
             text(

@@ -88,7 +88,9 @@ _RETURN_COLUMNS = """
     r.product_code_snapshot as product_code, r.product_name_snapshot as product_name,
     r.different_product_desc, r.qty, r.qc_routing_code, r.qc_routing_label, r.status,
     r.created_at, r.submitted_at, r.void_reason, r.voided_at, r.closed_at,
-    cp.full_name as created_by_name
+    cp.full_name as created_by_name,
+    r.resolution_code, r.resolution_label, r.resolution_qty, r.resolution_note, r.resolved_at,
+    (select rp.full_name from public.profiles rp where rp.id = r.resolved_by) as resolved_by_name
 """
 
 
@@ -182,6 +184,48 @@ def set_return_submitted(session: Session, return_id: UUID, *, status: str, by: 
             """
         ),
         {"id": return_id, "status": status, "by": by},
+    )
+
+
+def set_return_resolved(
+    session: Session,
+    return_id: UUID,
+    *,
+    code: str,
+    label: str,
+    qty: int,
+    note: str | None,
+    by: UUID,
+) -> None:
+    """DEC-76: the executive's portal resolution; the return moves to PENDING_UNBOXING."""
+    session.execute(
+        text(
+            """
+            update public.ecommerce_returns
+               set status = 'PENDING_UNBOXING', resolution_code = :code, resolution_label = :label,
+                   resolution_qty = :qty, resolution_note = :note, resolved_at = now(),
+                   resolved_by = :by
+             where id = :id
+            """
+        ),
+        {"id": return_id, "code": code, "label": label, "qty": qty, "note": note, "by": by},
+    )
+
+
+def portal_check_queue(session: Session, *, limit: int) -> list[dict[str, Any]]:
+    """DEC-76: returns without a ticket waiting for the executive's portal check (oldest first)."""
+    return _all(
+        session,
+        """
+        select r.id as return_id, r.return_no, r.entry_date, r.platform_label, r.order_id, r.qty,
+               r.submitted_at,
+               coalesce(r.product_name_snapshot, r.different_product_desc) as product_text
+          from public.ecommerce_returns r
+         where r.status = 'IN_CHECKING'
+         order by r.submitted_at, r.created_at
+         limit :limit
+        """,
+        {"limit": limit},
     )
 
 
@@ -294,7 +338,8 @@ def stale_pending_media(
 _TICKET_COLUMNS = """
     t.id, t.return_id, t.sla_due_at, t.assigned_handler_id, ah.full_name as assigned_handler_name,
     t.raised_at, t.response_code, t.response_label, t.rejection_remark, t.claim_amount,
-    t.responded_at, rb.full_name as responded_by_name, t.closed_at, cb.full_name as closed_by_name
+    t.responded_at, rb.full_name as responded_by_name, t.closed_at, cb.full_name as closed_by_name,
+    t.follow_up_count, t.last_follow_up_at, t.next_follow_up_on
 """
 _TICKET_JOINS = """
     left join public.profiles ah on ah.id = t.assigned_handler_id
@@ -409,6 +454,20 @@ def set_ticket_response(
             "amount": amount,
             "by": by,
         },
+    )
+
+
+def add_ticket_follow_up(session: Session, ticket_id: UUID, *, next_on: date | None) -> None:
+    session.execute(
+        text(
+            """
+            update public.ecommerce_tickets
+               set follow_up_count = follow_up_count + 1, last_follow_up_at = now(),
+                   next_follow_up_on = :next_on
+             where id = :id
+            """
+        ),
+        {"id": ticket_id, "next_on": next_on},
     )
 
 

@@ -6,8 +6,9 @@ import { apiAvailable, asUser, expectNoHorizontalOverflow } from './support/stac
  * DEC-73 against the REAL local stack (API + Supabase Storage), at 360 px (phone) and 1280 px
  * (desktop). The E-Commerce gate user records a return (Ticket Raise) with a package-opening video
  * (real signed upload + confirm) and an image; the Ticket Handler raises the ticket, records a
- * Claim Received response and closes it. A second return goes to the Checking Department and stays
- * open. No console errors, no horizontal scroll.
+ * Claim Received response and closes it with the portal resolution (DEC-76: the return then waits
+ * for unboxing). A second return (no ticket) waits for the executive's portal check. No console
+ * errors, no horizontal scroll. The settlement after unboxing: ecommerce_settlement_flow.spec.ts.
  */
 const GATE = 'ecomgate@rms.local';
 const HANDLER = 'tickets@rms.local';
@@ -62,7 +63,7 @@ test.describe('E-Commerce Return gate entry → platform ticket', () => {
       expect(returnNo).toMatch(/^ECR\//);
       await expectNoHorizontalOverflow(gate.page);
 
-      // 2. A second return goes to the Checking Department and stays open.
+      // 2. A second return without a ticket waits for the portal check (DEC-76).
       await gate.page.getByRole('button', { name: 'Record another' }).click();
       await gate.page.getByLabel(/Platform/).selectOption({ label: 'Flipkart' });
       await gate.page.getByLabel(/Order ID/).fill(`${orderId}-B`);
@@ -73,7 +74,7 @@ test.describe('E-Commerce Return gate entry → platform ticket', () => {
         .locator('#ecom-video')
         .setInputFiles(fakeFile('open2.mov', 'video/quicktime', 200));
       await gate.page.getByTestId('ecom-record').click();
-      await expect(gate.page.getByTestId('ecom-success')).toContainText('In Checking', {
+      await expect(gate.page.getByTestId('ecom-success')).toContainText('Portal Check Pending', {
         timeout: 60_000,
       });
 
@@ -94,15 +95,20 @@ test.describe('E-Commerce Return gate entry → platform ticket', () => {
       await handler.page.getByTestId('ticket-response-save').click();
       await expect(card).toContainText('Claim Received');
       await card.getByTestId('ticket-close').click();
+      const closeDialog = handler.page.getByRole('dialog');
+      await closeDialog.getByLabel('Refund').check();
+      await closeDialog.getByLabel(/^Qty/).fill('2');
+      await handler.page.getByTestId('resolution-save').click();
       await expect(card).toHaveCount(0);
 
       // 4. Detail page: closed, history, video viewable.
       await handler.page.goto(`/#/ecom-returns`);
       await handler.page.getByRole('button', { name: new RegExp(returnNo) }).click();
       const detail = handler.page.getByTestId('ecom-return-detail');
-      await expect(detail).toContainText('Closed');
+      await expect(detail).toContainText('Awaiting Unboxing');
       await expect(detail).toContainText('Claim ₹1499.50');
       await expect(detail).toContainText('ticket closed');
+      await expect(detail.getByTestId('ecom-resolution')).toContainText('Refund');
       await expectNoHorizontalOverflow(handler.page);
 
       expect(gate.errors, 'gate console errors').toEqual([]);

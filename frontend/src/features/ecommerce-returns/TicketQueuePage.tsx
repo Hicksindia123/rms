@@ -1,8 +1,9 @@
 /**
- * DEC-73: Ticket Handler queue. Unraised tickets first by SLA due time (OVERDUE flagged in-app,
- * Q3); raise the ticket on the platform, record the platform response (Rejected → remark, Claim
- * Received → amount, Pending → stays open) and close. The server enforces every rule again.
- * DEC-51: any Ticket Handler may work any ticket.
+ * DEC-73 / DEC-76: E-Commerce Executive ticket queue. Unraised tickets first by SLA due time
+ * (OVERDUE flagged in-app, Q3); raise the ticket on the platform, record follow-ups and the
+ * platform response (Rejected → remark, Claim Received → amount, Pending → stays open), then close
+ * it with the portal resolution (Free Replacement / Refund + qty, DEC-76) so the return goes to
+ * unboxing. The server enforces every rule again. DEC-51: any executive may work any ticket.
  */
 import React, { useCallback, useRef, useState } from 'react';
 import { ChevronRight, RefreshCw } from 'lucide-react';
@@ -24,8 +25,17 @@ import { formatDate, formatDateTime } from '@/features/goods-slips/format';
 import '@/features/goods-slips/gateForm.css';
 
 import { ecomApi } from './api';
+import { FollowUpModal, ResolutionModal } from './ResolutionModal';
 import { EcomStatusChip, SlaChip } from './SlaChip';
 import type { Option, ResponseCode, TicketQueue, TicketRow } from './types';
+
+/** Today as YYYY-MM-DD in the browser (the server checks the date again). */
+function todayLocal(): string {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${String(d.getFullYear())}-${m}-${day}`;
+}
 
 interface Props {
   canEdit: boolean;
@@ -39,6 +49,8 @@ export const TicketQueuePage: React.FC<Props> = ({ canEdit, onOpen }) => {
   const fetcher = useCallback(() => ecomApi.tickets(state), [state]);
   const query = useApiQuery<TicketQueue>(fetcher);
   const [responding, setResponding] = useState<TicketRow | null>(null);
+  const [closing, setClosing] = useState<TicketRow | null>(null);
+  const [following, setFollowing] = useState<TicketRow | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
 
@@ -60,7 +72,7 @@ export const TicketQueuePage: React.FC<Props> = ({ canEdit, onOpen }) => {
     <div className="mx-auto max-w-5xl space-y-4 p-4 sm:p-6" data-testid="ecom-tickets">
       <PageHeader
         title="Platform Tickets"
-        subtitle="Raise the platform ticket within the SLA, record the platform's response and close it."
+        subtitle="Raise the platform ticket within the SLA, follow it up, record the platform's response and close it with what the portal shows (Free Replacement / Refund)."
         actions={
           <Button type="button" variant="outline" className="min-h-[44px]" onClick={query.reload}>
             <RefreshCw className="h-4 w-4" aria-hidden="true" /> Refresh
@@ -138,6 +150,15 @@ export const TicketQueuePage: React.FC<Props> = ({ canEdit, onOpen }) => {
                       {t.response_label ? ` · ${t.response_label}` : ''}
                       {t.claim_amount ? ` ₹${t.claim_amount}` : ''}
                     </div>
+                    {t.follow_up_count > 0 ? (
+                      <div className="text-xs text-slate-500" data-testid="ticket-follow-ups">
+                        {t.follow_up_count} follow-up(s)
+                        {t.last_follow_up_at
+                          ? ` · last ${formatDateTime(t.last_follow_up_at)}`
+                          : ''}
+                        {t.next_follow_up_on ? ` · next ${formatDate(t.next_follow_up_on)}` : ''}
+                      </div>
+                    ) : null}
                   </div>
                   <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" aria-hidden="true" />
                 </button>
@@ -162,6 +183,18 @@ export const TicketQueuePage: React.FC<Props> = ({ canEdit, onOpen }) => {
                           variant="outline"
                           className="min-h-[44px]"
                           disabled={busy}
+                          data-testid="ticket-follow-up"
+                          onClick={() => {
+                            setFollowing(r);
+                          }}
+                        >
+                          Follow-up
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="min-h-[44px]"
+                          disabled={busy}
                           data-testid="ticket-respond"
                           onClick={() => {
                             setResponding(r);
@@ -176,7 +209,7 @@ export const TicketQueuePage: React.FC<Props> = ({ canEdit, onOpen }) => {
                           title={final ? undefined : 'Record a final response first (not Pending)'}
                           data-testid="ticket-close"
                           onClick={() => {
-                            void act(r, (key) => ecomApi.close(t.id, key));
+                            setClosing(r);
                           }}
                         >
                           Close ticket
@@ -191,6 +224,42 @@ export const TicketQueuePage: React.FC<Props> = ({ canEdit, onOpen }) => {
         </ul>
       )}
 
+      {closing && query.data ? (
+        <ResolutionModal
+          title={`Close ticket · ${closing.return_no}`}
+          intro={
+            <p className="m-0 text-sm text-slate-600 dark:text-slate-300">
+              {closing.platform_label} · Order {closing.order_id} · {closing.product_text} · Qty{' '}
+              {closing.qty}. Check the order on the portal and record what it shows.
+            </p>
+          }
+          options={query.data.resolution_options}
+          maxQty={closing.qty}
+          submitLabel="Close ticket"
+          onSubmit={(body, key) => ecomApi.close(closing.ticket.id, body, key)}
+          onClose={() => {
+            setClosing(null);
+          }}
+          onDone={() => {
+            setClosing(null);
+            query.reload();
+          }}
+        />
+      ) : null}
+      {following ? (
+        <FollowUpModal
+          title={`Follow-up · ${following.return_no}`}
+          today={todayLocal()}
+          onSubmit={(body, key) => ecomApi.followUp(following.ticket.id, body, key)}
+          onClose={() => {
+            setFollowing(null);
+          }}
+          onDone={() => {
+            setFollowing(null);
+            query.reload();
+          }}
+        />
+      ) : null}
       {responding && query.data ? (
         <ResponseModal
           row={responding}

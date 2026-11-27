@@ -352,6 +352,32 @@ const TicketQueuePage = lazy(() =>
     default: m.TicketQueuePage,
   })),
 );
+// DEC-76: E-Commerce settlement.
+const PortalCheckPage = lazy(() =>
+  import('@/features/ecommerce-returns/PortalCheckPage').then((m) => ({
+    default: m.PortalCheckPage,
+  })),
+);
+const EcomUnboxingPage = lazy(() =>
+  import('@/features/ecommerce-returns/EcomUnboxingPage').then((m) => ({
+    default: m.EcomUnboxingPage,
+  })),
+);
+const EcomStoreReceiptsPage = lazy(() =>
+  import('@/features/ecommerce-returns/EcomStoreReceiptsPage').then((m) => ({
+    default: m.EcomStoreReceiptsPage,
+  })),
+);
+const EcomActionSheetsPage = lazy(() =>
+  import('@/features/ecommerce-returns/EcomActionSheetsPage').then((m) => ({
+    default: m.EcomActionSheetsPage,
+  })),
+);
+const EcomActionSheetPage = lazy(() =>
+  import('@/features/ecommerce-returns/EcomActionSheetPage').then((m) => ({
+    default: m.EcomActionSheetPage,
+  })),
+);
 const DepartmentIssueNotePrintPage = lazy(() =>
   import('@/features/department-routing/DepartmentIssueNotePrintPage').then((m) => ({
     default: m.DepartmentIssueNotePrintPage,
@@ -402,6 +428,10 @@ type NavTab =
   | 'management-approval'
   | 'ecom-returns'
   | 'ecom-tickets'
+  | 'ecom-portal-check'
+  | 'ecom-unboxing'
+  | 'ecom-store-receipts'
+  | 'ecom-action-sheets'
   | 'transfer-slips'
   | 'department-receiving'
   | 'accounts-entry'
@@ -454,6 +484,10 @@ const STATIC_TABS: ReadonlySet<string> = new Set([
   'management-approval',
   'ecom-returns',
   'ecom-tickets',
+  'ecom-portal-check',
+  'ecom-unboxing',
+  'ecom-store-receipts',
+  'ecom-action-sheets',
   'transfer-slips',
   'department-receiving',
   'accounts-entry',
@@ -1766,6 +1800,13 @@ function Shell() {
                       onBack={() => {
                         navigate('/ecom-returns');
                       }}
+                      onOpenSheet={
+                        can('ecommerce_accounts', 'view') || isSuperAdmin
+                          ? (sheetId: string) => {
+                              navigate(`/ecom-action-sheets/${sheetId}`);
+                            }
+                          : undefined
+                      }
                     />
                   ) : (
                     <EcommerceReturnsPage
@@ -1806,6 +1847,105 @@ function Shell() {
                   <EmptyState
                     title="Access Restricted"
                     hint="You do not have permission to view Platform Tickets."
+                  />
+                )}
+              </RequireAuth>
+            )}
+            {activeTab === 'ecom-portal-check' && (
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
+                {can('ecommerce_tickets', 'view') || isSuperAdmin ? (
+                  <PortalCheckPage
+                    canEdit={can('ecommerce_tickets', 'edit') || isSuperAdmin}
+                    onOpen={(id: string) => {
+                      navigate(`/ecom-returns/${id}`);
+                    }}
+                  />
+                ) : (
+                  <EmptyState
+                    title="Access Restricted"
+                    hint="You do not have permission to view the Portal Check."
+                  />
+                )}
+              </RequireAuth>
+            )}
+            {activeTab === 'ecom-unboxing' && (
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
+                {can('ecommerce_unboxing', 'view') || isSuperAdmin ? (
+                  <EcomUnboxingPage
+                    canEdit={can('ecommerce_unboxing', 'create') || isSuperAdmin}
+                    onOpen={(id: string) => {
+                      navigate(`/ecom-returns/${id}`);
+                    }}
+                    onOpenSheet={(id: string) => {
+                      navigate(`/ecom-action-sheets/${id}`);
+                    }}
+                  />
+                ) : (
+                  <EmptyState
+                    title="Access Restricted"
+                    hint="You do not have permission to view E-Commerce Unboxing."
+                  />
+                )}
+              </RequireAuth>
+            )}
+            {activeTab === 'ecom-store-receipts' && (
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
+                {can('ecommerce_store_receipts', 'view') || isSuperAdmin ? (
+                  <EcomStoreReceiptsPage
+                    onOpen={(id: string) => {
+                      navigate(`/ecom-returns/${id}`);
+                    }}
+                  />
+                ) : (
+                  <EmptyState
+                    title="Access Restricted"
+                    hint="You do not have permission to view E-Commerce Receipts."
+                  />
+                )}
+              </RequireAuth>
+            )}
+            {activeTab === 'ecom-action-sheets' && (
+              <RequireAuth
+                onSignIn={() => {
+                  setActiveTab('login');
+                }}
+              >
+                {can('ecommerce_accounts', 'view') || isSuperAdmin ? (
+                  second ? (
+                    <EcomActionSheetPage
+                      key={second}
+                      sheetId={second}
+                      canIssueCn={can('ecommerce_accounts', 'edit') || isSuperAdmin}
+                      onBack={() => {
+                        navigate('/ecom-action-sheets');
+                      }}
+                      onOpenReturn={(id: string) => {
+                        navigate(`/ecom-returns/${id}`);
+                      }}
+                    />
+                  ) : (
+                    <EcomActionSheetsPage
+                      onOpen={(id: string) => {
+                        navigate(`/ecom-action-sheets/${id}`);
+                      }}
+                    />
+                  )
+                ) : (
+                  <EmptyState
+                    title="Access Restricted"
+                    hint="You do not have permission to view E-Commerce Action Sheets."
                   />
                 )}
               </RequireAuth>

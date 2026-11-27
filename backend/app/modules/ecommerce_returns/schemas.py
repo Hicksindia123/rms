@@ -10,9 +10,18 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.attachments.schemas import SignedPutUpload, TusUpload
+from app.modules.ecommerce_settlement.schemas import ReturnSettlementOut
 
+# DEC-76 adds PENDING_UNBOXING (executive finished) and UNBOXED (on an action sheet).
 ReturnStatus = Literal[
-    "DRAFT", "IN_CHECKING", "PENDING_TICKET", "TICKET_RAISED", "CLOSED", "VOIDED"
+    "DRAFT",
+    "IN_CHECKING",
+    "PENDING_TICKET",
+    "TICKET_RAISED",
+    "PENDING_UNBOXING",
+    "UNBOXED",
+    "CLOSED",
+    "VOIDED",
 ]
 ProductTypeCode = Literal["COMPANY_PRODUCT", "DIFFERENT_PRODUCT"]
 QcRoutingCode = Literal["TICKET_RAISE", "ISSUE_TO_CHECKING"]
@@ -138,6 +147,9 @@ class TicketOut(BaseModel):
     responded_by_name: str | None
     closed_at: datetime | None
     closed_by_name: str | None
+    follow_up_count: int = 0
+    last_follow_up_at: datetime | None = None
+    next_follow_up_on: date | None = None
 
 
 class EventOut(BaseModel):
@@ -173,6 +185,14 @@ class ReturnOut(BaseModel):
     void_reason: str | None
     voided_at: datetime | None
     closed_at: datetime | None
+    # DEC-76: the E-Commerce Executive's portal resolution and the settlement after unboxing.
+    resolution_code: str | None
+    resolution_label: str | None
+    resolution_qty: int | None
+    resolution_note: str | None
+    resolved_at: datetime | None
+    resolved_by_name: str | None
+    settlement: ReturnSettlementOut | None
     media: list[MediaOut]
     ticket: TicketOut | None
     events: list[EventOut]
@@ -234,4 +254,39 @@ class TicketRowOut(BaseModel):
 
 class TicketQueueOut(BaseModel):
     response_options: list[OptionOut]
+    resolution_options: list[OptionOut]
     rows: list[TicketRowOut]
+
+
+# --- DEC-76: the E-Commerce Executive's resolution and follow-ups --------------------------------
+class ResolutionIn(BaseModel):
+    """What the portal shows for the order (ECOM_PORTAL_RESOLUTION code) and its qty."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    resolution_code: str = Field(min_length=1, max_length=50)
+    resolution_qty: int = Field(ge=1, le=100000)
+    resolution_note: str | None = Field(default=None, max_length=200)
+
+
+class FollowUpIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    note: str = Field(min_length=3, max_length=300)
+    next_follow_up_on: date | None = None
+
+
+class PortalCheckRowOut(BaseModel):
+    return_id: UUID
+    return_no: str
+    entry_date: date
+    platform_label: str
+    order_id: str
+    product_text: str
+    qty: int
+    submitted_at: datetime | None
+
+
+class PortalCheckQueueOut(BaseModel):
+    resolution_options: list[OptionOut]
+    rows: list[PortalCheckRowOut]

@@ -214,6 +214,36 @@ _QUEUES: dict[str, str] = {
           from public.gs_management_approval_requests r
           join public.goods_slips g on g.id = r.gs_id {_GS_JOINS}
          where r.status = 'OPEN'""",  # noqa: S608
+    # E-Commerce (DEC-76): the rows are E-Commerce Returns or action sheets, not goods
+    # slips. gs_no carries the return / sheet number, party_name the platform, station_name the
+    # order id; target_id opens the item (item_screen_key ecom-return / ecom-action-sheet).
+    # DEC-76: returns without a ticket waiting for the executive's portal check.
+    "ECOM_PORTAL_CHECK": """
+        select r.id as gs_id, r.return_no as gs_no, r.platform_label as party_name,
+               'Order ' || r.order_id as station_name, r.id as target_id, r.submitted_at as since
+          from public.ecommerce_returns r
+         where r.status = 'IN_CHECKING'""",
+    # DEC-76: returns the executive finished, waiting for unboxing.
+    "ECOM_UNBOXING": """
+        select r.id as gs_id, r.return_no as gs_no, r.platform_label as party_name,
+               'Order ' || r.order_id as station_name, r.id as target_id, r.resolved_at as since
+          from public.ecommerce_returns r
+         where r.status = 'PENDING_UNBOXING'""",
+    # DEC-76: pieces issued to the signed-in user's Intermediate Stores, not acknowledged yet.
+    # Scoped by :uid (Super Admin: all stores).
+    "ECOM_STORE_RECEIPTS": """
+        select r.id as gs_id, r.return_no as gs_no, r.platform_label as party_name,
+               'Order ' || r.order_id as station_name, r.id as target_id, x.created_at as since
+          from public.ecommerce_store_receipts x
+          join public.ecommerce_returns r on r.id = x.return_id
+         where x.status = 'PENDING'
+           and rms_private.user_acts_for_store(cast(:uid as uuid), x.store_id)""",
+    # DEC-76: action sheets waiting for the credit note of E-Commerce Accounts.
+    "ECOM_ACTION_SHEETS": """
+        select s.id as gs_id, s.sheet_no as gs_no, s.platform_label as party_name,
+               null::text as station_name, s.id as target_id, s.created_at as since
+          from public.ecommerce_action_sheets s
+         where s.status = 'PENDING_ACCOUNTS'""",
 }
 
 QUEUE_CODES = frozenset(_QUEUES)

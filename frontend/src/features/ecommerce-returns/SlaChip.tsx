@@ -40,6 +40,8 @@ const STATUS_VARIANT: Record<
   IN_CHECKING: 'info',
   PENDING_TICKET: 'warning',
   TICKET_RAISED: 'info',
+  PENDING_UNBOXING: 'warning', // DEC-76
+  UNBOXED: 'info', // DEC-76
   CLOSED: 'success',
   VOIDED: 'neutral',
 };

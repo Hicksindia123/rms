@@ -88,18 +88,20 @@ def create_stock_lot(
     requires_evaluation: bool = False,
     routing_hint: str | None = None,
     created_by: UUID | None = None,
+    ecommerce_return_id: UUID | None = None,
 ) -> UUID:
-    """Create a tracked stock lot associated with a goods slip."""
+    """Create a tracked stock lot associated with a goods slip, or (DEC-76) with an E-Commerce
+    Return (no goods slip)."""
     stmt = text(
         """
         insert into public.stock_lots (
           stock_item_id, gs_id, gs_item_id, condition_class,
           source_condition_code, container_id, partition_id, is_pending,
-          requires_evaluation, routing_hint, created_by
+          requires_evaluation, routing_hint, created_by, ecommerce_return_id
         ) values (
           :stock_item_id, :gs_id, :gs_item_id, :condition_class,
           :source_condition_code, :container_id, :partition_id, :is_pending,
-          :requires_evaluation, :routing_hint, :created_by
+          :requires_evaluation, :routing_hint, :created_by, :ecommerce_return_id
         )
         returning id
         """
@@ -118,6 +120,7 @@ def create_stock_lot(
             "requires_evaluation": requires_evaluation,
             "routing_hint": routing_hint,
             "created_by": created_by,
+            "ecommerce_return_id": ecommerce_return_id,
         },
     ).scalar_one()
     return UUID(str(res))
