@@ -54,3 +54,4 @@ frontend/x/
 # Manual test plan + dummy test users (contain test passwords)
 RMS_MANUAL_TEST_PLAN.txt
 RMS_TEST_USERS.sql
+RMS_PROD_RESET_TEST_DATA.sql
